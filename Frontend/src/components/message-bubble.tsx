@@ -1,4 +1,5 @@
 import { cn } from "cn"
+import "./message-bubble.css"
 
 import {
   Message,
@@ -9,11 +10,16 @@ import type { ChatMessage } from "@/types/chat"
 
 /**
  * The logo is not a circle, so the avatar must not clip it.
+ * When `animated`, it spins and pulses for the duration of the stream.
  */
-function AssistantAvatar() {
+function AssistantAvatar({ animated = false }: { animated?: boolean }) {
   return (
     <MessageAvatar className="size-8 self-start overflow-visible rounded-none bg-transparent">
-      <img src="/vite.svg" alt="Calabrass" className="size-7" />
+      <img
+        src="/vite.svg"
+        alt="Calabrass"
+        className={cn("block size-6", animated && "streaming-logo")}
+      />
     </MessageAvatar>
   )
 }
@@ -42,7 +48,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
 export function StreamingMessage({ text }: { text: string }) {
   return (
     <Message align="start">
-      <AssistantAvatar />
+      <AssistantAvatar animated />
       <MessageContent className="items-start">
         <div className="w-fit max-w-[80%] rounded-2xl bg-white/5 px-4 py-2 text-sm leading-relaxed whitespace-pre-wrap text-white/90">
           {text}
