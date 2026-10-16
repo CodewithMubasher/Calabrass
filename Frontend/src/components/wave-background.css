@@ -1,0 +1,67 @@
+.wave-bg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--wave-base, #000);
+  pointer-events: none;
+  z-index: 0;
+  contain: strict; /* isolates repaints from the rest of the page */
+  /* page-load entrance: whole field rises from below instead of popping in */
+  animation: wave-rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.wave-bg--fixed { position: fixed; }
+
+.wave-bg__blob {
+  position: absolute;
+  bottom: -38%;
+  width: 62%;
+  height: 78%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--c) 0%, transparent 100%);
+  opacity: 0.9;
+  will-change: transform;
+  animation:
+    wave-drift calc(var(--dur) / var(--wave-speed, 1)) ease-in-out infinite alternate,
+    wave-enter 0.7s ease-out both;
+  /* first delay = drift phase, second = entrance stagger */
+  animation-delay: var(--delay), var(--enter-delay, 0s);
+}
+
+/* Each blob: its own position, duration and phase so the motion never looks looped */
+/* blobs 1 & 4 sit on the corners and are slightly taller so the edges rise higher */
+.wave-bg__blob--1 { left: -18%; --dur: 14s; --delay: -3s;  height: 85%; --enter-delay: 0.05s; }
+.wave-bg__blob--2 { left: 10%;  --dur: 18s; --delay: -9s;  height: 70%; --enter-delay: 0.2s; }
+.wave-bg__blob--3 { left: 38%;  --dur: 16s; --delay: -6s;  height: 70%; --enter-delay: 0.35s; }
+.wave-bg__blob--4 { left: 58%;  --dur: 20s; --delay: -12s; height: 85%; --enter-delay: 0.5s; }
+
+@keyframes wave-drift {
+  0%   { transform: translate3d(-10%, 6%, 0)  scale(1); }
+  50%  { transform: translate3d(4%, -8%, 0)   scale(1.12); }
+  100% { transform: translate3d(12%, 2%, 0)   scale(0.96); }
+}
+
+/* Page-load entrance: whole field rises from below and fades in */
+@keyframes wave-rise {
+  from { transform: translate3d(0, 22%, 0); opacity: 0; }
+  to   { transform: translate3d(0, 0, 0);   opacity: 1; }
+}
+
+/* Each blob lights up in sequence so nothing appears all at once */
+@keyframes wave-enter {
+  from { opacity: 0; }
+  to   { opacity: 0.9; }
+}
+
+/* Black fade from the top + darker dip in the bottom center = the "bowl" look */
+.wave-bg__shade {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 55% 45% at 50% 100%, rgba(0, 0, 0, 0.6), transparent 100%),
+    linear-gradient(to bottom, var(--wave-base, #000) 0%, var(--wave-base, #000) 38%, transparent 88%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wave-bg,
+  .wave-bg__blob { animation: none; }
+}
