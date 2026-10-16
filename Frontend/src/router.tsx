@@ -6,9 +6,11 @@ import { Route as workspacesRoute } from "@/routes/workspaces"
 import { Route as connectorsRoute } from "@/routes/connectors"
 import { Route as schedulesRoute } from "@/routes/schedules"
 import { Route as settingsRoute } from "@/routes/settings"
+import { Route as chatRoute } from "@/routes/chat"
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  chatRoute,
   workspacesRoute,
   connectorsRoute,
   schedulesRoute,

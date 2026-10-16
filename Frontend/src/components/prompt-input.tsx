@@ -21,12 +21,15 @@ interface PromptInputProps {
   onSend?: (message: string) => void
   heading?: string
   compact?: boolean
+  /** Bottom-docked composer used inside a chat thread. */
+  isInChat?: boolean
 }
 
 export function PromptInput({
   onSend,
   heading,
   compact = false,
+  isInChat = false,
 }: PromptInputProps) {
   const [value, setValue] = useState("")
   const [selected, setSelected] = useState("readonly")
@@ -131,6 +134,29 @@ export function PromptInput({
     </div>
   )
 
+  const renderComposer = () => (
+    <div className="w-full rounded-2xl border border-white/10 border-l-2 border-l-primary bg-white/5 px-4 pt-4 pb-2 shadow-sm backdrop-blur-[2px]">
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="Describe what you want to build, / Commands @ files or sessions"
+        rows={2}
+        className="w-full resize-none bg-transparent px-1 text-sm text-white placeholder:text-white/50 outline-none"
+      />
+      {renderActions()}
+    </div>
+  )
+
+  if (isInChat) {
+    return (
+      <div className="w-full p-4">
+        <div className="mx-auto w-full max-w-[780px]">{renderComposer()}</div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-full -mt-20 items-center justify-center p-4">
       <div className="flex w-full max-w-[780px] flex-col items-center gap-5">
@@ -146,18 +172,7 @@ export function PromptInput({
             {heading || "What can I do for you?"}
           </h1>
         </div>
-        <div className="w-full rounded-2xl border border-white/10 border-l-2 border-l-primary bg-white/5 px-4 pt-4 pb-2 shadow-sm backdrop-blur-[2px]">
-          <textarea
-            ref={textareaRef}
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Describe what you want to build, / Commands @ files or sessions"
-            rows={2}
-            className="w-full resize-none bg-transparent px-1 text-sm text-white placeholder:text-white/50 outline-none"
-          />
-          {renderActions()}
-        </div>
+        {renderComposer()}
       </div>
     </div>
   )

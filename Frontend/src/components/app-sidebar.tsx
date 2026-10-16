@@ -1,4 +1,5 @@
 import * as React from "react"
+import { Link } from "@tanstack/react-router"
 import {
   AddCircleHalfDotIcon,
   ChartRelationshipIcon,
@@ -54,32 +55,6 @@ const data = {
       icon: Settings02Icon,
     },
   ] as NavItem[],
-  chats: [
-    {
-      name: "Fix TypeScript build errors in auth",
-      url: "#",
-    },
-    {
-      name: "Refactor sidebar component",
-      url: "#",
-    },
-    {
-      name: "Debug Vite HMR not reloading",
-      url: "#",
-    },
-    {
-      name: "Add dark mode toggle",
-      url: "#",
-    },
-    {
-      name: "Optimize React re-renders",
-      url: "#",
-    },
-    {
-      name: "Explain useEffect cleanup",
-      url: "#",
-    },
-  ],
 }
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
@@ -95,12 +70,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <SidebarMenuButton
               size="lg"
               render={
-                <a href="/">
+                <Link to="/">
                   <img src="/vite.svg" alt="Calabrass" className="size-6" />
                   <div className="grid flex-1 text-left leading-tight">
                     <span className="truncate font-semibold">Calabrass</span>
                   </div>
-                </a>
+                </Link>
               }
             />
           </SidebarMenuItem>
@@ -108,7 +83,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarHeader>
       <SidebarContent>
         <NavMain items={data.navMain} />
-        <NavRecents chats={data.chats} />
+        <NavRecents />
       </SidebarContent>
       <SidebarFooter>
         <NavUser user={data.user} />

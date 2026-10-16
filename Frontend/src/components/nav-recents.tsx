@@ -1,3 +1,4 @@
+import { Link, useLocation, useNavigate } from "@tanstack/react-router"
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
   Chat01Icon,
@@ -21,16 +22,20 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
+import { deleteChat, useChats } from "@/lib/chat-store"
 
-export function NavRecents({
-  chats,
-}: {
-  chats: {
-    name: string
-    url: string
-  }[]
-}) {
+export function NavRecents() {
   const { isMobile } = useSidebar()
+  const { pathname } = useLocation()
+  const navigate = useNavigate()
+  const chats = useChats()
+
+  const handleDelete = (chatId: string) => {
+    deleteChat(chatId)
+    if (pathname === `/chat/${chatId}`) {
+      navigate({ to: "/" })
+    }
+  }
 
   return (
     <SidebarGroup className="group-data-[collapsible=icon]:hidden">
@@ -39,11 +44,22 @@ export function NavRecents({
         <HugeiconsIcon icon={FilterHorizontalIcon} strokeWidth={2} />
       </SidebarGroupAction>
       <SidebarMenu>
+        {chats.length === 0 && (
+          <SidebarMenuItem>
+            <span className="block px-2 py-1.5 text-xs text-sidebar-foreground/50">
+              No chats yet
+            </span>
+          </SidebarMenuItem>
+        )}
         {chats.map((chat) => (
-          <SidebarMenuItem key={chat.name}>
-            <SidebarMenuButton render={<a href={chat.url} />}>
+          <SidebarMenuItem key={chat.id}>
+            <SidebarMenuButton
+              tooltip={chat.title}
+              isActive={pathname === `/chat/${chat.id}`}
+              render={<Link to="/chat/$chatId" params={{ chatId: chat.id }} />}
+            >
               <HugeiconsIcon icon={Chat01Icon} strokeWidth={2} />
-              <span>{chat.name}</span>
+              <span>{chat.title}</span>
             </SidebarMenuButton>
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -65,7 +81,10 @@ export function NavRecents({
                 <DropdownMenuItem>
                   <span>Star</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem variant="destructive">
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={() => handleDelete(chat.id)}
+                >
                   <span>Delete</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
