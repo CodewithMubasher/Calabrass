@@ -1,13 +1,4 @@
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar"
-import { AppSidebar } from "@/components/app-sidebar"
-import WaveBackground from "@/components/wave-background"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { PromptInput } from "@/components/prompt-input"
+import { createRootRoute, Outlet } from "@tanstack/react-router"
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
   BubbleChatTemporaryIcon,
@@ -15,7 +6,21 @@ import {
   GiftIcon,
 } from "@hugeicons/core-free-icons"
 
-export function App() {
+import { AppSidebar } from "@/components/app-sidebar"
+import WaveBackground from "@/components/wave-background"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar"
+
+export const Route = createRootRoute({
+  component: RootLayout,
+})
+
+function RootLayout() {
   return (
     <SidebarProvider>
       <AppSidebar />
@@ -28,7 +33,7 @@ export function App() {
 
           {/* Centered badge */}
           <div className="pointer-events-none absolute inset-x-0 flex justify-center">
-            <Badge className="pointer-events-auto bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300 h-6 gap-1 px-2.5 text-xs font-medium">
+            <Badge className="pointer-events-auto h-6 gap-1 bg-sky-50 px-2.5 text-xs font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300">
               <HugeiconsIcon icon={GiftIcon} strokeWidth={2} />
               Upgrade for free
             </Badge>
@@ -55,11 +60,9 @@ export function App() {
           </div>
         </header>
         <main className="relative z-10 flex flex-1 flex-col">
-          <PromptInput onSend={(value) => console.log("prompt:", value)} />
+          <Outlet />
         </main>
       </SidebarInset>
     </SidebarProvider>
   )
 }
-
-export default App

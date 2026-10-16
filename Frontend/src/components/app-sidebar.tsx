@@ -7,7 +7,7 @@ import {
   TimeScheduleIcon,
 } from "@hugeicons/core-free-icons"
 
-import { NavMain } from "@/components/nav-main"
+import { NavMain, type NavItem } from "@/components/nav-main"
 import { NavRecents } from "@/components/nav-recents"
 import { NavUser } from "@/components/nav-user"
 import {
@@ -30,30 +30,30 @@ const data = {
   navMain: [
     {
       title: "New Chat",
-      url: "#",
+      to: "/",
       icon: AddCircleHalfDotIcon,
     },
     {
       title: "Workspaces",
-      url: "#",
+      to: "/workspaces",
       icon: Folder01Icon,
     },
     {
       title: "Connectors",
-      url: "#",
+      to: "/connectors",
       icon: ChartRelationshipIcon,
     },
     {
       title: "Schedules",
-      url: "#",
+      to: "/schedules",
       icon: TimeScheduleIcon,
     },
     {
       title: "Settings",
-      url: "#",
+      to: "/settings",
       icon: Settings02Icon,
     },
-  ],
+  ] as NavItem[],
   chats: [
     {
       name: "Fix TypeScript build errors in auth",

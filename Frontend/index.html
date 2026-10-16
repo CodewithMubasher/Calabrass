@@ -1,10 +1,41 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>vite-app</title>
+    <title>Calabrass</title>
+    <script>
+      // Applied before first paint so there is no flash of the wrong theme.
+      // Mirrors ThemeProvider: honors an explicit "light"/"dark" choice,
+      // otherwise falls back to dark.
+      ;(function () {
+        try {
+          var stored = localStorage.getItem("theme")
+          var theme = stored === "light" ? "light" : "dark"
+          document.documentElement.classList.remove("light", "dark")
+          document.documentElement.classList.add(theme)
+        } catch (e) {
+          document.documentElement.classList.add("dark")
+        }
+      })()
+    </script>
+    <style>
+      /* Solution 1: paint the background before Vite loads JS/CSS,
+         so the browser never shows its default white canvas.
+         #000 matches the wave background's base color. */
+      html {
+        background-color: #000;
+        color-scheme: dark;
+      }
+      body {
+        background-color: #000;
+        margin: 0;
+      }
+      #root {
+        min-height: 100svh;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
