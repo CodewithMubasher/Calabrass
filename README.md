@@ -63,6 +63,10 @@ there is no CORS setup to worry about.
 | ------ | ----------------------------- | ----------------------------------- |
 | GET    | `/api/health`                 | Liveness + configured providers     |
 | GET    | `/api/models`                 | Live model catalog (`?refresh=1`)   |
+| GET    | `/api/providers`              | Providers + on/off state            |
+| POST   | `/api/providers`              | Add a custom provider               |
+| PUT    | `/api/providers/{id}`         | Edit a provider, or turn it on/off  |
+| DELETE | `/api/providers/{id}`         | Remove a custom provider            |
 | GET    | `/api/chats`                  | List chats, newest first            |
 | POST   | `/api/chats`                  | Create a chat                       |
 | GET    | `/api/chats/{id}`             | One chat with its messages          |
@@ -88,6 +92,15 @@ disconnects mid-stream.
 
 - Models are listed live from each provider, so the picker always reflects what
   your keys can actually reach.
+- Turning a provider off on the Providers page stores the choice in SQLite and
+  removes that provider from `/api/models`, so its models leave the composer's
+  picker and are refused by the send path.
+- Providers are rows in SQLite. A built-in (Google, Groq) keeps its key in
+  `Backend/.env` unless the Providers page saves an override; a custom provider
+  you add carries its own base URL and key, and is called through GoAI's
+  OpenAI-compatible client. Because the API is bound to the loopback interface
+  and is for a single local user, `/api/providers` returns the effective key so
+  the detail dialog can show and edit it.
 - Chats and messages live in SQLite at `Backend/data/calabrass.db`.
 - The model's thinking is streamed on its own channel, never mixed into the
   answer, and stored alongside the message. The UI renders it with the shadcn

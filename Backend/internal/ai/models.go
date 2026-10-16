@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -52,9 +53,9 @@ var (
 )
 
 // Models returns the live model catalog, using a short-lived cache unless
-// force is set. A provider whose credentials are missing is skipped; if every
-// live lookup fails the static fallback list is returned so the UI is never
-// empty.
+// force is set. Providers that are turned off or have no credentials are
+// skipped; if every live lookup fails the static fallback list is returned so
+// the UI is never empty.
 func (r *Registry) Models(ctx context.Context, force bool) []ProviderInfo {
 	modelCatalog.mu.Lock()
 	defer modelCatalog.mu.Unlock()
@@ -65,31 +66,35 @@ func (r *Registry) Models(ctx context.Context, force bool) []ProviderInfo {
 
 	providers := []ProviderInfo{}
 
-	specs := r.providerSpecs()
-	for _, id := range r.ProviderOrder() {
-		spec, ok := specs[id]
-		if !ok {
+	for _, p := range r.providers(ctx) {
+		if !p.connected() || !p.Enabled || p.fetch == nil {
 			continue
 		}
-		models, err := spec.fetch(ctx, spec.defaults)
+		models, err := p.fetch(ctx, p.defaults)
 		if err != nil || len(models) == 0 {
 			continue
 		}
 		providers = append(providers, ProviderInfo{
-			ID:           spec.id,
-			Name:         spec.name,
+			ID:           p.ID,
+			Name:         p.Name,
 			DefaultModel: pickDefault(models),
 			Models:       models,
 		})
 	}
 
 	if len(providers) == 0 {
-		providers = fallbackCatalog(r)
+		providers = fallbackCatalog(r, ctx)
 	}
 
 	modelCatalog.providers = providers
 	modelCatalog.fetchedAt = time.Now()
 	return providers
+}
+
+// NormaliseBaseURL trims trailing slashes. GoAI appends "/chat/completions" to
+// whatever base URL it is given.
+func NormaliseBaseURL(raw string) string {
+	return strings.TrimRight(strings.TrimSpace(raw), "/")
 }
 
 // providerSpec describes how to talk to one provider's model listing.
@@ -289,30 +294,71 @@ func pickDefault(models []ModelInfo) string {
 	return models[0].ID
 }
 
-func fallbackCatalog(r *Registry) []ProviderInfo {
-	specs := r.providerSpecs()
+// fallbackCatalog lists each usable built-in provider's preferred models, used
+// when every live lookup fails. Custom providers are left out, since their
+// model ids cannot be guessed.
+func fallbackCatalog(r *Registry, ctx context.Context) []ProviderInfo {
 	providers := []ProviderInfo{}
 
-	for _, id := range r.ProviderOrder() {
-		spec, ok := specs[id]
-		if !ok {
+	for _, p := range r.providers(ctx) {
+		if p.Custom || !p.connected() || !p.Enabled || len(p.defaults) == 0 {
 			continue
 		}
-		models := make([]ModelInfo, 0, len(spec.defaults))
-		for _, modelID := range spec.defaults {
-			models = append(models, ModelInfo{ID: modelID, Label: Prettify(modelID), Provider: id})
+		models := make([]ModelInfo, 0, len(p.defaults))
+		for _, modelID := range p.defaults {
+			models = append(models, ModelInfo{ID: modelID, Label: Prettify(modelID), Provider: p.ID})
 		}
 		if len(models) == 0 {
 			continue
 		}
 		providers = append(providers, ProviderInfo{
-			ID:           id,
-			Name:         spec.name,
+			ID:           p.ID,
+			Name:         p.Name,
 			DefaultModel: models[0].ID,
 			Models:       models,
 		})
 	}
 	return providers
+}
+
+// fetchCompatModels lists the chat models of a custom, OpenAI-compatible
+// provider by calling its /models endpoint.
+func fetchCompatModels(
+	ctx context.Context,
+	providerID, baseURL, apiKey string,
+	defaults []string,
+) ([]ModelInfo, error) {
+	if baseURL == "" {
+		return nil, errors.New("ai: base URL is not set")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	var payload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := doJSON(req, &payload); err != nil {
+		return nil, err
+	}
+
+	models := []ModelInfo{}
+	for _, m := range payload.Data {
+		if m.ID == "" || isNonChatModel(m.ID) {
+			continue
+		}
+		models = append(models, ModelInfo{ID: m.ID, Label: Prettify(m.ID), Provider: providerID})
+	}
+	sortModels(models, defaults)
+	return models, nil
 }
 
 // Prettify turns a model id into a human label: "gemini-2.5-flash" becomes

@@ -47,6 +47,10 @@ func New(deps Deps) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/models", s.handleModels)
+	mux.HandleFunc("GET /api/providers", s.handleListProviders)
+	mux.HandleFunc("POST /api/providers", s.handleCreateProvider)
+	mux.HandleFunc("PUT /api/providers/{providerID}", s.handleUpdateProvider)
+	mux.HandleFunc("DELETE /api/providers/{providerID}", s.handleDeleteProvider)
 	mux.HandleFunc("GET /api/chats", s.handleListChats)
 	mux.HandleFunc("POST /api/chats", s.handleCreateChat)
 	mux.HandleFunc("GET /api/chats/{chatID}", s.handleGetChat)
@@ -96,7 +100,7 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 		if isLocalOrigin(origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 			w.Header().Set("Access-Control-Max-Age", "600")
 		}

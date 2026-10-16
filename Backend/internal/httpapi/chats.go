@@ -12,18 +12,22 @@ import (
 
 // --- health -----------------------------------------------------------------
 
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+// handleHealth reports which providers are usable, so the UI can warn early.
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	providers := map[string]bool{}
+	for _, p := range s.registry.Providers(r.Context()) {
+		providers[p.ID] = p.Connected && p.Enabled
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "ok",
-		"providers": map[string]bool{
-			ai.ProviderGoogle: s.registry.Available(ai.ProviderGoogle),
-			ai.ProviderGroq:   s.registry.Available(ai.ProviderGroq),
-		},
+		"status":    "ok",
+		"providers": providers,
 	})
 }
 
 // --- models -----------------------------------------------------------------
 
+// handleModels lists the models of every usable provider. Providers that are
+// turned off, or have no credentials, are left out by the registry itself.
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	force := r.URL.Query().Get("refresh") != ""
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -164,7 +168,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	providerID, modelID := s.resolveModel(ctx, firstNonEmpty(req.Provider, chat.Provider), firstNonEmpty(req.Model, chat.Model))
 	if providerID == "" || modelID == "" {
-		writeError(w, http.StatusBadRequest, errors.New("no model is available; check the backend provider keys"))
+		writeError(w, http.StatusBadRequest, errors.New("no model is available; add a provider key or turn a provider on under Providers"))
 		return
 	}
 
@@ -249,19 +253,19 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 // resolveModel picks the provider/model for a turn, falling back to the first
-// configured provider and its default model.
+// provider that has credentials and is turned on.
 func (s *Server) resolveModel(ctx context.Context, providerID, modelID string) (string, string) {
 	providerID = strings.TrimSpace(providerID)
 	modelID = strings.TrimSpace(modelID)
 
-	if providerID == "" || !s.registry.Available(providerID) {
-		order := s.registry.ProviderOrder()
-		if len(order) == 0 {
-			return "", ""
+	if !s.registry.Usable(ctx, providerID) {
+		providerID = ""
+		for _, id := range s.registry.ProviderOrder(ctx) {
+			providerID = id
+			break
 		}
-		providerID = order[0]
 	}
-	if !s.registry.Available(providerID) {
+	if providerID == "" {
 		return "", ""
 	}
 

@@ -103,6 +103,19 @@ CREATE TABLE IF NOT EXISTS messages (
 	created_at INTEGER NOT NULL
 );
 
+-- One row per provider that has been configured or toggled. A provider with no
+-- row uses its built-in defaults (credentials from .env, on). Custom providers
+-- always have a row and carry their own endpoint and key.
+CREATE TABLE IF NOT EXISTS providers (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL DEFAULT '',
+	base_url   TEXT NOT NULL DEFAULT '',
+	api_key    TEXT NOT NULL DEFAULT '',
+	enabled    INTEGER NOT NULL DEFAULT 1,
+	custom     INTEGER NOT NULL DEFAULT 0,
+	updated_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_chats_updated ON chats(updated_at DESC);
 `
@@ -114,6 +127,10 @@ CREATE INDEX IF NOT EXISTS idx_chats_updated ON chats(updated_at DESC);
 	added := []struct{ table, column, ddl string }{
 		{"messages", "reasoning", "reasoning TEXT NOT NULL DEFAULT ''"},
 		{"messages", "thinking_ms", "thinking_ms INTEGER NOT NULL DEFAULT 0"},
+		{"providers", "name", "name TEXT NOT NULL DEFAULT ''"},
+		{"providers", "base_url", "base_url TEXT NOT NULL DEFAULT ''"},
+		{"providers", "api_key", "api_key TEXT NOT NULL DEFAULT ''"},
+		{"providers", "custom", "custom INTEGER NOT NULL DEFAULT 0"},
 	}
 	for _, col := range added {
 		if err := s.ensureColumn(ctx, col.table, col.column, col.ddl); err != nil {
@@ -334,6 +351,114 @@ func (s *Store) DeleteChat(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// Provider records -----------------------------------------------------------
+
+// ProviderRecord is a stored provider: its on/off state and, for a provider
+// the user added, its own endpoint and credential.
+type ProviderRecord struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	BaseURL   string `json:"baseUrl"`
+	APIKey    string `json:"apiKey"`
+	Enabled   bool   `json:"enabled"`
+	Custom    bool   `json:"custom"`
+	UpdatedAt int64  `json:"updatedAt"`
+}
+
+// ListProviders returns every stored provider row.
+func (s *Store) ListProviders(ctx context.Context) ([]ProviderRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, base_url, api_key, enabled, custom, updated_at
+		FROM providers
+		ORDER BY custom ASC, updated_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list providers: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	records := []ProviderRecord{}
+	for rows.Next() {
+		var (
+			rec             ProviderRecord
+			enabled, custom int
+		)
+		if err := rows.Scan(
+			&rec.ID, &rec.Name, &rec.BaseURL, &rec.APIKey,
+			&enabled, &custom, &rec.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("store: scan provider: %w", err)
+		}
+		rec.Enabled = enabled != 0
+		rec.Custom = custom != 0
+		records = append(records, rec)
+	}
+	return records, rows.Err()
+}
+
+// GetProvider returns one stored provider row.
+func (s *Store) GetProvider(ctx context.Context, id string) (ProviderRecord, error) {
+	var (
+		rec             ProviderRecord
+		enabled, custom int
+	)
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, name, base_url, api_key, enabled, custom, updated_at
+		FROM providers WHERE id = ?`, id).
+		Scan(&rec.ID, &rec.Name, &rec.BaseURL, &rec.APIKey, &enabled, &custom, &rec.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ProviderRecord{}, ErrNotFound
+	}
+	if err != nil {
+		return ProviderRecord{}, fmt.Errorf("store: get provider: %w", err)
+	}
+	rec.Enabled = enabled != 0
+	rec.Custom = custom != 0
+	return rec, nil
+}
+
+// UpsertProvider writes a provider row in full.
+func (s *Store) UpsertProvider(ctx context.Context, rec ProviderRecord) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO providers (id, name, base_url, api_key, enabled, custom, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
+			base_url = excluded.base_url,
+			api_key = excluded.api_key,
+			enabled = excluded.enabled,
+			custom = excluded.custom,
+			updated_at = excluded.updated_at`,
+		rec.ID, rec.Name, rec.BaseURL, rec.APIKey,
+		boolToInt(rec.Enabled), boolToInt(rec.Custom), time.Now().UnixMilli())
+	if err != nil {
+		return fmt.Errorf("store: save provider %s: %w", rec.ID, err)
+	}
+	return nil
+}
+
+// DeleteProvider removes a stored provider row.
+func (s *Store) DeleteProvider(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM providers WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("store: delete provider: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: delete provider: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func join(parts []string, sep string) string {

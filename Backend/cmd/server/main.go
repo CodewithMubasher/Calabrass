@@ -29,9 +29,32 @@ func main() {
 	}
 	defer func() { _ = st.Close() }()
 
-	registry := ai.NewRegistry(cfg.GeminiKey, cfg.GroqKey, cfg.ProviderPriority)
-	if !registry.Available(ai.ProviderGoogle) && !registry.Available(ai.ProviderGroq) {
-		log.Warn("no AI provider credentials found; set GOOGLE_GENERATIVE_AI_API_KEY and/or GROQ_API_KEY in Backend/.env")
+	// Providers are stored in the database, so the registry reads them on
+	// demand: built-in providers (Google, Groq) keep their credential in the
+	// environment unless a stored override exists, and custom providers carry
+	// their own endpoint and key.
+	registry := ai.NewRegistry(cfg.GeminiKey, cfg.GroqKey, cfg.ProviderPriority,
+		func(ctx context.Context) ([]ai.ProviderRecord, error) {
+			rows, sourceErr := st.ListProviders(ctx)
+			if sourceErr != nil {
+				return nil, sourceErr
+			}
+			records := make([]ai.ProviderRecord, 0, len(rows))
+			for _, row := range rows {
+				records = append(records, ai.ProviderRecord{
+					ID:      row.ID,
+					Name:    row.Name,
+					BaseURL: row.BaseURL,
+					APIKey:  row.APIKey,
+					Enabled: row.Enabled,
+					Custom:  row.Custom,
+				})
+			}
+			return records, nil
+		})
+
+	if len(registry.ProviderOrder(context.Background())) == 0 {
+		log.Warn("no usable AI provider; set GROQ_API_KEY or GOOGLE_GENERATIVE_AI_API_KEY in Backend/.env, or add a provider on the Providers page")
 	}
 
 	handler := httpapi.New(httpapi.Deps{

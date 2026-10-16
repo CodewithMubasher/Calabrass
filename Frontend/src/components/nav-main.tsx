@@ -14,6 +14,7 @@ export type NavTo =
   | "/workspaces"
   | "/connectors"
   | "/schedules"
+  | "/providers"
   | "/settings"
 
 export interface NavItem {

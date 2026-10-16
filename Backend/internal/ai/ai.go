@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/zendev-sh/goai"
 	"github.com/zendev-sh/goai/provider"
+	"github.com/zendev-sh/goai/provider/compat"
 	"github.com/zendev-sh/goai/provider/google"
 	"github.com/zendev-sh/goai/provider/groq"
 )
@@ -27,70 +29,297 @@ type Registry struct {
 	geminiKey string
 	groqKey   string
 	priority  []string
+	source    ProviderSource
 }
+
+// ProviderRecord is what the registry needs to know about a stored provider.
+type ProviderRecord struct {
+	ID      string
+	Name    string
+	BaseURL string
+	APIKey  string
+	Enabled bool
+	Custom  bool
+}
+
+// ProviderSource returns the stored provider rows. It may be nil, leaving only
+// the built-in providers.
+type ProviderSource func(ctx context.Context) ([]ProviderRecord, error)
 
 // NewRegistry builds a registry from the configured provider credentials.
-// priority controls the order in which available providers are offered.
-func NewRegistry(geminiKey, groqKey string, priority []string) *Registry {
-	return &Registry{geminiKey: geminiKey, groqKey: groqKey, priority: priority}
+// priority controls the order in which available providers are offered, and
+// source supplies the providers stored in the database.
+func NewRegistry(geminiKey, groqKey string, priority []string, source ProviderSource) *Registry {
+	return &Registry{
+		geminiKey: geminiKey,
+		groqKey:   groqKey,
+		priority:  priority,
+		source:    source,
+	}
 }
 
-// ProviderOrder returns the configured providers that actually have
-// credentials, in priority order. Any configured provider missing from the
-// priority list is appended so it is never silently dropped.
-func (r *Registry) ProviderOrder() []string {
-	seen := make(map[string]bool)
-	order := make([]string, 0, 2)
+// resolvedProvider is a provider joined with its stored settings. Built-ins
+// carry the behaviour from providerSpecs; custom providers are
+// OpenAI-compatible endpoints the user added.
+type resolvedProvider struct {
+	ID      string
+	Name    string
+	BaseURL string
+	APIKey  string
+	Enabled bool
+	Custom  bool
 
-	for _, id := range r.priority {
+	defaults []string
+	fetch    func(ctx context.Context, defaults []string) ([]ModelInfo, error)
+}
+
+// connected reports whether the provider has what it needs to be called. A
+// custom provider only needs a base URL: local servers take no key.
+func (p resolvedProvider) connected() bool {
+	if p.Custom {
+		return p.BaseURL != ""
+	}
+	return p.APIKey != ""
+}
+
+// ProviderSummary describes one provider, as the providers page needs it.
+type ProviderSummary struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	BaseURL string `json:"baseUrl"`
+	// Connected reports whether the provider has credentials or, for a custom
+	// provider, an endpoint.
+	Connected bool `json:"connected"`
+	// Enabled reports whether the provider may be used.
+	Enabled bool `json:"enabled"`
+	// Custom reports whether the user added this provider.
+	Custom bool `json:"custom"`
+	// APIKey is the effective credential: the stored override when one exists,
+	// otherwise the value from the environment. Never serialised directly; the
+	// handlers decide what to expose.
+	APIKey string `json:"-"`
+}
+
+// providers merges the built-in specs with the stored rows: built-ins in
+// priority order, then custom providers by name. A read failure is not fatal;
+// it just leaves the built-ins.
+func (r *Registry) providers(ctx context.Context) []resolvedProvider {
+	records := map[string]ProviderRecord{}
+	if r.source != nil {
+		if rows, err := r.source(ctx); err == nil {
+			for _, row := range rows {
+				records[strings.ToLower(strings.TrimSpace(row.ID))] = row
+			}
+		}
+	}
+
+	specs := r.providerSpecs()
+	out := make([]resolvedProvider, 0, len(specs)+len(records))
+
+	for _, id := range r.builtinOrder(specs) {
+		spec := specs[id]
+		p := resolvedProvider{
+			ID:       id,
+			Name:     spec.name,
+			APIKey:   r.staticKey(id),
+			Enabled:  true,
+			defaults: spec.defaults,
+			fetch:    spec.fetch,
+		}
+		// A stored row overrides the built-in defaults. An empty stored key
+		// leaves the one from the environment in place.
+		if row, ok := records[id]; ok {
+			if key := strings.TrimSpace(row.APIKey); key != "" {
+				p.APIKey = key
+			}
+			if name := strings.TrimSpace(row.Name); name != "" {
+				p.Name = name
+			}
+			p.Enabled = row.Enabled
+		}
+		out = append(out, p)
+	}
+
+	custom := make([]ProviderRecord, 0, len(records))
+	for _, row := range records {
+		if row.Custom {
+			custom = append(custom, row)
+		}
+	}
+	sort.Slice(custom, func(i, j int) bool { return custom[i].Name < custom[j].Name })
+
+	for _, row := range custom {
+		p := resolvedProvider{
+			ID:      row.ID,
+			Name:    row.Name,
+			BaseURL: NormaliseBaseURL(row.BaseURL),
+			APIKey:  row.APIKey,
+			Enabled: row.Enabled,
+			Custom:  true,
+		}
+		p.fetch = func(ctx context.Context, defaults []string) ([]ModelInfo, error) {
+			return fetchCompatModels(ctx, p.ID, p.BaseURL, p.APIKey, defaults)
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// Providers lists every provider, whether or not it is usable.
+func (r *Registry) Providers(ctx context.Context) []ProviderSummary {
+	all := r.providers(ctx)
+	out := make([]ProviderSummary, 0, len(all))
+	for _, p := range all {
+		out = append(out, ProviderSummary{
+			ID:        p.ID,
+			Name:      p.Name,
+			BaseURL:   p.BaseURL,
+			Connected: p.connected(),
+			Enabled:   p.Enabled,
+			Custom:    p.Custom,
+			APIKey:    p.APIKey,
+		})
+	}
+	return out
+}
+
+// ProviderOrder returns the providers that can actually be used, in preference
+// order: built-ins first, then custom providers by name.
+func (r *Registry) ProviderOrder(ctx context.Context) []string {
+	out := []string{}
+	for _, p := range r.providers(ctx) {
+		if p.connected() && p.Enabled {
+			out = append(out, p.ID)
+		}
+	}
+	return out
+}
+
+// Usable reports whether a provider exists, has credentials and is turned on.
+func (r *Registry) Usable(ctx context.Context, providerID string) bool {
+	for _, p := range r.providers(ctx) {
+		if p.ID == providerID {
+			return p.connected() && p.Enabled
+		}
+	}
+	return false
+}
+
+// Known reports whether a provider id exists, built-in or custom.
+func (r *Registry) Known(ctx context.Context, providerID string) bool {
+	for _, p := range r.providers(ctx) {
+		if p.ID == providerID {
+			return true
+		}
+	}
+	return false
+}
+
+// staticKey returns the credential a built-in provider gets from the
+// environment.
+func (r *Registry) staticKey(providerID string) string {
+	switch providerID {
+	case ProviderGoogle:
+		return r.geminiKey
+	case ProviderGroq:
+		return r.groqKey
+	default:
+		return ""
+	}
+}
+
+// builtinOrder returns the built-in provider ids in priority order, followed by
+// any other built-in (sorted, so the order stays stable). A provider named in
+// the priority list that is not built in is ignored.
+func (r *Registry) builtinOrder(specs map[string]providerSpec) []string {
+	seen := make(map[string]bool, len(specs))
+	order := make([]string, 0, len(specs))
+
+	add := func(id string) {
 		id = strings.ToLower(strings.TrimSpace(id))
-		if id == "" || seen[id] || !r.Available(id) {
-			continue
+		if id == "" || seen[id] {
+			return
+		}
+		if _, known := specs[id]; !known {
+			return
 		}
 		seen[id] = true
 		order = append(order, id)
 	}
+
+	for _, id := range r.priority {
+		add(id)
+	}
 	for _, id := range []string{ProviderGoogle, ProviderGroq} {
-		if !seen[id] && r.Available(id) {
-			seen[id] = true
-			order = append(order, id)
+		add(id)
+	}
+
+	rest := make([]string, 0, len(specs))
+	for id := range specs {
+		if !seen[id] {
+			rest = append(rest, id)
 		}
+	}
+	sort.Strings(rest)
+	for _, id := range rest {
+		add(id)
 	}
 	return order
 }
 
-// Available reports whether a provider has credentials configured.
-func (r *Registry) Available(providerID string) bool {
-	switch providerID {
-	case ProviderGoogle:
-		return r.geminiKey != ""
-	case ProviderGroq:
-		return r.groqKey != ""
-	default:
-		return false
-	}
+// InvalidateCatalog drops the cached model catalog so the next read reflects a
+// provider change.
+func (r *Registry) InvalidateCatalog() {
+	modelCatalog.mu.Lock()
+	defer modelCatalog.mu.Unlock()
+	modelCatalog.providers = nil
+	modelCatalog.fetchedAt = time.Time{}
 }
 
-func (r *Registry) resolve(providerID, model string) (provider.LanguageModel, error) {
+// resolve builds the GoAI language model for a provider, honouring the
+// provider's stored settings.
+func (r *Registry) resolve(ctx context.Context, providerID, model string) (provider.LanguageModel, error) {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return nil, fmt.Errorf("ai: empty model id for provider %q", providerID)
 	}
 
-	switch providerID {
-	case ProviderGoogle:
-		if r.geminiKey == "" {
-			return nil, fmt.Errorf("ai: %s API key is not configured", ProviderGoogle)
+	for _, p := range r.providers(ctx) {
+		if p.ID != providerID {
+			continue
 		}
-		return google.Chat(model, google.WithAPIKey(r.geminiKey)), nil
-	case ProviderGroq:
-		if r.groqKey == "" {
-			return nil, fmt.Errorf("ai: %s API key is not configured", ProviderGroq)
+		if !p.connected() {
+			if p.Custom {
+				return nil, fmt.Errorf("ai: %s has no base URL", p.ID)
+			}
+			return nil, fmt.Errorf("ai: %s API key is not configured", p.ID)
 		}
-		return groq.Chat(model, groq.WithAPIKey(r.groqKey)), nil
-	default:
-		return nil, fmt.Errorf("%w: %q", ErrUnsupportedProvider, providerID)
+		if !p.Enabled {
+			return nil, fmt.Errorf("ai: %s is turned off", p.ID)
+		}
+
+		if p.Custom {
+			opts := []compat.Option{
+				compat.WithBaseURL(p.BaseURL),
+				compat.WithProviderID(p.ID),
+			}
+			// A custom provider may legitimately take no key, in which case
+			// the Authorization header is left off entirely.
+			if p.APIKey != "" {
+				opts = append(opts, compat.WithAPIKey(p.APIKey))
+			}
+			return compat.Chat(model, opts...), nil
+		}
+
+		switch p.ID {
+		case ProviderGoogle:
+			return google.Chat(model, google.WithAPIKey(p.APIKey)), nil
+		case ProviderGroq:
+			return groq.Chat(model, groq.WithAPIKey(p.APIKey)), nil
+		}
 	}
+
+	return nil, fmt.Errorf("%w: %q", ErrUnsupportedProvider, providerID)
 }
 
 // Usage reports token consumption for one completion.
@@ -127,7 +356,7 @@ func (r *Registry) Stream(
 	messages []Message,
 	handlers Handlers,
 ) (Reply, error) {
-	lm, err := r.resolve(providerID, model)
+	lm, err := r.resolve(ctx, providerID, model)
 	if err != nil {
 		return Reply{}, err
 	}

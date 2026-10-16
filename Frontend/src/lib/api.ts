@@ -4,6 +4,8 @@ import type {
   ChatMessage,
   ModelSelection,
   ProviderInfo,
+  ProviderInput,
+  ProviderRow,
   Usage,
 } from "@/types/chat"
 
@@ -46,6 +48,28 @@ export const api = {
 
   listModels: () =>
     request<{ providers: ProviderInfo[] }>("/models").then((r) => r.providers ?? []),
+
+  listProviders: () =>
+    request<{ providers: ProviderRow[] }>("/providers").then(
+      (r) => r.providers ?? []
+    ),
+
+  updateProvider: (providerId: string, input: ProviderInput) =>
+    request<{ providers: ProviderRow[] }>(`/providers/${providerId}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }).then((r) => r.providers ?? []),
+
+  createProvider: (input: ProviderInput) =>
+    request<{ providers: ProviderRow[] }>("/providers", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).then((r) => r.providers ?? []),
+
+  deleteProvider: (providerId: string) =>
+    request<{ providers: ProviderRow[] }>(`/providers/${providerId}`, {
+      method: "DELETE",
+    }).then((r) => r.providers ?? []),
 
   listChats: () => request<{ chats: Chat[] }>("/chats").then((r) => r.chats ?? []),
 

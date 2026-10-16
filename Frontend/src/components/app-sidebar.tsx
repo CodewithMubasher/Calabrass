@@ -5,6 +5,7 @@ import {
   ChartRelationshipIcon,
   Folder01Icon,
   Settings02Icon,
+  ThreeDScaleIcon,
   TimeScheduleIcon,
 } from "@hugeicons/core-free-icons"
 
@@ -48,6 +49,11 @@ const data = {
       title: "Schedules",
       to: "/schedules",
       icon: TimeScheduleIcon,
+    },
+    {
+      title: "Providers",
+      to: "/providers",
+      icon: ThreeDScaleIcon,
     },
     {
       title: "Settings",
