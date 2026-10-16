@@ -161,8 +161,8 @@ export async function ensureChatLoaded(chatId: string) {
   }
 }
 
-export async function createChat(): Promise<Chat> {
-  const chat = await api.createChat(getSelectedModel())
+export async function createChat(workspaceId?: string): Promise<Chat> {
+  const chat = await api.createChat(getSelectedModel(), workspaceId)
   setState({
     chats: upsertChat(state.chats, chat),
     messages: { ...state.messages, [chat.id]: [] },

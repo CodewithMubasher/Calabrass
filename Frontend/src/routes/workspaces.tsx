@@ -4,7 +4,7 @@ import {
   Add01Icon,
   MoreHorizontalIcon,
 } from "@hugeicons/core-free-icons"
-import { createRoute } from "@tanstack/react-router"
+import { createRoute, useNavigate } from "@tanstack/react-router"
 
 import {
   PageEmpty,
@@ -19,10 +19,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import {
-  NewWorkspaceDialog,
-  WorkspaceInfoDialog,
-} from "@/components/workspace-dialog"
+import { NewWorkspaceDialog } from "@/components/workspace-dialog"
 import {
   clearWorkspacesError,
   deleteWorkspace,
@@ -48,10 +45,10 @@ function formatDate(at: number): string {
 }
 
 function WorkspacesPage() {
+  const navigate = useNavigate()
   const { workspaces, loading, error } = useWorkspacesState()
   const [query, setQuery] = useState("")
   const [adding, setAdding] = useState(false)
-  const [open, setOpen] = useState<WorkspaceRow | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -117,11 +114,19 @@ function WorkspacesPage() {
               role="button"
               tabIndex={0}
               aria-label={`Open ${workspace.name}`}
-              onClick={() => setOpen(workspace)}
+              onClick={() =>
+                navigate({
+                  to: "/workspaces/$workspaceId",
+                  params: { workspaceId: workspace.id },
+                })
+              }
               onKeyDown={(event) => {
                 if (event.key !== "Enter" && event.key !== " ") return
                 event.preventDefault()
-                setOpen(workspace)
+                navigate({
+                  to: "/workspaces/$workspaceId",
+                  params: { workspaceId: workspace.id },
+                })
               }}
               className="relative flex cursor-pointer flex-col rounded-2xl border border-white/10 bg-white/5 p-4 transition-colors hover:border-white/20 focus-visible:border-white/20 focus-visible:outline-none"
             >
@@ -184,15 +189,6 @@ function WorkspacesPage() {
         <NewWorkspaceDialog
           onOpenChange={(next) => {
             if (!next) setAdding(false)
-          }}
-        />
-      ) : null}
-      {open ? (
-        <WorkspaceInfoDialog
-          key={open.id}
-          workspace={open}
-          onOpenChange={(next) => {
-            if (!next) setOpen(null)
           }}
         />
       ) : null}

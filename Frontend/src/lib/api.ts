@@ -97,10 +97,13 @@ export const api = {
   getChat: (chatId: string) =>
     request<{ chat: ChatDetail }>(`/chats/${chatId}`).then((r) => r.chat),
 
-  createChat: (selection?: ModelSelection | null) =>
+  createChat: (selection?: ModelSelection | null, workspaceId?: string) =>
     request<{ chat: Chat }>("/chats", {
       method: "POST",
-      body: JSON.stringify(selection ?? {}),
+      body: JSON.stringify({
+        ...(selection ?? {}),
+        ...(workspaceId ? { workspaceId } : {}),
+      }),
     }).then((r) => r.chat),
 
   updateChat: (chatId: string, patch: { title?: string; pinned?: boolean }) =>

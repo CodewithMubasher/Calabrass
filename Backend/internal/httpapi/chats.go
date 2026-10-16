@@ -53,15 +53,32 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Provider string `json:"provider"`
 		Model    string `json:"model"`
+		// WorkspaceID binds the chat to one workspace's folder. Empty means the
+		// default workspace.
+		WorkspaceID string `json:"workspaceId"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 
+	workspaceDir := ""
+	if strings.TrimSpace(req.WorkspaceID) != "" {
+		record, err := s.store.GetWorkspace(r.Context(), req.WorkspaceID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusBadRequest, errors.New("unknown workspace"))
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		workspaceDir = record.Dir
+	}
+
 	providerID, modelID := s.resolveModel(r.Context(), req.Provider, req.Model)
 
-	chat, err := s.store.CreateChat(r.Context(), providerID, modelID)
+	chat, err := s.store.CreateChat(r.Context(), providerID, modelID, workspaceDir)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -194,6 +211,25 @@ type errorPayload struct {
 	Message string `json:"message"`
 }
 
+// workspaceFor picks the folder a chat works in: the workspace it was bound to,
+// or the server's default. The folder is opened on demand, so a chat keeps
+// working in the directory it remembers even after the workspace row is gone.
+// A binding that cannot be opened falls back to the default rather than running
+// the turn without tools.
+func (s *Server) workspaceFor(chat store.Chat) *agent.Workspace {
+	dir := strings.TrimSpace(chat.WorkspaceDir)
+	if dir == "" || dir == agent.DefaultWorkspaceName || s.library == nil {
+		return s.workspace
+	}
+	opened, err := s.library.Ensure(dir)
+	if err != nil {
+		s.log.Warn("could not open the chat's workspace",
+			"chat", chat.ID, "workspace", dir, "error", err)
+		return s.workspace
+	}
+	return opened
+}
+
 // handleSendMessage persists the user turn, then streams the assistant reply as
 // Server-Sent Events: chat, message, reasoning*, token*, done|error.
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
@@ -291,10 +327,11 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	// The harness: the tools for the workspace, and a prompt that explains the
 	// project the model is working in. Without a workspace the turn is a plain
 	// completion, which is what a fresh checkout without a project looks like.
-	tools := agent.Tools(s.workspace)
+	workspace := s.workspaceFor(chat.Chat)
+	tools := agent.Tools(workspace)
 	system := s.system
-	if s.workspace != nil {
-		system = agent.SystemPrompt(s.workspace, s.system)
+	if workspace != nil {
+		system = agent.SystemPrompt(workspace, s.system)
 	}
 
 	started := time.Now()

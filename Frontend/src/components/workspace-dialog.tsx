@@ -1,6 +1,4 @@
 import { useState } from "react"
-import { HugeiconsIcon } from "@hugeicons/react"
-import { Folder01Icon } from "@hugeicons/core-free-icons"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -12,7 +10,6 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { createWorkspace } from "@/lib/workspace-store"
-import type { WorkspaceRow } from "@/types/chat"
 
 // The dialogs sit on the same dark panel as the reference project's, with our
 // own popover token standing in for its neutral-900.
@@ -35,15 +32,6 @@ function Field({
 
 function message(err: unknown, fallback: string) {
   return err instanceof Error ? err.message : fallback
-}
-
-function formatDate(at: number): string {
-  if (!at) return ""
-  return new Date(at).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  })
 }
 
 /**
@@ -135,69 +123,3 @@ export function NewWorkspaceDialog({
   )
 }
 
-/**
- * Shows where one workspace lives and what it holds. Removing it is the card
- * menu's job; this is the read-only half of the workspace detail screen the
- * reference project opens from a card.
- */
-export function WorkspaceInfoDialog({
-  workspace,
-  onOpenChange,
-}: {
-  workspace: WorkspaceRow
-  onOpenChange: (open: boolean) => void
-}) {
-  return (
-    <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent className={SURFACE}>
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-3 text-white/90">
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-white/5">
-              <HugeiconsIcon
-                icon={Folder01Icon}
-                strokeWidth={1.8}
-                className="size-4 text-white/50"
-              />
-            </span>
-            {workspace.name}
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="py-2">
-          <div className="mb-5">
-            <span className="mb-2 block text-sm text-white/60">Folder</span>
-            <code
-              title={workspace.path}
-              className="block truncate rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-mono text-xs text-white/80"
-            >
-              {workspace.path || `workspace/${workspace.dir}`}
-            </code>
-            <p className="mt-2 text-xs text-white/40">
-              The agent works in this folder, and can never reach outside it.
-            </p>
-          </div>
-
-          {workspace.description ? (
-            <div className="mb-5">
-              <span className="mb-2 block text-sm text-white/60">
-                Description
-              </span>
-              <p className="text-sm text-white/80">{workspace.description}</p>
-            </div>
-          ) : null}
-
-          <div>
-            <span className="mb-2 block text-sm text-white/60">Created</span>
-            <p className="text-sm text-white/80">
-              {formatDate(workspace.createdAt)}
-            </p>
-          </div>
-        </div>
-
-        <DialogFooter className="gap-2">
-          <Button onClick={() => onOpenChange(false)}>Close</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}

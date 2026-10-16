@@ -59,6 +59,8 @@ export interface Chat {
   title: string
   provider: string
   model: string
+  /** The workspace folder this chat works in. Empty means the default. */
+  workspaceDir: string
   /** Pinned chats lead the sidebar list. */
   pinned: boolean
   createdAt: number
