@@ -5,6 +5,10 @@ export interface ChatMessage {
   chatId: string
   role: ChatRole
   content: string
+  /** The model's thinking text, when the provider exposes it. */
+  reasoning?: string
+  /** How long the model spent thinking, in milliseconds. */
+  thinkingMs?: number
   createdAt: number
   /** Set on an optimistic message that the server has not confirmed yet. */
   pending?: boolean

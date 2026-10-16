@@ -8,6 +8,7 @@ interface ChatState {
   chats: Chat[]
   messages: Record<string, ChatMessage[]>
   streaming: Record<string, string>
+  reasoning: Record<string, string>
   errors: Record<string, string>
   backendError: string | null
   hydrated: boolean
@@ -17,6 +18,7 @@ let state: ChatState = {
   chats: [],
   messages: {},
   streaming: {},
+  reasoning: {},
   errors: {},
   backendError: null,
   hydrated: false,
@@ -59,6 +61,13 @@ export function useChatMessages(chatId: string) {
 export function useStreamingText(chatId: string) {
   return (
     useSyncExternalStore(subscribe, getSnapshot, getSnapshot).streaming[chatId] ?? ""
+  )
+}
+
+/** The thinking text of the in-flight reply, or "" when there is none. */
+export function useStreamingReasoning(chatId: string) {
+  return (
+    useSyncExternalStore(subscribe, getSnapshot, getSnapshot).reasoning[chatId] ?? ""
   )
 }
 
@@ -168,6 +177,7 @@ export async function sendMessage(chatId: string, content: string) {
       [chatId]: [...(state.messages[chatId] ?? []), optimistic],
     },
     streaming: { ...state.streaming, [chatId]: "" },
+    reasoning: { ...state.reasoning, [chatId]: "" },
     errors: without(state.errors, chatId),
   })
 
@@ -188,6 +198,14 @@ export async function sendMessage(chatId: string, content: string) {
             },
           }),
 
+        onReasoning: (delta) =>
+          setState({
+            reasoning: {
+              ...state.reasoning,
+              [chatId]: (state.reasoning[chatId] ?? "") + delta,
+            },
+          }),
+
         onToken: (delta) =>
           setState({
             streaming: {
@@ -203,6 +221,7 @@ export async function sendMessage(chatId: string, content: string) {
               [chatId]: [...(state.messages[chatId] ?? []), message],
             },
             streaming: without(state.streaming, chatId),
+            reasoning: without(state.reasoning, chatId),
             errors: interrupted
               ? { ...state.errors, [chatId]: "The reply was interrupted." }
               : without(state.errors, chatId),
@@ -211,6 +230,7 @@ export async function sendMessage(chatId: string, content: string) {
         onError: (message) =>
           setState({
             streaming: without(state.streaming, chatId),
+            reasoning: without(state.reasoning, chatId),
             errors: { ...state.errors, [chatId]: message },
           }),
       }
@@ -218,6 +238,7 @@ export async function sendMessage(chatId: string, content: string) {
   } catch (err) {
     setState({
       streaming: without(state.streaming, chatId),
+      reasoning: without(state.reasoning, chatId),
       errors: { ...state.errors, [chatId]: errorMessage(err) },
     })
   }
@@ -229,6 +250,7 @@ export async function deleteChat(chatId: string) {
     chats: state.chats.filter((chat) => chat.id !== chatId),
     messages: without(state.messages, chatId),
     streaming: without(state.streaming, chatId),
+    reasoning: without(state.reasoning, chatId),
   })
 
   try {

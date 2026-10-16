@@ -75,6 +75,7 @@ The message endpoint replies with a Server-Sent Event stream:
 ```
 event: chat      -> the chat summary (auto-title, selected model)
 event: message   -> the persisted user message
+event: reasoning -> one delta of the model's thinking (repeated, optional)
 event: token     -> one text delta of the reply (repeated)
 event: done      -> the persisted assistant message + token usage
 event: error     -> provider/stream failure
@@ -88,3 +89,8 @@ disconnects mid-stream.
 - Models are listed live from each provider, so the picker always reflects what
   your keys can actually reach.
 - Chats and messages live in SQLite at `Backend/data/calabrass.db`.
+- The model's thinking is streamed on its own channel, never mixed into the
+  answer, and stored alongside the message. The UI renders it with the shadcn
+  [Trace](https://ui.shadcn.com/docs/components/trace) component as a
+  "Thinking → Thought for Ns" row that opens while the model thinks and closes
+  when it is done (`Frontend/src/components/reasoning-trace.tsx`).

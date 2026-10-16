@@ -27,13 +27,17 @@ type Chat struct {
 	UpdatedAt int64  `json:"updatedAt"`
 }
 
-// Message is a single turn in a conversation.
+// Message is a single turn in a conversation. Reasoning holds the model's
+// thinking text when the provider exposes it, and ThinkingMs is how long it
+// spent producing it.
 type Message struct {
-	ID        string `json:"id"`
-	ChatID    string `json:"chatId"`
-	Role      string `json:"role"`
-	Content   string `json:"content"`
-	CreatedAt int64  `json:"createdAt"`
+	ID         string `json:"id"`
+	ChatID     string `json:"chatId"`
+	Role       string `json:"role"`
+	Content    string `json:"content"`
+	Reasoning  string `json:"reasoning,omitempty"`
+	ThinkingMs int64  `json:"thinkingMs,omitempty"`
+	CreatedAt  int64  `json:"createdAt"`
 }
 
 // ChatDetail is a chat together with its messages.
@@ -94,6 +98,8 @@ CREATE TABLE IF NOT EXISTS messages (
 	chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
 	role       TEXT NOT NULL,
 	content    TEXT NOT NULL,
+	reasoning  TEXT NOT NULL DEFAULT '',
+	thinking_ms INTEGER NOT NULL DEFAULT 0,
 	created_at INTEGER NOT NULL
 );
 
@@ -102,6 +108,35 @@ CREATE INDEX IF NOT EXISTS idx_chats_updated ON chats(updated_at DESC);
 `
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("store: migrate: %w", err)
+	}
+
+	// Columns added after the first release, for databases created earlier.
+	added := []struct{ table, column, ddl string }{
+		{"messages", "reasoning", "reasoning TEXT NOT NULL DEFAULT ''"},
+		{"messages", "thinking_ms", "thinking_ms INTEGER NOT NULL DEFAULT 0"},
+	}
+	for _, col := range added {
+		if err := s.ensureColumn(ctx, col.table, col.column, col.ddl); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ensureColumn adds a column when an older database does not have it yet.
+func (s *Store) ensureColumn(ctx context.Context, table, column, ddl string) error {
+	var count int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, table, column,
+	).Scan(&count); err != nil {
+		return fmt.Errorf("store: inspect %s.%s: %w", table, column, err)
+	}
+	if count > 0 {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx,
+		fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s", table, ddl)); err != nil {
+		return fmt.Errorf("store: add %s.%s: %w", table, column, err)
 	}
 	return nil
 }
@@ -198,7 +233,7 @@ func (s *Store) GetChat(ctx context.Context, id string) (ChatDetail, error) {
 // ListMessages returns a chat's messages in chronological order.
 func (s *Store) ListMessages(ctx context.Context, chatID string) ([]Message, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, chat_id, role, content, created_at
+		SELECT id, chat_id, role, content, reasoning, thinking_ms, created_at
 		FROM messages
 		WHERE chat_id = ?
 		ORDER BY created_at ASC, rowid ASC`, chatID)
@@ -210,7 +245,10 @@ func (s *Store) ListMessages(ctx context.Context, chatID string) ([]Message, err
 	messages := []Message{}
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.ChatID, &m.Role, &m.Content, &m.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&m.ID, &m.ChatID, &m.Role, &m.Content,
+			&m.Reasoning, &m.ThinkingMs, &m.CreatedAt,
+		); err != nil {
 			return nil, fmt.Errorf("store: scan message: %w", err)
 		}
 		messages = append(messages, m)
@@ -218,16 +256,12 @@ func (s *Store) ListMessages(ctx context.Context, chatID string) ([]Message, err
 	return messages, rows.Err()
 }
 
-// AddMessage appends a message and bumps the chat's updated_at.
-func (s *Store) AddMessage(ctx context.Context, chatID, role, content string) (Message, error) {
-	now := time.Now().UnixMilli()
-	msg := Message{
-		ID:        NewID(),
-		ChatID:    chatID,
-		Role:      role,
-		Content:   content,
-		CreatedAt: now,
-	}
+// AddMessage appends a message and bumps the chat's updated_at. The ID and
+// creation time are assigned here.
+func (s *Store) AddMessage(ctx context.Context, msg Message) (Message, error) {
+	msg.ID = NewID()
+	msg.CreatedAt = time.Now().UnixMilli()
+	now := msg.CreatedAt
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -236,13 +270,14 @@ func (s *Store) AddMessage(ctx context.Context, chatID, role, content string) (M
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO messages (id, chat_id, role, content, created_at)
-		VALUES (?, ?, ?, ?, ?)`,
-		msg.ID, msg.ChatID, msg.Role, msg.Content, msg.CreatedAt); err != nil {
+		INSERT INTO messages (id, chat_id, role, content, reasoning, thinking_ms, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		msg.ID, msg.ChatID, msg.Role, msg.Content, msg.Reasoning, msg.ThinkingMs, msg.CreatedAt,
+	); err != nil {
 		return Message{}, fmt.Errorf("store: insert message: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE chats SET updated_at = ? WHERE id = ?`, now, chatID); err != nil {
+		`UPDATE chats SET updated_at = ? WHERE id = ?`, now, msg.ChatID); err != nil {
 		return Message{}, fmt.Errorf("store: touch chat: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

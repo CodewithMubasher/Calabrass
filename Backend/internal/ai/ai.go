@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/zendev-sh/goai"
 	"github.com/zendev-sh/goai/provider"
@@ -99,20 +100,32 @@ type Usage struct {
 	Model        string `json:"model"`
 }
 
-// Reply is the outcome of a completion.
+// Reply is the outcome of a completion. Reasoning is the model's thinking text
+// when the provider exposes it, and ThinkingMs is how long it spent producing
+// it.
 type Reply struct {
-	Text  string
-	Usage Usage
+	Text       string
+	Reasoning  string
+	ThinkingMs int64
+	Usage      Usage
 }
 
-// Stream runs a single completion, calling onDelta for every text delta as it
-// arrives. A non-nil error may still come with partial text, which callers are
-// expected to persist so a cancelled or failed turn is not silently lost.
+// Handlers receives incremental output from a streaming completion. Both
+// callbacks are optional; returning an error aborts the stream.
+type Handlers struct {
+	OnText      func(delta string) error
+	OnReasoning func(delta string) error
+}
+
+// Stream runs a single completion, calling the handlers for every text and
+// reasoning delta as it arrives. A non-nil error may still come with partial
+// text, which callers are expected to persist so a cancelled or failed turn is
+// not silently lost.
 func (r *Registry) Stream(
 	ctx context.Context,
 	providerID, model, system string,
 	messages []Message,
-	onDelta func(delta string) error,
+	handlers Handlers,
 ) (Reply, error) {
 	lm, err := r.resolve(providerID, model)
 	if err != nil {
@@ -130,8 +143,23 @@ func (r *Registry) Stream(
 		return Reply{}, err
 	}
 
-	var text strings.Builder
-	var streamErr error
+	var (
+		text        strings.Builder
+		reasoning   strings.Builder
+		streamErr   error
+		startedAt   = time.Now()
+		thinkingEnd time.Time
+	)
+
+	// current assembles a reply from whatever has arrived so far, so partial
+	// output survives an abort or a provider failure.
+	current := func() Reply {
+		out := Reply{Text: text.String(), Reasoning: reasoning.String()}
+		if out.Reasoning != "" && !thinkingEnd.IsZero() {
+			out.ThinkingMs = thinkingEnd.Sub(startedAt).Milliseconds()
+		}
+		return out
+	}
 
 	for chunk := range stream.Stream() {
 		switch chunk.Type {
@@ -140,8 +168,21 @@ func (r *Registry) Stream(
 				continue
 			}
 			text.WriteString(chunk.Text)
-			if err := onDelta(chunk.Text); err != nil {
-				return Reply{Text: text.String()}, err
+			if handlers.OnText != nil {
+				if err := handlers.OnText(chunk.Text); err != nil {
+					return current(), err
+				}
+			}
+		case provider.ChunkReasoning:
+			if chunk.Text == "" {
+				continue
+			}
+			reasoning.WriteString(chunk.Text)
+			thinkingEnd = time.Now()
+			if handlers.OnReasoning != nil {
+				if err := handlers.OnReasoning(chunk.Text); err != nil {
+					return current(), err
+				}
 			}
 		case provider.ChunkError:
 			if chunk.Error != nil {
@@ -151,13 +192,13 @@ func (r *Registry) Stream(
 	}
 
 	if streamErr != nil {
-		return Reply{Text: text.String()}, streamErr
+		return current(), streamErr
 	}
 	if err := stream.Err(); err != nil {
-		return Reply{Text: text.String()}, err
+		return current(), err
 	}
 
-	reply := Reply{Text: text.String()}
+	reply := current()
 	if result := stream.Result(); result != nil {
 		// TextResult.Text includes reasoning tokens, so only fall back to it
 		// when nothing was accumulated from the text deltas. Steps[n].Text is
@@ -171,6 +212,12 @@ func (r *Registry) Stream(
 				reply.Text = steps.String()
 			} else if strings.TrimSpace(result.Text) != "" {
 				reply.Text = result.Text
+			}
+		}
+		if reply.Reasoning == "" {
+			reply.Reasoning = result.Reasoning
+			if reply.Reasoning != "" {
+				reply.ThinkingMs = time.Since(startedAt).Milliseconds()
 			}
 		}
 		reply.Usage = Usage{

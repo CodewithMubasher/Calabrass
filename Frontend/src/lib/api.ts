@@ -65,6 +65,7 @@ export const api = {
 export interface StreamHandlers {
   onChat?: (chat: Chat) => void
   onMessage?: (message: ChatMessage) => void
+  onReasoning?: (text: string) => void
   onToken?: (text: string) => void
   onDone?: (payload: {
     message: ChatMessage
@@ -76,7 +77,7 @@ export interface StreamHandlers {
 
 /**
  * POST a user turn and consume the Server-Sent Events reply stream.
- * Events: chat, message, token*, done|error.
+ * Events: chat, message, reasoning*, token*, done|error.
  */
 export async function streamMessage(
   chatId: string,
@@ -150,6 +151,9 @@ function dispatchSSE(frame: string, handlers: StreamHandlers) {
       break
     case "message":
       handlers.onMessage?.(payload as ChatMessage)
+      break
+    case "reasoning":
+      handlers.onReasoning?.((payload as { text: string }).text ?? "")
       break
     case "token":
       handlers.onToken?.((payload as { text: string }).text ?? "")

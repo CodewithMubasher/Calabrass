@@ -1,6 +1,7 @@
 import { cn } from "cn"
 import "./message-bubble.css"
 
+import { ReasoningTrace } from "@/components/reasoning-trace"
 import {
   Message,
   MessageAvatar,
@@ -26,34 +27,52 @@ function AssistantAvatar({ animated = false }: { animated?: boolean }) {
 
 export function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user"
+  const reasoning = message.reasoning ?? ""
 
   return (
     <Message align={isUser ? "end" : "start"}>
       {!isUser && <AssistantAvatar />}
       <MessageContent className={cn(isUser ? "items-end" : "items-start")}>
-        <div
-          className={cn(
-            "w-fit max-w-[80%] rounded-2xl px-4 py-2 text-sm leading-relaxed whitespace-pre-wrap",
-            isUser ? "bg-primary text-white" : "bg-white/5 text-white/90"
-          )}
-        >
-          {message.content}
-        </div>
+        {!isUser && reasoning !== "" && (
+          <ReasoningTrace text={reasoning} thinkingMs={message.thinkingMs} />
+        )}
+        {message.content !== "" && (
+          <div
+            className={cn(
+              "w-fit max-w-[80%] rounded-2xl px-4 py-2 text-sm leading-relaxed whitespace-pre-wrap",
+              isUser ? "bg-primary text-white" : "bg-white/5 text-white/90"
+            )}
+          >
+            {message.content}
+          </div>
+        )}
       </MessageContent>
     </Message>
   )
 }
 
-/** The in-flight reply: the words revealed so far plus a blinking caret. */
-export function StreamingMessage({ text }: { text: string }) {
+/**
+ * The in-flight reply: the model's thinking as a Trace row, then the words
+ * revealed so far plus a blinking caret.
+ */
+export function StreamingMessage({
+  text,
+  reasoning = "",
+}: {
+  text: string
+  reasoning?: string
+}) {
   return (
     <Message align="start">
       <AssistantAvatar animated />
       <MessageContent className="items-start">
-        <div className="w-fit max-w-[80%] rounded-2xl bg-white/5 px-4 py-2 text-sm leading-relaxed whitespace-pre-wrap text-white/90">
-          {text}
-          <span className="ml-0.5 inline-block h-3.5 w-[2px] translate-y-[2px] animate-pulse rounded-full bg-white/70" />
-        </div>
+        {reasoning.trim() !== "" && <ReasoningTrace text={reasoning} running />}
+        {text !== "" && (
+          <div className="w-fit max-w-[80%] rounded-2xl bg-white/5 px-4 py-2 text-sm leading-relaxed whitespace-pre-wrap text-white/90">
+            {text}
+            <span className="ml-0.5 inline-block h-3.5 w-[2px] translate-y-[2px] animate-pulse rounded-full bg-white/70" />
+          </div>
+        )}
       </MessageContent>
     </Message>
   )

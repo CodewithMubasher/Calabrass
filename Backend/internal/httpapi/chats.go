@@ -119,7 +119,9 @@ type sendRequest struct {
 	Model    string `json:"model"`
 }
 
-type tokenPayload struct {
+// deltaPayload carries one incremental chunk of either answer text or
+// reasoning text.
+type deltaPayload struct {
 	Text string `json:"text"`
 }
 
@@ -134,7 +136,7 @@ type errorPayload struct {
 }
 
 // handleSendMessage persists the user turn, then streams the assistant reply as
-// Server-Sent Events: chat, message, token*, done|error.
+// Server-Sent Events: chat, message, reasoning*, token*, done|error.
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	chatID := r.PathValue("chatID")
@@ -167,7 +169,11 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Persist the user turn before generating, so it survives a failed reply.
-	userMessage, err := s.store.AddMessage(ctx, chatID, ai.RoleUser, req.Content)
+	userMessage, err := s.store.AddMessage(ctx, store.Message{
+		ChatID:  chatID,
+		Role:    ai.RoleUser,
+		Content: req.Content,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -203,17 +209,28 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	history = append(history, ai.Message{Role: ai.RoleUser, Content: req.Content})
 
-	reply, genErr := s.registry.Stream(ctx, providerID, modelID, s.system, history, func(delta string) error {
-		return stream.event("token", tokenPayload{Text: delta})
+	reply, genErr := s.registry.Stream(ctx, providerID, modelID, s.system, history, ai.Handlers{
+		OnText: func(delta string) error {
+			return stream.event("token", deltaPayload{Text: delta})
+		},
+		OnReasoning: func(delta string) error {
+			return stream.event("reasoning", deltaPayload{Text: delta})
+		},
 	})
 
-	// Persist whatever text we got, even when the stream failed or the client
+	// Persist whatever we got, even when the stream failed or the client
 	// disconnected mid-generation.
-	if strings.TrimSpace(reply.Text) != "" {
+	if strings.TrimSpace(reply.Text) != "" || strings.TrimSpace(reply.Reasoning) != "" {
 		// Detach from the request context: a cancelled request must still be
 		// able to write the partial reply.
 		saveCtx := context.WithoutCancel(ctx)
-		assistant, saveErr := s.store.AddMessage(saveCtx, chatID, ai.RoleAssistant, reply.Text)
+		assistant, saveErr := s.store.AddMessage(saveCtx, store.Message{
+			ChatID:     chatID,
+			Role:       ai.RoleAssistant,
+			Content:    reply.Text,
+			Reasoning:  reply.Reasoning,
+			ThinkingMs: reply.ThinkingMs,
+		})
 		if saveErr != nil {
 			s.log.Error("could not persist assistant reply", "chat", chatID, "error", saveErr)
 		} else {

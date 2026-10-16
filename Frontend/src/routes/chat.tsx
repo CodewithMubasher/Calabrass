@@ -12,6 +12,7 @@ import {
   useChatMessages,
   useHydrated,
   useIsStreaming,
+  useStreamingReasoning,
   useStreamingText,
 } from "@/lib/chat-store"
 import { Route as rootRoute } from "@/routes/__root"
@@ -29,6 +30,7 @@ function ChatPage() {
   const messages = useChatMessages(chatId)
   const streaming = useIsStreaming(chatId)
   const streamingText = useStreamingText(chatId)
+  const streamingReasoning = useStreamingReasoning(chatId)
   const error = useChatError(chatId)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -38,12 +40,13 @@ function ChatPage() {
 
   const messageCount = messages?.length ?? 0
   const streamingLength = streamingText.length
+  const reasoningLength = streamingReasoning.length
 
   // Keep the newest message in view while the reply streams in.
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [messageCount, streamingLength])
+  }, [messageCount, streamingLength, reasoningLength])
 
   if (!hydrated) {
     return (
@@ -71,8 +74,11 @@ function ChatPage() {
           {(messages ?? []).map((message) => (
             <MessageBubble key={message.id} message={message} />
           ))}
-          {streaming && streamingText !== "" && (
-            <StreamingMessage text={streamingText} />
+          {streaming && (streamingText !== "" || streamingReasoning !== "") && (
+            <StreamingMessage
+              text={streamingText}
+              reasoning={streamingReasoning}
+            />
           )}
         </MessageGroup>
       </div>
