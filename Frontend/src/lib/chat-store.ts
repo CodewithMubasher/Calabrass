@@ -2,13 +2,14 @@ import { useSyncExternalStore } from "react"
 
 import { api, streamMessage } from "@/lib/api"
 import { getSelectedModel } from "@/lib/model-store"
-import type { Chat, ChatMessage } from "@/types/chat"
+import type { Chat, ChatMessage, TurnTrace } from "@/types/chat"
 
 interface ChatState {
   chats: Chat[]
   messages: Record<string, ChatMessage[]>
   streaming: Record<string, string>
   reasoning: Record<string, string>
+  traces: Record<string, TurnTrace>
   errors: Record<string, string>
   backendError: string | null
   hydrated: boolean
@@ -19,6 +20,7 @@ let state: ChatState = {
   messages: {},
   streaming: {},
   reasoning: {},
+  traces: {},
   errors: {},
   backendError: null,
   hydrated: false,
@@ -58,24 +60,32 @@ export function useChatMessages(chatId: string) {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot).messages[chatId]
 }
 
-export function useStreamingText(chatId: string) {
-  return (
-    useSyncExternalStore(subscribe, getSnapshot, getSnapshot).streaming[chatId] ?? ""
-  )
-}
-
-/** The thinking text of the in-flight reply, or "" when there is none. */
-export function useStreamingReasoning(chatId: string) {
-  return (
-    useSyncExternalStore(subscribe, getSnapshot, getSnapshot).reasoning[chatId] ?? ""
-  )
-}
-
 export function useIsStreaming(chatId: string) {
   return (
     useSyncExternalStore(subscribe, getSnapshot, getSnapshot).streaming[chatId] !==
     undefined
   )
+}
+
+/**
+ * The reply that is still arriving, shaped like a stored message so the same
+ * component renders both. Its id is fixed for the life of the turn, and it is
+ * gone the moment the real reply is committed.
+ */
+export function useStreamingMessage(chatId: string): ChatMessage | undefined {
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  if (snapshot.streaming[chatId] === undefined) return undefined
+
+  return {
+    id: `streaming:${chatId}`,
+    chatId,
+    role: "assistant",
+    content: snapshot.streaming[chatId] ?? "",
+    reasoning: snapshot.reasoning[chatId] ?? "",
+    trace: snapshot.traces[chatId],
+    createdAt: 0,
+    pending: true,
+  }
 }
 
 export function useChatError(chatId: string) {
@@ -105,8 +115,10 @@ function without<T>(record: Record<string, T>, key: string) {
 }
 
 function upsertChat(chats: Chat[], next: Chat): Chat[] {
+  // Pinned chats lead the list, then the most recently used ones — the same
+  // order the backend returns.
   return [next, ...chats.filter((chat) => chat.id !== next.id)].sort(
-    (a, b) => b.updatedAt - a.updatedAt
+    (a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt
   )
 }
 
@@ -178,18 +190,119 @@ export async function sendMessage(chatId: string, content: string) {
     },
     streaming: { ...state.streaming, [chatId]: "" },
     reasoning: { ...state.reasoning, [chatId]: "" },
+    traces: without(state.traces, chatId),
     errors: without(state.errors, chatId),
   })
 
+  await runStream(chatId, text)
+}
+
+/**
+ * Drop a reply and ask for a new one from the user turn it answered. Only the
+ * last reply is retryable, so the backend can replace it in place.
+ */
+export async function retryReply(chatId: string, messageId: string) {
+  const list = state.messages[chatId] ?? []
+  const index = list.findIndex((message) => message.id === messageId)
+  if (index === -1) return
+
+  // The user turn this reply was answering.
+  const prompt = list
+    .slice(0, index)
+    .reverse()
+    .find((message) => message.role === "user")
+  if (!prompt) return
+
+  setState({
+    messages: {
+      ...state.messages,
+      [chatId]: list.filter((message) => message.id !== messageId),
+    },
+    streaming: { ...state.streaming, [chatId]: "" },
+    reasoning: { ...state.reasoning, [chatId]: "" },
+    traces: without(state.traces, chatId),
+    errors: without(state.errors, chatId),
+  })
+
+  await runStream(chatId, prompt.content, true)
+}
+
+/** Remove one turn from a chat. */
+export async function deleteReply(chatId: string, messageId: string) {
+  const previous = state.messages[chatId] ?? []
+  setState({
+    messages: {
+      ...state.messages,
+      [chatId]: previous.filter((message) => message.id !== messageId),
+    },
+  })
+
+  try {
+    await api.deleteMessage(chatId, messageId)
+  } catch (err) {
+    setState({
+      messages: { ...state.messages, [chatId]: previous },
+      errors: { ...state.errors, [chatId]: errorMessage(err) },
+    })
+  }
+}
+
+/** Retitle a chat. */
+export async function renameChat(chatId: string, title: string) {
+  const next = title.trim()
+  if (!next) return
+
+  const previous = state.chats
+  const current = previous.find((chat) => chat.id === chatId)
+  if (!current || current.title === next) return
+
+  setState({
+    chats: upsertChat(previous, { ...current, title: next }),
+    backendError: null,
+  })
+
+  try {
+    const chat = await api.updateChat(chatId, { title: next })
+    setState({ chats: upsertChat(state.chats, chat) })
+  } catch (err) {
+    setState({ chats: previous, backendError: errorMessage(err) })
+  }
+}
+
+/**
+ * Pin or unpin a chat. The flip shows straight away, and is put back if the
+ * server refuses it.
+ */
+export async function togglePinChat(chatId: string, pinned: boolean) {
+  const previous = state.chats
+  const current = previous.find((chat) => chat.id === chatId)
+  if (!current || current.pinned === pinned) return
+
+  setState({
+    chats: upsertChat(previous, { ...current, pinned }),
+    backendError: null,
+  })
+
+  try {
+    const chat = await api.updateChat(chatId, { pinned })
+    setState({ chats: upsertChat(state.chats, chat) })
+  } catch (err) {
+    setState({ chats: previous, backendError: errorMessage(err) })
+  }
+}
+
+/** The shared streaming path, for a fresh turn and for a regeneration. */
+async function runStream(chatId: string, content: string, regenerate = false) {
   const selection = getSelectedModel()
 
   try {
     await streamMessage(
       chatId,
-      { content: text, ...(selection ?? {}) },
+      { content, regenerate, ...(selection ?? {}) },
       {
         onChat: (chat) => setState({ chats: upsertChat(state.chats, chat) }),
 
+        // No user message is echoed back when regenerating.
         onMessage: (message) =>
           setState({
             messages: {
@@ -214,7 +327,15 @@ export async function sendMessage(chatId: string, content: string) {
             },
           }),
 
-        onDone: ({ message, interrupted }) =>
+        onTrace: (trace) =>
+          setState({ traces: { ...state.traces, [chatId]: trace } }),
+
+        onDone: ({ message, interrupted, steps = 0, stepsExhausted }) => {
+          const notice = interrupted
+            ? "The reply was interrupted."
+            : stepsExhausted
+              ? `The harness stopped after ${steps} steps, so the task may be unfinished.`
+              : ""
           setState({
             messages: {
               ...state.messages,
@@ -222,15 +343,18 @@ export async function sendMessage(chatId: string, content: string) {
             },
             streaming: without(state.streaming, chatId),
             reasoning: without(state.reasoning, chatId),
-            errors: interrupted
-              ? { ...state.errors, [chatId]: "The reply was interrupted." }
+            traces: without(state.traces, chatId),
+            errors: notice
+              ? { ...state.errors, [chatId]: notice }
               : without(state.errors, chatId),
-          }),
+          })
+        },
 
         onError: (message) =>
           setState({
             streaming: without(state.streaming, chatId),
             reasoning: without(state.reasoning, chatId),
+            traces: without(state.traces, chatId),
             errors: { ...state.errors, [chatId]: message },
           }),
       }
@@ -239,6 +363,7 @@ export async function sendMessage(chatId: string, content: string) {
     setState({
       streaming: without(state.streaming, chatId),
       reasoning: without(state.reasoning, chatId),
+      traces: without(state.traces, chatId),
       errors: { ...state.errors, [chatId]: errorMessage(err) },
     })
   }
@@ -251,6 +376,7 @@ export async function deleteChat(chatId: string) {
     messages: without(state.messages, chatId),
     streaming: without(state.streaming, chatId),
     reasoning: without(state.reasoning, chatId),
+    traces: without(state.traces, chatId),
   })
 
   try {

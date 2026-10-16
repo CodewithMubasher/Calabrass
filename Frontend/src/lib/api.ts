@@ -2,11 +2,16 @@ import type {
   Chat,
   ChatDetail,
   ChatMessage,
+  ConnectorInput,
+  ConnectorRow,
   ModelSelection,
   ProviderInfo,
   ProviderInput,
   ProviderRow,
+  TurnTrace,
   Usage,
+  WorkspaceInput,
+  WorkspaceRow,
 } from "@/types/chat"
 
 const BASE = "/api"
@@ -71,6 +76,22 @@ export const api = {
       method: "DELETE",
     }).then((r) => r.providers ?? []),
 
+  listWorkspaces: () =>
+    request<{ workspaces: WorkspaceRow[] }>("/workspaces").then(
+      (r) => r.workspaces ?? []
+    ),
+
+  createWorkspace: (input: WorkspaceInput) =>
+    request<{ workspaces: WorkspaceRow[] }>("/workspaces", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).then((r) => r.workspaces ?? []),
+
+  deleteWorkspace: (workspaceId: string) =>
+    request<{ workspaces: WorkspaceRow[] }>(`/workspaces/${workspaceId}`, {
+      method: "DELETE",
+    }).then((r) => r.workspaces ?? []),
+
   listChats: () => request<{ chats: Chat[] }>("/chats").then((r) => r.chats ?? []),
 
   getChat: (chatId: string) =>
@@ -82,6 +103,39 @@ export const api = {
       body: JSON.stringify(selection ?? {}),
     }).then((r) => r.chat),
 
+  updateChat: (chatId: string, patch: { title?: string; pinned?: boolean }) =>
+    request<{ chat: Chat }>(`/chats/${chatId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }).then((r) => r.chat),
+
+  listConnectors: () =>
+    request<{ connectors: ConnectorRow[] }>("/connectors").then(
+      (r) => r.connectors ?? []
+    ),
+
+  createConnector: (input: ConnectorInput) =>
+    request<{ connectors: ConnectorRow[] }>("/connectors", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).then((r) => r.connectors ?? []),
+
+  setConnectorEnabled: (connectorId: string, enabled: boolean) =>
+    request<{ connectors: ConnectorRow[] }>(`/connectors/${connectorId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    }).then((r) => r.connectors ?? []),
+
+  deleteConnector: (connectorId: string) =>
+    request<{ connectors: ConnectorRow[] }>(`/connectors/${connectorId}`, {
+      method: "DELETE",
+    }).then((r) => r.connectors ?? []),
+
+  deleteMessage: (chatId: string, messageId: string) =>
+    request<{ deleted: boolean }>(`/chats/${chatId}/messages/${messageId}`, {
+      method: "DELETE",
+    }),
+
   deleteChat: (chatId: string) =>
     request<{ deleted: boolean }>(`/chats/${chatId}`, { method: "DELETE" }),
 }
@@ -91,21 +145,31 @@ export interface StreamHandlers {
   onMessage?: (message: ChatMessage) => void
   onReasoning?: (text: string) => void
   onToken?: (text: string) => void
+  /** A whole snapshot of the turn's trace, re-sent on every change. */
+  onTrace?: (trace: TurnTrace) => void
   onDone?: (payload: {
     message: ChatMessage
     usage: Usage
     interrupted: boolean
+    /** How many model turns the harness used. */
+    steps?: number
+    /** The harness ran out of steps mid-task. */
+    stepsExhausted?: boolean
   }) => void
   onError?: (message: string) => void
 }
 
 /**
  * POST a user turn and consume the Server-Sent Events reply stream.
- * Events: chat, message, reasoning*, token*, done|error.
+ * Events: chat, message, reasoning*, token*, trace*, done|error.
+ *
+ * With `regenerate`, the backend drops the trailing assistant reply and writes
+ * a new one from the same user turn; no user message or `message` event is
+ * produced.
  */
 export async function streamMessage(
   chatId: string,
-  body: { content: string } & Partial<ModelSelection>,
+  body: { content: string; regenerate?: boolean } & Partial<ModelSelection>,
   handlers: StreamHandlers,
   signal?: AbortSignal
 ): Promise<void> {
@@ -182,9 +246,18 @@ function dispatchSSE(frame: string, handlers: StreamHandlers) {
     case "token":
       handlers.onToken?.((payload as { text: string }).text ?? "")
       break
+    case "trace":
+      handlers.onTrace?.((payload as { trace: TurnTrace }).trace)
+      break
     case "done":
       handlers.onDone?.(
-        payload as { message: ChatMessage; usage: Usage; interrupted: boolean }
+        payload as {
+          message: ChatMessage
+          usage: Usage
+          interrupted: boolean
+          steps?: number
+          stepsExhausted?: boolean
+        }
       )
       break
     case "error":

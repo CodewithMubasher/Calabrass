@@ -96,6 +96,11 @@ export async function setProviderEnabled(providerID: string, enabled: boolean) {
   }
 }
 
+/** Dismiss the error banner on the providers page. */
+export function clearProvidersError() {
+  setState({ error: null })
+}
+
 /**
  * Add a custom, OpenAI-compatible provider. Throws with the server's message so
  * the dialog can show it next to the form.

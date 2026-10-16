@@ -1,0 +1,450 @@
+/* Cal Live orb: a thin ring opens at the top, the logo drops in, the ring
+   seals, and a ball of luminous smoke blooms inside. No gloss, no dark rim —
+   the colour is light, so it reads as energy rather than a glass marble. */
+
+.cal-live-orb {
+  --orb-size: min(70vw, 46vh, 440px);
+  /* Cal's voice: the page writes this 0–1 as words land. */
+  --level: 0;
+  position: relative;
+  width: var(--orb-size);
+  aspect-ratio: 1;
+  flex: none;
+  pointer-events: none;
+  /* Tightens on the loud words, springs back in the gaps between them. */
+  scale: calc(1 - 0.06 * var(--level));
+  filter: brightness(calc(1 + 0.25 * var(--level)));
+  will-change: transform;
+}
+
+.cal-live-orb__glow,
+.cal-live-orb__waves,
+.cal-live-orb__ring,
+.cal-live-orb__logo-wrap {
+  position: absolute;
+  inset: 0;
+}
+
+/* --- halo: breathes with the orb ------------------------------------------- */
+
+.cal-live-orb__glow {
+  inset: 2%;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    rgba(86, 190, 255, 0.5),
+    rgba(255, 145, 195, 0.22) 65%,
+    transparent 100%
+  );
+  filter: blur(36px);
+  opacity: 0;
+  animation:
+    cal-live-glow-in 1s 0.9s ease-out both,
+    cal-live-halo 2.8s 2s ease-in-out infinite;
+}
+
+/* --- the ball of smoke ----------------------------------------------------- */
+
+.cal-live-orb__waves {
+  /* Sits right under the ring (r = 48 of 50), so there is no dark gap. */
+  inset: 2%;
+  border-radius: 50%;
+  overflow: hidden;
+  isolation: isolate;
+  /* The ring holds the edge while it is there; once it goes, this fades the
+     smoke out over the last stretch of the rim so the ball never ends in a
+     hard cut. */
+  -webkit-mask-image: radial-gradient(
+    closest-side,
+    #000 86%,
+    transparent 100%
+  );
+  mask-image: radial-gradient(closest-side, #000 86%, transparent 100%);
+  animation:
+    cal-live-bloom 1.05s 0.95s cubic-bezier(0.22, 1, 0.36, 1) both,
+    cal-live-pulse 3.4s 2.1s ease-in-out infinite;
+}
+
+/* The noise filter. Its group also hosts the blending, so the base colour
+   lives inside it too. */
+.cal-live-orb__smoke {
+  position: absolute;
+  inset: -12%;
+  filter: url(#cal-live-smoke);
+  isolation: isolate;
+}
+
+.cal-live-orb__base {
+  position: absolute;
+  inset: 0;
+  /* Cool base, sky blue into plum under the light: what screens on top then
+     reads as sky blue and pink instead of navy or green. */
+  background:
+    radial-gradient(closest-side at 50% 62%, #2f86c4 0%, transparent 85%),
+    linear-gradient(165deg, #134a6b 0%, #3a2b50 55%, #5c2a4a 100%);
+}
+
+.cal-live-orb__layer {
+  position: absolute;
+  inset: 12%;
+}
+
+/* Two layers turning against each other, so the smoke keeps folding over. */
+.cal-live-orb__layer--a {
+  animation: cal-live-spin-cw 22s linear infinite;
+}
+
+.cal-live-orb__layer--b {
+  animation: cal-live-spin-ccw 15s linear infinite;
+}
+
+.cal-live-orb__wave,
+.cal-live-orb__wisp {
+  position: absolute;
+  width: var(--w);
+  height: var(--h);
+  mix-blend-mode: screen;
+  will-change: transform;
+  animation: cal-live-drift var(--dur) var(--delay) ease-in-out infinite
+    alternate;
+}
+
+/* Brand colours: strong, with a short blur — the noise does the softening. */
+.cal-live-orb__wave {
+  opacity: var(--o, 0.9);
+  filter: blur(var(--blur, 7px));
+  background:
+    radial-gradient(closest-side at 34% 42%, var(--c) 0%, transparent 72%),
+    radial-gradient(closest-side at 66% 62%, var(--c) 0%, transparent 76%);
+}
+
+/* Sky blue and pink carry the ball; teal and violet are accents, so it never
+   settles into a single hue. */
+.cal-live-orb__wave--1 {
+  --w: 60%;
+  --h: 46%;
+  --dur: 6s;
+  --delay: -2s;
+  --o: 0.42;
+  left: 46%;
+  top: 4%;
+}
+
+.cal-live-orb__wave--2 {
+  --w: 86%;
+  --h: 62%;
+  --dur: 8s;
+  --delay: -5s;
+  --o: 1;
+  left: -12%;
+  top: -4%;
+}
+
+.cal-live-orb__wave--3 {
+  --w: 58%;
+  --h: 44%;
+  --dur: 7s;
+  --delay: -3s;
+  --o: 0.45;
+  left: 2%;
+  top: 54%;
+}
+
+.cal-live-orb__wave--4 {
+  --w: 82%;
+  --h: 58%;
+  --dur: 9s;
+  --delay: -6s;
+  --o: 0.95;
+  left: 32%;
+  top: 44%;
+}
+
+/* Bright wisps: thin, streaky, screened on top for the lit-from-within look.
+   They flare with the voice, so the ball brightens as words land. */
+.cal-live-orb__wisp {
+  opacity: calc(var(--o, 0.55) * (1 + 0.8 * var(--level)));
+  filter: blur(5px);
+  background: radial-gradient(
+    closest-side,
+    var(--c) 0%,
+    transparent 78%
+  );
+}
+
+.cal-live-orb__wisp--1 {
+  --w: 80%;
+  --h: 20%;
+  --dur: 5s;
+  --delay: -1s;
+  --o: 0.4;
+  left: 6%;
+  top: 30%;
+  rotate: -22deg;
+}
+
+.cal-live-orb__wisp--2 {
+  --w: 56%;
+  --h: 16%;
+  --dur: 6.5s;
+  --delay: -4s;
+  --o: 0.68;
+  left: 36%;
+  top: 56%;
+  rotate: 28deg;
+}
+
+.cal-live-orb__wisp--3 {
+  --w: 62%;
+  --h: 18%;
+  --dur: 7s;
+  --delay: -2s;
+  --o: 0.68;
+  left: 0%;
+  top: 66%;
+  rotate: -12deg;
+}
+
+/* --- the ring: hugs the edge, open at the top until the logo lands --------- */
+
+.cal-live-orb__ring {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  /* The circle has closed and flashed — the ball stands on its own now. */
+  animation: cal-live-ring-out 0.55s 1.55s ease-out forwards;
+}
+
+.cal-live-orb__ring-arc,
+.cal-live-orb__ring-seal,
+.cal-live-orb__ring-flash {
+  fill: none;
+  stroke: url(#cal-live-ring);
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 5px rgba(120, 205, 255, 0.55));
+}
+
+.cal-live-orb__ring-arc {
+  stroke-dasharray: 290;
+  stroke-dashoffset: 290;
+  animation: cal-live-draw 0.7s 0.05s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.cal-live-orb__ring-seal {
+  stroke-dasharray: 70;
+  stroke-dashoffset: 70;
+  animation: cal-live-draw 0.4s 1s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.cal-live-orb__ring-flash {
+  stroke-width: 2.2;
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.6));
+  opacity: 0;
+  animation: cal-live-flash 0.55s 1.25s ease-out both;
+}
+
+/* --- the logo -------------------------------------------------------------- */
+
+.cal-live-orb__logo-wrap {
+  display: grid;
+  place-items: center;
+  /* The logo doesn't just disappear: it shrinks and blurs away exactly as the
+     smoke grows past it, so it reads as turning into the waves. */
+  animation: cal-live-dissolve 0.85s 1.05s cubic-bezier(0.4, 0, 0.6, 1) both;
+}
+
+.cal-live-orb__logo-drop {
+  width: 24%;
+  animation: cal-live-drop 0.8s 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.cal-live-orb__logo {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 4px 14px rgba(10, 10, 60, 0.4));
+  animation: cal-live-turn 0.55s 0.95s cubic-bezier(0.5, 0, 0.2, 1) both;
+}
+
+/* --- the timeline ---------------------------------------------------------- */
+
+@keyframes cal-live-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes cal-live-flash {
+  0% {
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes cal-live-drop {
+  0% {
+    transform: translateY(-300%) scale(0.9);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  70% {
+    transform: translateY(5%) scale(1.03);
+    opacity: 1;
+  }
+  84% {
+    transform: translateY(-3%) scale(0.99);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes cal-live-turn {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Shrinks into the middle and loses its edge as the smoke takes over. */
+@keyframes cal-live-dissolve {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+  55% {
+    opacity: 0.8;
+    transform: scale(0.42);
+    filter: blur(2px);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.1);
+    filter: blur(10px);
+  }
+}
+
+/* Out of the way once the circle is complete. */
+@keyframes cal-live-ring-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes cal-live-bloom {
+  from {
+    transform: scale(0.08);
+    opacity: 0;
+  }
+  40% {
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* A slow inhale: uses `scale`, so it stacks with the bloom's `transform`. */
+@keyframes cal-live-pulse {
+  0%,
+  100% {
+    scale: 1;
+  }
+  50% {
+    scale: 1.025;
+  }
+}
+
+@keyframes cal-live-halo {
+  0%,
+  100% {
+    opacity: 0.75;
+    scale: 1;
+  }
+  50% {
+    opacity: 1;
+    scale: 1.06;
+  }
+}
+
+@keyframes cal-live-glow-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Billowing: each puff travels far, stretches and turns. */
+@keyframes cal-live-drift {
+  0% {
+    transform: translate3d(-22%, 16%, 0) scale(0.85, 1) rotate(-25deg);
+  }
+  33% {
+    transform: translate3d(16%, -20%, 0) scale(1.25, 0.85) rotate(20deg);
+  }
+  66% {
+    transform: translate3d(26%, 8%, 0) scale(0.9, 1.25) rotate(50deg);
+  }
+  100% {
+    transform: translate3d(-10%, -16%, 0) scale(1.3, 1) rotate(-12deg);
+  }
+}
+
+@keyframes cal-live-spin-cw {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes cal-live-spin-ccw {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+/* Land on the finished frame for anyone who asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .cal-live-orb__glow,
+  .cal-live-orb__waves,
+  .cal-live-orb__layer,
+  .cal-live-orb__wave,
+  .cal-live-orb__wisp,
+  .cal-live-orb__ring,
+  .cal-live-orb__ring-arc,
+  .cal-live-orb__ring-seal,
+  .cal-live-orb__ring-flash,
+  .cal-live-orb__logo-wrap,
+  .cal-live-orb__logo-drop,
+  .cal-live-orb__logo {
+    animation: none !important;
+  }
+
+  .cal-live-orb__glow,
+  .cal-live-orb__waves {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* Same place the intro leaves off: smoke, no ring, no logo. */
+  .cal-live-orb__ring,
+  .cal-live-orb__logo-wrap {
+    opacity: 0;
+  }
+}

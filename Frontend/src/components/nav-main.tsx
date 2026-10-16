@@ -11,6 +11,7 @@ import {
 
 export type NavTo =
   | "/"
+  | "/cal-live"
   | "/workspaces"
   | "/connectors"
   | "/schedules"

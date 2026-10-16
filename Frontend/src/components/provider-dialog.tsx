@@ -19,10 +19,9 @@ import {
 } from "@/lib/provider-store"
 import type { ProviderRow } from "@/types/chat"
 
-// The same glassy panel as the provider cards, so the dialogs sit on the wave
-// the way the rest of the app does.
-const SURFACE =
-  "rounded-2xl bg-black/60 ring-white/10 backdrop-blur-xl sm:max-w-lg"
+// The dialogs sit on the same dark panel as the reference project's, with our
+// own popover token standing in for its neutral-900.
+const SURFACE = "sm:max-w-md bg-popover border border-white/10"
 
 function Field({
   label,
@@ -34,10 +33,12 @@ function Field({
   children: ReactNode
 }) {
   return (
-    <label className="grid gap-1.5">
-      <span className="text-xs font-medium text-white/70">{label}</span>
+    <label className="block">
+      <span className="mb-2 block text-sm text-white/60">{label}</span>
       {children}
-      {hint ? <span className="text-xs text-white/40">{hint}</span> : null}
+      {hint ? (
+        <span className="mt-1.5 block text-xs text-white/40">{hint}</span>
+      ) : null}
     </label>
   )
 }
@@ -64,7 +65,7 @@ function KeyField({
           placeholder="sk-…"
           autoComplete="off"
           spellCheck={false}
-          className="bg-white/5 pr-8 font-mono text-xs"
+          className="h-9 border-white/10 bg-white/5 pr-8 font-mono text-xs text-white/80 placeholder:text-white/30"
         />
         <button
           type="button"
@@ -145,7 +146,7 @@ export function AddProviderDialog({
                 onChange={(event) => setName(event.target.value)}
                 placeholder="OpenRouter"
                 autoFocus
-                className="bg-white/5"
+                className="h-9 border-white/10 bg-white/5 px-3 text-white/80 placeholder:text-white/30"
               />
             </Field>
             <Field
@@ -158,7 +159,7 @@ export function AddProviderDialog({
                 placeholder="https://api.example.com/v1"
                 autoComplete="off"
                 spellCheck={false}
-                className="bg-white/5 font-mono text-xs"
+                className="h-9 border-white/10 bg-white/5 px-3 font-mono text-xs text-white/80 placeholder:text-white/30"
               />
             </Field>
             <KeyField
@@ -266,7 +267,7 @@ export function ProviderDetailDialog({
                   <Input
                     value={name}
                     onChange={(event) => setName(event.target.value)}
-                    className="bg-white/5"
+                    className="h-9 border-white/10 bg-white/5 px-3 text-white/80 placeholder:text-white/30"
                   />
                 </Field>
                 <Field label="Base URL">
@@ -275,7 +276,7 @@ export function ProviderDetailDialog({
                     onChange={(event) => setBaseUrl(event.target.value)}
                     autoComplete="off"
                     spellCheck={false}
-                    className="bg-white/5 font-mono text-xs"
+                    className="h-9 border-white/10 bg-white/5 px-3 font-mono text-xs text-white/80 placeholder:text-white/30"
                   />
                 </Field>
               </>

@@ -97,6 +97,9 @@ func NormaliseBaseURL(raw string) string {
 	return strings.TrimRight(strings.TrimSpace(raw), "/")
 }
 
+// groqBaseURL is Groq's OpenAI-compatible endpoint.
+const groqBaseURL = "https://api.groq.com/openai/v1"
+
 // providerSpec describes how to talk to one provider's model listing.
 type providerSpec struct {
 	id       string
@@ -201,7 +204,7 @@ func (r *Registry) fetchGoogleModels(ctx context.Context, defaults []string) ([]
 }
 
 func (r *Registry) fetchGroqModels(ctx context.Context, defaults []string) ([]ModelInfo, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.groq.com/openai/v1/models", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, groqBaseURL+"/models", nil)
 	if err != nil {
 		return nil, err
 	}

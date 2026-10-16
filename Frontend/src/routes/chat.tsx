@@ -1,19 +1,20 @@
 import { createRoute } from "@tanstack/react-router"
 import { useEffect, useRef } from "react"
 
-import { MessageBubble, StreamingMessage } from "@/components/message-bubble"
+import { MessageBubble } from "@/components/message-bubble"
 import { PromptInput } from "@/components/prompt-input"
 import { MessageGroup } from "@/components/ui/message"
 import {
+  deleteReply,
   ensureChatLoaded,
+  retryReply,
   sendMessage,
   useChat,
   useChatError,
   useChatMessages,
   useHydrated,
   useIsStreaming,
-  useStreamingReasoning,
-  useStreamingText,
+  useStreamingMessage,
 } from "@/lib/chat-store"
 import { Route as rootRoute } from "@/routes/__root"
 
@@ -29,8 +30,7 @@ function ChatPage() {
   const chat = useChat(chatId)
   const messages = useChatMessages(chatId)
   const streaming = useIsStreaming(chatId)
-  const streamingText = useStreamingText(chatId)
-  const streamingReasoning = useStreamingReasoning(chatId)
+  const inFlight = useStreamingMessage(chatId)
   const error = useChatError(chatId)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -39,14 +39,24 @@ function ChatPage() {
   }, [chatId])
 
   const messageCount = messages?.length ?? 0
-  const streamingLength = streamingText.length
-  const reasoningLength = streamingReasoning.length
+
+  // Anything that grows the conversation: a message, a token, a thought, or a
+  // step's worth of tool calls.
+  const growth = [
+    messageCount,
+    inFlight?.content.length ?? 0,
+    inFlight?.reasoning?.length ?? 0,
+    (inFlight?.trace?.steps ?? []).reduce(
+      (parts, step) => parts + step.parts.length,
+      0
+    ),
+  ].join(":")
 
   // Keep the newest message in view while the reply streams in.
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [messageCount, streamingLength, reasoningLength])
+  }, [growth])
 
   if (!hydrated) {
     return (
@@ -71,14 +81,32 @@ function ChatPage() {
         className="scrollbar-thin min-h-0 flex-1 overflow-y-auto"
       >
         <MessageGroup className="mx-auto w-full max-w-[780px] gap-4 px-4 py-6">
-          {(messages ?? []).map((message) => (
-            <MessageBubble key={message.id} message={message} />
-          ))}
-          {streaming && (streamingText !== "" || streamingReasoning !== "") && (
-            <StreamingMessage
-              text={streamingText}
-              reasoning={streamingReasoning}
-            />
+          {(messages ?? []).map((message, index) => {
+            const list = messages ?? []
+            const newestReply =
+              message.role === "assistant" &&
+              index === list.length - 1 &&
+              !streaming
+
+            return (
+              <MessageBubble
+                key={message.id}
+                message={message}
+                onRetry={
+                  newestReply
+                    ? () => void retryReply(chatId, message.id)
+                    : undefined
+                }
+                onDelete={
+                  message.role === "assistant"
+                    ? () => void deleteReply(chatId, message.id)
+                    : undefined
+                }
+              />
+            )
+          })}
+          {inFlight && (
+            <MessageBubble key={inFlight.id} message={inFlight} streaming />
           )}
         </MessageGroup>
       </div>

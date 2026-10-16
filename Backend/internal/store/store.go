@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -17,27 +19,46 @@ import (
 // ErrNotFound is returned when a chat does not exist.
 var ErrNotFound = errors.New("store: not found")
 
+// ErrProtected is returned when something built in — the default workspace —
+// is asked to be removed.
+var ErrProtected = errors.New("store: this item is built in and cannot be removed")
+
 // Chat is a conversation without its messages.
 type Chat struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Provider  string `json:"provider"`
-	Model     string `json:"model"`
-	CreatedAt int64  `json:"createdAt"`
-	UpdatedAt int64  `json:"updatedAt"`
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	// Pinned chats are listed above the rest, in the order they were last used.
+	Pinned    bool  `json:"pinned"`
+	CreatedAt int64 `json:"createdAt"`
+	UpdatedAt int64 `json:"updatedAt"`
 }
 
 // Message is a single turn in a conversation. Reasoning holds the model's
 // thinking text when the provider exposes it, and ThinkingMs is how long it
 // spent producing it.
 type Message struct {
-	ID         string `json:"id"`
-	ChatID     string `json:"chatId"`
-	Role       string `json:"role"`
-	Content    string `json:"content"`
-	Reasoning  string `json:"reasoning,omitempty"`
-	ThinkingMs int64  `json:"thinkingMs,omitempty"`
-	CreatedAt  int64  `json:"createdAt"`
+	ID        string `json:"id"`
+	ChatID    string `json:"chatId"`
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	Reasoning string `json:"reasoning,omitempty"`
+	// ThinkingMs is how long the model spent thinking, when the provider
+	// reports reasoning.
+	ThinkingMs int64 `json:"thinkingMs,omitempty"`
+	// OutputTokens and DurationMs describe the finished reply, and give the
+	// UI its tokens-per-second figure.
+	OutputTokens int64 `json:"outputTokens,omitempty"`
+	DurationMs   int64 `json:"durationMs,omitempty"`
+	// Trace is the ordered record of the turn — reasoning, narration and tool
+	// calls — as JSON, and is what the UI renders inline.
+	Trace json.RawMessage `json:"trace,omitempty"`
+	// Replay is the provider transcript for the turn, kept so a later turn can
+	// replay its tool calls. It is an implementation detail and never sent to
+	// the frontend.
+	Replay json.RawMessage `json:"-"`
+	CreatedAt    int64 `json:"createdAt"`
 }
 
 // ChatDetail is a chat together with its messages.
@@ -89,6 +110,7 @@ CREATE TABLE IF NOT EXISTS chats (
 	title      TEXT NOT NULL,
 	provider   TEXT NOT NULL DEFAULT '',
 	model      TEXT NOT NULL DEFAULT '',
+	pinned     INTEGER NOT NULL DEFAULT 0,
 	created_at INTEGER NOT NULL,
 	updated_at INTEGER NOT NULL
 );
@@ -100,6 +122,10 @@ CREATE TABLE IF NOT EXISTS messages (
 	content    TEXT NOT NULL,
 	reasoning  TEXT NOT NULL DEFAULT '',
 	thinking_ms INTEGER NOT NULL DEFAULT 0,
+	output_tokens INTEGER NOT NULL DEFAULT 0,
+	duration_ms INTEGER NOT NULL DEFAULT 0,
+	trace      TEXT NOT NULL DEFAULT '',
+	replay     TEXT NOT NULL DEFAULT '',
 	created_at INTEGER NOT NULL
 );
 
@@ -118,6 +144,31 @@ CREATE TABLE IF NOT EXISTS providers (
 
 CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_chats_updated ON chats(updated_at DESC);
+
+-- One row per workspace: the folder the agent may work in, plus the label the
+-- UI shows for it. The folder itself lives inside the workspaces library.
+CREATE TABLE IF NOT EXISTS workspaces (
+	id          TEXT PRIMARY KEY,
+	name        TEXT NOT NULL,
+	description TEXT NOT NULL DEFAULT '',
+	dir         TEXT NOT NULL,
+	builtin     INTEGER NOT NULL DEFAULT 0,
+	created_at  INTEGER NOT NULL,
+	updated_at  INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_dir ON workspaces(dir);
+
+-- One row per MCP connector: the server the agent may start, and whether it is
+-- allowed to.
+CREATE TABLE IF NOT EXISTS connectors (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL,
+	command    TEXT NOT NULL,
+	enabled    INTEGER NOT NULL DEFAULT 1,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL
+);
 `
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("store: migrate: %w", err)
@@ -127,10 +178,15 @@ CREATE INDEX IF NOT EXISTS idx_chats_updated ON chats(updated_at DESC);
 	added := []struct{ table, column, ddl string }{
 		{"messages", "reasoning", "reasoning TEXT NOT NULL DEFAULT ''"},
 		{"messages", "thinking_ms", "thinking_ms INTEGER NOT NULL DEFAULT 0"},
+		{"messages", "output_tokens", "output_tokens INTEGER NOT NULL DEFAULT 0"},
+		{"messages", "duration_ms", "duration_ms INTEGER NOT NULL DEFAULT 0"},
+		{"messages", "trace", "trace TEXT NOT NULL DEFAULT ''"},
+		{"messages", "replay", "replay TEXT NOT NULL DEFAULT ''"},
 		{"providers", "name", "name TEXT NOT NULL DEFAULT ''"},
 		{"providers", "base_url", "base_url TEXT NOT NULL DEFAULT ''"},
 		{"providers", "api_key", "api_key TEXT NOT NULL DEFAULT ''"},
 		{"providers", "custom", "custom INTEGER NOT NULL DEFAULT 0"},
+		{"chats", "pinned", "pinned INTEGER NOT NULL DEFAULT 0"},
 	}
 	for _, col := range added {
 		if err := s.ensureColumn(ctx, col.table, col.column, col.ddl); err != nil {
@@ -158,6 +214,24 @@ func (s *Store) ensureColumn(ctx context.Context, table, column, ddl string) err
 	return nil
 }
 
+// jsonText stores a JSON blob as text, keeping NULL and empty apart from an
+// empty document.
+func jsonText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	return string(raw)
+}
+
+// rawJSON turns a stored column back into JSON, treating an empty column as
+// "nothing stored" rather than as an invalid document.
+func rawJSON(text string) json.RawMessage {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	return json.RawMessage(text)
+}
+
 // NewID returns a 14-digit numeric identifier, matching the format the
 // frontend uses in chat URLs.
 func NewID() string {
@@ -176,12 +250,12 @@ func NewID() string {
 	return string(b[:])
 }
 
-// ListChats returns chats ordered by most recently updated.
+// ListChats returns chats ordered by pinned first, then most recently updated.
 func (s *Store) ListChats(ctx context.Context) ([]Chat, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, title, provider, model, created_at, updated_at
+		SELECT id, title, provider, model, pinned, created_at, updated_at
 		FROM chats
-		ORDER BY updated_at DESC, rowid DESC`)
+		ORDER BY pinned DESC, updated_at DESC, rowid DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list chats: %w", err)
 	}
@@ -189,10 +263,14 @@ func (s *Store) ListChats(ctx context.Context) ([]Chat, error) {
 
 	chats := []Chat{}
 	for rows.Next() {
-		var c Chat
-		if err := rows.Scan(&c.ID, &c.Title, &c.Provider, &c.Model, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		var (
+			c      Chat
+			pinned int
+		)
+		if err := rows.Scan(&c.ID, &c.Title, &c.Provider, &c.Model, &pinned, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("store: scan chat: %w", err)
 		}
+		c.Pinned = pinned != 0
 		chats = append(chats, c)
 	}
 	return chats, rows.Err()
@@ -220,17 +298,21 @@ func (s *Store) CreateChat(ctx context.Context, providerID, model string) (Chat,
 }
 
 func (s *Store) getChat(ctx context.Context, id string) (Chat, error) {
-	var c Chat
+	var (
+		c      Chat
+		pinned int
+	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, title, provider, model, created_at, updated_at
+		SELECT id, title, provider, model, pinned, created_at, updated_at
 		FROM chats WHERE id = ?`, id).
-		Scan(&c.ID, &c.Title, &c.Provider, &c.Model, &c.CreatedAt, &c.UpdatedAt)
+		Scan(&c.ID, &c.Title, &c.Provider, &c.Model, &pinned, &c.CreatedAt, &c.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Chat{}, ErrNotFound
 	}
 	if err != nil {
 		return Chat{}, fmt.Errorf("store: get chat: %w", err)
 	}
+	c.Pinned = pinned != 0
 	return c, nil
 }
 
@@ -250,7 +332,8 @@ func (s *Store) GetChat(ctx context.Context, id string) (ChatDetail, error) {
 // ListMessages returns a chat's messages in chronological order.
 func (s *Store) ListMessages(ctx context.Context, chatID string) ([]Message, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, chat_id, role, content, reasoning, thinking_ms, created_at
+		SELECT id, chat_id, role, content, reasoning, thinking_ms,
+		       output_tokens, duration_ms, trace, replay, created_at
 		FROM messages
 		WHERE chat_id = ?
 		ORDER BY created_at ASC, rowid ASC`, chatID)
@@ -261,13 +344,20 @@ func (s *Store) ListMessages(ctx context.Context, chatID string) ([]Message, err
 
 	messages := []Message{}
 	for rows.Next() {
-		var m Message
+		var (
+			m      Message
+			trace  string
+			replay string
+		)
 		if err := rows.Scan(
 			&m.ID, &m.ChatID, &m.Role, &m.Content,
-			&m.Reasoning, &m.ThinkingMs, &m.CreatedAt,
+			&m.Reasoning, &m.ThinkingMs,
+			&m.OutputTokens, &m.DurationMs, &trace, &replay, &m.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("store: scan message: %w", err)
 		}
+		m.Trace = rawJSON(trace)
+		m.Replay = rawJSON(replay)
 		messages = append(messages, m)
 	}
 	return messages, rows.Err()
@@ -287,9 +377,13 @@ func (s *Store) AddMessage(ctx context.Context, msg Message) (Message, error) {
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO messages (id, chat_id, role, content, reasoning, thinking_ms, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		msg.ID, msg.ChatID, msg.Role, msg.Content, msg.Reasoning, msg.ThinkingMs, msg.CreatedAt,
+		INSERT INTO messages (
+			id, chat_id, role, content, reasoning, thinking_ms,
+			output_tokens, duration_ms, trace, replay, created_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		msg.ID, msg.ChatID, msg.Role, msg.Content, msg.Reasoning, msg.ThinkingMs,
+		msg.OutputTokens, msg.DurationMs, jsonText(msg.Trace), jsonText(msg.Replay), msg.CreatedAt,
 	); err != nil {
 		return Message{}, fmt.Errorf("store: insert message: %w", err)
 	}
@@ -301,6 +395,23 @@ func (s *Store) AddMessage(ctx context.Context, msg Message) (Message, error) {
 		return Message{}, fmt.Errorf("store: commit: %w", err)
 	}
 	return msg, nil
+}
+
+// DeleteMessage removes one message from a chat.
+func (s *Store) DeleteMessage(ctx context.Context, chatID, messageID string) error {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM messages WHERE id = ? AND chat_id = ?`, messageID, chatID)
+	if err != nil {
+		return fmt.Errorf("store: delete message: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: delete message: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // UpdateChat changes the title and/or the selected model of a chat. Empty
@@ -335,6 +446,19 @@ func (s *Store) UpdateChat(ctx context.Context, id, title, providerID, model str
 // RenameChat sets a chat's title.
 func (s *Store) RenameChat(ctx context.Context, id, title string) (Chat, error) {
 	return s.UpdateChat(ctx, id, title, "", "")
+}
+
+// SetChatPinned pins or unpins a chat. Pinned chats are listed above the rest.
+func (s *Store) SetChatPinned(ctx context.Context, id string, pinned bool) (Chat, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE chats SET pinned = ? WHERE id = ?`, boolToInt(pinned), id)
+	if err != nil {
+		return Chat{}, fmt.Errorf("store: pin chat: %w", err)
+	}
+	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+		return Chat{}, ErrNotFound
+	}
+	return s.getChat(ctx, id)
 }
 
 // DeleteChat removes a chat and its messages.
@@ -447,6 +571,241 @@ func (s *Store) DeleteProvider(ctx context.Context, id string) error {
 	affected, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("store: delete provider: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// Workspace records ----------------------------------------------------------
+
+// WorkspaceRecord is a workspace: the folder the agent works in, and the label
+// and description the UI shows for it.
+type WorkspaceRecord struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Dir is the folder name inside the workspaces library.
+	Dir string `json:"dir"`
+	// Builtin marks the default workspace, which cannot be deleted.
+	Builtin   bool  `json:"builtin"`
+	CreatedAt int64 `json:"createdAt"`
+	UpdatedAt int64 `json:"updatedAt"`
+}
+
+const workspaceColumns = `id, name, description, dir, builtin, created_at, updated_at`
+
+func scanWorkspace(row interface{ Scan(...any) error }) (WorkspaceRecord, error) {
+	var (
+		rec     WorkspaceRecord
+		builtin int
+	)
+	if err := row.Scan(&rec.ID, &rec.Name, &rec.Description, &rec.Dir, &builtin, &rec.CreatedAt, &rec.UpdatedAt); err != nil {
+		return WorkspaceRecord{}, err
+	}
+	rec.Builtin = builtin != 0
+	return rec, nil
+}
+
+// ListWorkspaces returns every workspace, the built-in one first.
+func (s *Store) ListWorkspaces(ctx context.Context) ([]WorkspaceRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+workspaceColumns+`
+		FROM workspaces
+		ORDER BY builtin DESC, created_at ASC, rowid ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list workspaces: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	records := []WorkspaceRecord{}
+	for rows.Next() {
+		rec, err := scanWorkspace(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan workspace: %w", err)
+		}
+		records = append(records, rec)
+	}
+	return records, rows.Err()
+}
+
+// GetWorkspace returns one workspace by id.
+func (s *Store) GetWorkspace(ctx context.Context, id string) (WorkspaceRecord, error) {
+	rec, err := scanWorkspace(s.db.QueryRowContext(ctx,
+		`SELECT `+workspaceColumns+` FROM workspaces WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return WorkspaceRecord{}, ErrNotFound
+	}
+	if err != nil {
+		return WorkspaceRecord{}, fmt.Errorf("store: get workspace: %w", err)
+	}
+	return rec, nil
+}
+
+// CreateWorkspace stores a new workspace. The ID and timestamps are assigned
+// here; the folder itself is the caller's job.
+func (s *Store) CreateWorkspace(ctx context.Context, rec WorkspaceRecord) (WorkspaceRecord, error) {
+	now := time.Now().UnixMilli()
+	rec.ID = NewID()
+	rec.CreatedAt, rec.UpdatedAt = now, now
+
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, description, dir, builtin, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		rec.ID, rec.Name, rec.Description, rec.Dir, boolToInt(rec.Builtin), rec.CreatedAt, rec.UpdatedAt,
+	); err != nil {
+		return WorkspaceRecord{}, fmt.Errorf("store: create workspace: %w", err)
+	}
+	return rec, nil
+}
+
+// EnsureWorkspace returns the workspace that uses a folder, creating its row
+// when there is none. It is how the default workspace is seeded on boot.
+func (s *Store) EnsureWorkspace(ctx context.Context, rec WorkspaceRecord) (WorkspaceRecord, error) {
+	existing, err := scanWorkspace(s.db.QueryRowContext(ctx,
+		`SELECT `+workspaceColumns+` FROM workspaces WHERE dir = ?`, rec.Dir))
+	if err == nil {
+		return existing, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return WorkspaceRecord{}, fmt.Errorf("store: find workspace %s: %w", rec.Dir, err)
+	}
+	return s.CreateWorkspace(ctx, rec)
+}
+
+// DeleteWorkspace removes a workspace row. The built-in one is refused. The
+// folder is never touched: a workspace's files are the user's, not ours.
+func (s *Store) DeleteWorkspace(ctx context.Context, id string) error {
+	rec, err := s.GetWorkspace(ctx, id)
+	if err != nil {
+		return err
+	}
+	if rec.Builtin {
+		return ErrProtected
+	}
+
+	res, err := s.db.ExecContext(ctx, `DELETE FROM workspaces WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("store: delete workspace: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: delete workspace: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// Connector records ----------------------------------------------------------
+
+// ConnectorRecord is one MCP server the agent may start: the name it is shown
+// under, and the command that runs it.
+type ConnectorRecord struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Command string `json:"command"`
+	// Enabled is whether the agent may use the connector. Nothing starts it
+	// yet, so this is the switch the UI sets and stores.
+	Enabled   bool  `json:"enabled"`
+	CreatedAt int64 `json:"createdAt"`
+	UpdatedAt int64 `json:"updatedAt"`
+}
+
+const connectorColumns = `id, name, command, enabled, created_at, updated_at`
+
+func scanConnector(row interface{ Scan(...any) error }) (ConnectorRecord, error) {
+	var (
+		rec     ConnectorRecord
+		enabled int
+	)
+	if err := row.Scan(&rec.ID, &rec.Name, &rec.Command, &enabled, &rec.CreatedAt, &rec.UpdatedAt); err != nil {
+		return ConnectorRecord{}, err
+	}
+	rec.Enabled = enabled != 0
+	return rec, nil
+}
+
+// ListConnectors returns every connector, alphabetically.
+func (s *Store) ListConnectors(ctx context.Context) ([]ConnectorRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+connectorColumns+`
+		FROM connectors
+		ORDER BY name COLLATE NOCASE ASC, rowid ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list connectors: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	records := []ConnectorRecord{}
+	for rows.Next() {
+		rec, err := scanConnector(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan connector: %w", err)
+		}
+		records = append(records, rec)
+	}
+	return records, rows.Err()
+}
+
+// CreateConnector stores a new connector, ready to be turned on.
+func (s *Store) CreateConnector(ctx context.Context, name, command string) (ConnectorRecord, error) {
+	now := time.Now().UnixMilli()
+	rec := ConnectorRecord{
+		ID:        NewID(),
+		Name:      name,
+		Command:   command,
+		Enabled:   true,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO connectors (id, name, command, enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		rec.ID, rec.Name, rec.Command, boolToInt(rec.Enabled), rec.CreatedAt, rec.UpdatedAt,
+	); err != nil {
+		return ConnectorRecord{}, fmt.Errorf("store: create connector: %w", err)
+	}
+	return rec, nil
+}
+
+// SetConnectorEnabled turns a connector on or off.
+func (s *Store) SetConnectorEnabled(ctx context.Context, id string, enabled bool) (ConnectorRecord, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE connectors SET enabled = ?, updated_at = ? WHERE id = ?`,
+		boolToInt(enabled), time.Now().UnixMilli(), id)
+	if err != nil {
+		return ConnectorRecord{}, fmt.Errorf("store: update connector: %w", err)
+	}
+	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+		return ConnectorRecord{}, ErrNotFound
+	}
+	return s.getConnector(ctx, id)
+}
+
+func (s *Store) getConnector(ctx context.Context, id string) (ConnectorRecord, error) {
+	rec, err := scanConnector(s.db.QueryRowContext(ctx,
+		`SELECT `+connectorColumns+` FROM connectors WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return ConnectorRecord{}, ErrNotFound
+	}
+	if err != nil {
+		return ConnectorRecord{}, fmt.Errorf("store: get connector: %w", err)
+	}
+	return rec, nil
+}
+
+// DeleteConnector removes a connector.
+func (s *Store) DeleteConnector(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM connectors WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("store: delete connector: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: delete connector: %w", err)
 	}
 	if affected == 0 {
 		return ErrNotFound

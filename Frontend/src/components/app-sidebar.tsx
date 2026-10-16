@@ -2,6 +2,7 @@ import * as React from "react"
 import { Link } from "@tanstack/react-router"
 import {
   AddCircleHalfDotIcon,
+  AiSpeechIcon,
   ChartRelationshipIcon,
   Folder01Icon,
   Settings02Icon,
@@ -34,6 +35,11 @@ const data = {
       title: "New Chat",
       to: "/",
       icon: AddCircleHalfDotIcon,
+    },
+    {
+      title: "Cal Live",
+      to: "/cal-live",
+      icon: AiSpeechIcon,
     },
     {
       title: "Workspaces",

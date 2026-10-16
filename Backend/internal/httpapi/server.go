@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/ai"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
 )
@@ -19,15 +20,24 @@ type Deps struct {
 	Store        *store.Store
 	Registry     *ai.Registry
 	SystemPrompt string
-	Logger       *slog.Logger
+	// Library holds the workspace folders. When it is nil the workspace
+	// endpoints report unavailable.
+	Library *agent.Library
+	// Workspace is the project the agent may read and change — the workspace a
+	// chat uses until it picks one of its own. When it is nil the chat runs
+	// without tools.
+	Workspace *agent.Workspace
+	Logger    *slog.Logger
 }
 
 // Server holds the HTTP handlers.
 type Server struct {
-	store    *store.Store
-	registry *ai.Registry
-	system   string
-	log      *slog.Logger
+	store     *store.Store
+	registry  *ai.Registry
+	system    string
+	library   *agent.Library
+	workspace *agent.Workspace
+	log       *slog.Logger
 }
 
 // New builds the fully wired HTTP handler.
@@ -38,10 +48,12 @@ func New(deps Deps) http.Handler {
 	}
 
 	s := &Server{
-		store:    deps.Store,
-		registry: deps.Registry,
-		system:   deps.SystemPrompt,
-		log:      log,
+		store:     deps.Store,
+		registry:  deps.Registry,
+		system:    deps.SystemPrompt,
+		library:   deps.Library,
+		workspace: deps.Workspace,
+		log:       log,
 	}
 
 	mux := http.NewServeMux()
@@ -51,12 +63,20 @@ func New(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/providers", s.handleCreateProvider)
 	mux.HandleFunc("PUT /api/providers/{providerID}", s.handleUpdateProvider)
 	mux.HandleFunc("DELETE /api/providers/{providerID}", s.handleDeleteProvider)
+	mux.HandleFunc("GET /api/workspaces", s.handleListWorkspaces)
+	mux.HandleFunc("POST /api/workspaces", s.handleCreateWorkspace)
+	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}", s.handleDeleteWorkspace)
+	mux.HandleFunc("GET /api/connectors", s.handleListConnectors)
+	mux.HandleFunc("POST /api/connectors", s.handleCreateConnector)
+	mux.HandleFunc("PATCH /api/connectors/{connectorID}", s.handleUpdateConnector)
+	mux.HandleFunc("DELETE /api/connectors/{connectorID}", s.handleDeleteConnector)
 	mux.HandleFunc("GET /api/chats", s.handleListChats)
 	mux.HandleFunc("POST /api/chats", s.handleCreateChat)
 	mux.HandleFunc("GET /api/chats/{chatID}", s.handleGetChat)
 	mux.HandleFunc("PATCH /api/chats/{chatID}", s.handleUpdateChat)
 	mux.HandleFunc("DELETE /api/chats/{chatID}", s.handleDeleteChat)
 	mux.HandleFunc("POST /api/chats/{chatID}/messages", s.handleSendMessage)
+	mux.HandleFunc("DELETE /api/chats/{chatID}/messages/{messageID}", s.handleDeleteMessage)
 
 	return s.withCORS(s.withLogging(mux))
 }

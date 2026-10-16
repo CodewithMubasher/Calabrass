@@ -2,17 +2,18 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zendev-sh/goai"
 	"github.com/zendev-sh/goai/provider"
 	"github.com/zendev-sh/goai/provider/compat"
 	"github.com/zendev-sh/goai/provider/google"
-	"github.com/zendev-sh/goai/provider/groq"
 )
 
 // ErrUnsupportedProvider is returned for a provider the backend does not serve.
@@ -22,6 +23,10 @@ var ErrUnsupportedProvider = errors.New("ai: unsupported provider")
 type Message struct {
 	Role    string
 	Content string
+	// Replay is the provider transcript a turn produced, stored as JSON. When
+	// set it is sent back verbatim instead of Content, so a turn that ran tools
+	// is replayed with its tool calls and results intact.
+	Replay json.RawMessage
 }
 
 // Registry resolves provider IDs to GoAI language models.
@@ -315,7 +320,18 @@ func (r *Registry) resolve(ctx context.Context, providerID, model string) (provi
 		case ProviderGoogle:
 			return google.Chat(model, google.WithAPIKey(p.APIKey)), nil
 		case ProviderGroq:
-			return groq.Chat(model, groq.WithAPIKey(p.APIKey)), nil
+			// Groq goes through the generic OpenAI-compatible model rather than
+			// groq.Chat because that one always replays the model's reasoning
+			// back as `reasoning_content`, and Groq rejects that field outright
+			// for the gpt-oss models. With tools enabled the second step of the
+			// loop would fail. Everything else stays the same: Groq's endpoint,
+			// and max_completion_tokens, which Groq prefers to max_tokens.
+			return compat.Chat(model,
+				compat.WithProviderID(ProviderGroq),
+				compat.WithBaseURL(groqBaseURL),
+				compat.WithAPIKey(p.APIKey),
+				compat.WithMaxCompletionTokens(true),
+			), nil
 		}
 	}
 
@@ -331,41 +347,86 @@ type Usage struct {
 
 // Reply is the outcome of a completion. Reasoning is the model's thinking text
 // when the provider exposes it, and ThinkingMs is how long it spent producing
-// it.
+// it. Trace is the ordered record of the turn, and Replay is the provider
+// transcript a later turn needs to keep the model's tool context.
 type Reply struct {
 	Text       string
 	Reasoning  string
 	ThinkingMs int64
 	Usage      Usage
+	Trace      Trace
+	Replay     json.RawMessage
+	// Steps is how many model turns the harness loop used, and StepsExhausted
+	// reports that it stopped because MaxSteps ran out mid-task.
+	Steps          int
+	StepsExhausted bool
 }
 
-// Handlers receives incremental output from a streaming completion. Both
-// callbacks are optional; returning an error aborts the stream.
+// StreamRequest is one turn of generation: which model to ask, the conversation
+// so far, and the tools the model may call. With no tools it is a plain
+// completion.
+type StreamRequest struct {
+	ProviderID string
+	Model      string
+	System     string
+	Messages   []Message
+	Tools      []goai.Tool
+	// MaxSteps bounds the harness loop. Zero or less means a single step.
+	MaxSteps int
+}
+
+// Handlers receives incremental output from a streaming completion. All
+// callbacks are optional; returning an error aborts the stream. OnTrace is
+// called with the whole trace whenever it changes, so the caller can forward a
+// snapshot and keep the last one.
 type Handlers struct {
 	OnText      func(delta string) error
 	OnReasoning func(delta string) error
+	OnTrace     func(trace Trace) error
 }
 
-// Stream runs a single completion, calling the handlers for every text and
-// reasoning delta as it arrives. A non-nil error may still come with partial
-// text, which callers are expected to persist so a cancelled or failed turn is
-// not silently lost.
-func (r *Registry) Stream(
-	ctx context.Context,
-	providerID, model, system string,
-	messages []Message,
-	handlers Handlers,
-) (Reply, error) {
-	lm, err := r.resolve(ctx, providerID, model)
+// Stream runs one turn, calling the handlers for every text and reasoning delta
+// as it arrives and for each change to the trace. A non-nil error may still
+// come with partial text and a partial trace, which callers are expected to
+// persist so a cancelled or failed turn is not silently lost.
+func (r *Registry) Stream(ctx context.Context, req StreamRequest, handlers Handlers) (Reply, error) {
+	lm, err := r.resolve(ctx, req.ProviderID, req.Model)
 	if err != nil {
 		return Reply{}, err
 	}
 
-	opts := make([]goai.Option, 0, 3)
-	if strings.TrimSpace(system) != "" {
-		opts = append(opts, goai.WithSystem(system))
+	opts := make([]goai.Option, 0, 8)
+	if strings.TrimSpace(req.System) != "" {
+		opts = append(opts, goai.WithSystem(req.System))
 	}
-	opts = append(opts, goai.WithMessages(toGoAIMessages(messages)...))
+	opts = append(opts, goai.WithMessages(toGoAIMessages(req.Messages)...))
+
+	// Tool results are reported by the harness hook, which runs on the loop's
+	// goroutine while this one is blocked reading chunks. They are queued here
+	// and folded into the trace between chunks, so every trace mutation and
+	// every write to the client happens on one goroutine.
+	var (
+		resultsMu sync.Mutex
+		results   []goai.ToolCallInfo
+	)
+	if len(req.Tools) > 0 {
+		steps := req.MaxSteps
+		if steps < 1 {
+			steps = 1
+		}
+		opts = append(opts,
+			goai.WithTools(req.Tools...),
+			goai.WithMaxSteps(steps),
+			// One tool at a time keeps the trace in the order the model asked
+			// for, and keeps the tools off each other's toes.
+			goai.WithSequentialToolExecution(),
+			goai.WithOnToolCall(func(info goai.ToolCallInfo) {
+				resultsMu.Lock()
+				results = append(results, info)
+				resultsMu.Unlock()
+			}),
+		)
+	}
 
 	stream, err := goai.StreamText(ctx, lm, opts...)
 	if err != nil {
@@ -378,12 +439,53 @@ func (r *Registry) Stream(
 		streamErr   error
 		startedAt   = time.Now()
 		thinkingEnd time.Time
+		builder     traceBuilder
 	)
+
+	// emit publishes the trace so far. It is called on every change the user
+	// can see: a tool call, a finished step, a tool's result.
+	emit := func() error {
+		if handlers.OnTrace == nil {
+			return nil
+		}
+		return handlers.OnTrace(builder.trace.Clone())
+	}
+
+	// drain folds any tool outcome the hook has queued into the trace, and
+	// reports whether anything changed.
+	drain := func() bool {
+		resultsMu.Lock()
+		pending := results
+		results = nil
+		resultsMu.Unlock()
+		if len(pending) == 0 {
+			return false
+		}
+		outcomes := make([]ToolOutcome, 0, len(pending))
+		for _, info := range pending {
+			outcome := ToolOutcome{
+				CallID:     info.ToolCallID,
+				Output:     info.Output,
+				DurationMs: info.Duration.Milliseconds(),
+			}
+			switch {
+			case info.Error != nil:
+				outcome.Output = ""
+				outcome.Error = info.Error.Error()
+			case info.Skipped:
+				outcome.Output = ""
+				outcome.Status = StatusSkipped
+			}
+			outcomes = append(outcomes, outcome)
+		}
+		builder.toolResults(outcomes)
+		return true
+	}
 
 	// current assembles a reply from whatever has arrived so far, so partial
 	// output survives an abort or a provider failure.
 	current := func() Reply {
-		out := Reply{Text: text.String(), Reasoning: reasoning.String()}
+		out := Reply{Text: text.String(), Reasoning: reasoning.String(), Trace: builder.trace.Clone()}
 		if out.Reasoning != "" && !thinkingEnd.IsZero() {
 			out.ThinkingMs = thinkingEnd.Sub(startedAt).Milliseconds()
 		}
@@ -391,12 +493,20 @@ func (r *Registry) Stream(
 	}
 
 	for chunk := range stream.Stream() {
+		// A tool that has just run reports here, before whatever the model
+		// does next.
+		if drain() {
+			if err := emit(); err != nil {
+				return current(), err
+			}
+		}
 		switch chunk.Type {
 		case provider.ChunkText:
 			if chunk.Text == "" {
 				continue
 			}
 			text.WriteString(chunk.Text)
+			builder.append(PartText, chunk.Text)
 			if handlers.OnText != nil {
 				if err := handlers.OnText(chunk.Text); err != nil {
 					return current(), err
@@ -408,8 +518,31 @@ func (r *Registry) Stream(
 			}
 			reasoning.WriteString(chunk.Text)
 			thinkingEnd = time.Now()
+			builder.append(PartReasoning, chunk.Text)
 			if handlers.OnReasoning != nil {
 				if err := handlers.OnReasoning(chunk.Text); err != nil {
+					return current(), err
+				}
+			}
+		case provider.ChunkToolCallStreamStart:
+			builder.toolStart(chunk.ToolCallID, chunk.ToolName)
+			if err := emit(); err != nil {
+				return current(), err
+			}
+		case provider.ChunkToolCall:
+			builder.toolInput(chunk.ToolCallID, chunk.ToolName, chunk.ToolInput)
+			if err := emit(); err != nil {
+				return current(), err
+			}
+		case provider.ChunkStepFinish:
+			// goai tags its own step boundaries "goai" and hands over the
+			// step's ordered parts. Tool results do not come through here: the
+			// chunk that carries them is consumed by the stream's own reducer,
+			// so the harness hook is what reports them (see drain above).
+			if stepSource(chunk.Metadata) == "goai" {
+				builder.fromContent(chunk.Content)
+				builder.stepFinish(string(chunk.FinishReason))
+				if err := emit(); err != nil {
 					return current(), err
 				}
 			}
@@ -427,8 +560,19 @@ func (r *Registry) Stream(
 		return current(), err
 	}
 
+	// The loop's own record is authoritative, so anything the live stream did
+	// not report is folded in before the last snapshot goes out.
+	result := stream.Result()
+	if result != nil {
+		drain()
+		builder.applyFinal(result.Steps)
+	}
+	if err := emit(); err != nil {
+		return current(), err
+	}
+
 	reply := current()
-	if result := stream.Result(); result != nil {
+	if result != nil {
 		// TextResult.Text includes reasoning tokens, so only fall back to it
 		// when nothing was accumulated from the text deltas. Steps[n].Text is
 		// text-only and is the safer fallback.
@@ -454,6 +598,15 @@ func (r *Registry) Stream(
 			OutputTokens: result.TotalUsage.OutputTokens,
 			Model:        result.Response.Model,
 		}
+		reply.Steps = len(result.Steps)
+		reply.StepsExhausted = result.StepsExhausted
+		// The replay transcript is only needed when tools were in play: without
+		// them the plain role/content history says the same thing.
+		if len(req.Tools) > 0 && len(result.ResponseMessages) > 0 {
+			if data, err := json.Marshal(result.ResponseMessages); err == nil {
+				reply.Replay = data
+			}
+		}
 	}
 	return reply, nil
 }
@@ -461,6 +614,16 @@ func (r *Registry) Stream(
 func toGoAIMessages(messages []Message) []provider.Message {
 	out := make([]provider.Message, 0, len(messages))
 	for _, m := range messages {
+		// A turn that ran tools replays its provider transcript verbatim: tool
+		// calls and their results have to survive, and the plain text cannot
+		// carry them.
+		if len(m.Replay) > 0 {
+			var replayed []provider.Message
+			if err := json.Unmarshal(m.Replay, &replayed); err == nil && len(replayed) > 0 {
+				out = append(out, replayed...)
+				continue
+			}
+		}
 		content := strings.TrimSpace(m.Content)
 		if content == "" {
 			continue

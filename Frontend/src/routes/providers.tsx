@@ -3,33 +3,40 @@ import { cn } from "cn"
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react"
 import {
   Add01Icon,
+  BotIcon,
   ChatGptIcon,
   ClaudeIcon,
   DeepseekIcon,
   GoogleGeminiIcon,
   Grok02Icon,
   MistralIcon,
-  Search01Icon,
+  MoreHorizontalIcon,
+  PowerIcon,
+  PowerOffIcon,
   ThreeDScaleIcon,
 } from "@hugeicons/core-free-icons"
 import { createRoute } from "@tanstack/react-router"
 
+import {
+  PageEmpty,
+  PageLoading,
+  PageShell,
+  SearchInput,
+} from "@/components/page-shell"
 import { Button } from "@/components/ui/button"
 import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Switch } from "@/components/ui/switch"
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   AddProviderDialog,
   ProviderDetailDialog,
 } from "@/components/provider-dialog"
 import {
+  clearProvidersError,
+  deleteProvider,
   loadProviders,
   setProviderEnabled,
   useProvidersState,
@@ -54,34 +61,25 @@ const PROVIDER_ICONS: Record<string, IconSvgElement> = {
   deepseek: DeepseekIcon,
 }
 
-/** The muted middle line of a card. Empty when there is nothing to warn about. */
+/** The middle line of a card: the endpoint, or why there is not one. */
 function describe(provider: ProviderRow) {
-  if (!provider.connected) {
-    return provider.custom
-      ? "No base URL configured"
-      : "No API key configured"
-  }
-  if (!provider.enabled) return "Turned off — its models are hidden"
-  if (provider.modelCount === 0) {
-    return provider.custom
-      ? "No chat models found at this endpoint"
-      : "No chat models available for this key"
-  }
-  return ""
+  if (provider.baseUrl) return provider.baseUrl
+  if (!provider.connected) return "No base URL configured"
+  return "Built in"
 }
 
-/** The status dot: green when usable, amber when off, grey when unconfigured. */
+/** The chip: green when the provider can be used, grey when it cannot. */
 function statusOf(provider: ProviderRow) {
   if (!provider.connected) {
-    return {
-      label: provider.custom ? "Not configured" : "No API key",
-      dot: "bg-white/25",
-    }
+    return { label: "No key", chip: "bg-white/5 text-white/30" }
   }
   if (!provider.enabled) {
-    return { label: "Off", dot: "bg-amber-400" }
+    return { label: "Inactive", chip: "bg-white/5 text-white/30" }
   }
-  return { label: "Connected", dot: "bg-emerald-400" }
+  return {
+    label: "Active",
+    chip: "bg-emerald-500/10 text-emerald-400",
+  }
 }
 
 function ProvidersPage() {
@@ -89,10 +87,22 @@ function ProvidersPage() {
   const [query, setQuery] = useState("")
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<ProviderRow | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   useEffect(() => {
     void loadProviders()
   }, [])
+
+  const remove = async (providerId: string) => {
+    setActionError(null)
+    try {
+      await deleteProvider(providerId)
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Could not remove the provider."
+      )
+    }
+  }
 
   const needle = query.trim().toLowerCase()
   const visible = needle
@@ -100,137 +110,157 @@ function ProvidersPage() {
     : providers
 
   return (
-    <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto w-full max-w-4xl px-4 py-6">
-        <div className="flex items-center justify-between gap-4">
-          <h1 className="min-w-0 truncate text-xl font-semibold text-white">
-            Providers
-          </h1>
-          <div className="flex shrink-0 items-center gap-2">
-            <div className="relative">
-              <HugeiconsIcon
-                icon={Search01Icon}
-                strokeWidth={2}
-                className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-white/40"
-              />
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search providers"
-                aria-label="Search providers"
-                className="w-56 pl-8"
-              />
-            </div>
-            <Button className="gap-1.5" onClick={() => setAdding(true)}>
-              <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
-              New provider
-            </Button>
-          </div>
-        </div>
-
-        <p className="mt-1 text-sm text-white/50">
-          Connect the model providers Calabrass can use.
-        </p>
-
-        {error ? (
-          <p className="mt-4 text-sm text-red-400">{error}</p>
-        ) : null}
-
-        {loading && providers.length === 0 ? (
-          <p className="mt-6 text-sm text-white/40">Loading providers…</p>
-        ) : null}
-
-        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+    <PageShell
+      title="Providers"
+      subtitle="Save an API key for any AI provider and use its models"
+      error={actionError ?? error}
+      onDismissError={() => {
+        setActionError(null)
+        clearProvidersError()
+      }}
+      actions={
+        <>
+          <SearchInput
+            value={query}
+            onChange={setQuery}
+            placeholder="Search providers..."
+          />
+          <Button
+            variant="default"
+            className="gap-2 rounded-full"
+            onClick={() => setAdding(true)}
+          >
+            <HugeiconsIcon icon={Add01Icon} strokeWidth={2} className="size-4" />
+            <span>New provider</span>
+          </Button>
+        </>
+      }
+    >
+      {loading && providers.length === 0 ? (
+        <PageLoading />
+      ) : visible.length === 0 ? (
+        <PageEmpty
+          icon={BotIcon}
+          title={
+            needle ? "No providers match your search" : "No providers yet"
+          }
+          hint={needle ? undefined : "Add a provider to start using AI models"}
+        />
+      ) : (
+        <div className="grid grid-cols-2 gap-4">
           {visible.map((provider) => {
             const status = statusOf(provider)
-            const description = describe(provider)
-            const busy = pending.includes(provider.id)
 
             return (
-              <Card
+              <div
                 key={provider.id}
-                // Clicking anywhere on the card opens its detail dialog, so it
-                // has to behave like a button.
-                role="button"
-                tabIndex={0}
-                aria-label={`Open ${provider.name}`}
-                onClick={() => setEditing(provider)}
-                onKeyDown={(event) => {
-                  if (event.key !== "Enter" && event.key !== " ") return
-                  event.preventDefault()
-                  setEditing(provider)
-                }}
-                className={cn(
-                  // The prompt input on the home screen, verbatim: a
-                  // translucent white wash with a hairline border.
-                  "cursor-pointer rounded-2xl border border-white/10 bg-white/5 backdrop-blur-[2px] transition-colors",
-                  // Ring comes from the Card primitive; the border replaces it.
-                  "ring-0 hover:border-white/30",
-                  "focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:outline-none",
-                  !provider.enabled && "opacity-70"
-                )}
+                className="relative flex flex-col rounded-2xl border border-white/10 bg-white/5 p-4 transition-colors hover:border-white/20"
               >
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2.5 text-white">
-                    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/5 ring-1 ring-white/10">
+                <div className="flex items-start justify-between">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-white/5">
                       <HugeiconsIcon
                         icon={PROVIDER_ICONS[provider.id] ?? ThreeDScaleIcon}
                         strokeWidth={1.8}
-                        className="size-4.5"
+                        className="size-4 text-white/50"
                       />
-                    </span>
-                    {provider.name}
-                  </CardTitle>
-                  <CardAction
-                    // The switch is its own control: toggling it must not open
-                    // the detail dialog.
-                    onClick={(event) => event.stopPropagation()}
-                    onKeyDown={(event) => event.stopPropagation()}
-                  >
-                    <Switch
-                      checked={provider.enabled}
-                      disabled={busy}
-                      onCheckedChange={(next) =>
-                        void setProviderEnabled(provider.id, next)
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="truncate text-sm font-medium text-white/90">
+                        {provider.name}
+                      </h3>
+                      <p className="mt-0.5 truncate font-mono text-xs text-white/40">
+                        {describe(provider)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void setProviderEnabled(provider.id, !provider.enabled)
                       }
+                      disabled={pending.includes(provider.id)}
+                      title={provider.enabled ? "Disable" : "Enable"}
                       aria-label={`Turn ${provider.name} ${provider.enabled ? "off" : "on"}`}
-                    />
-                  </CardAction>
-                  {description !== "" ? (
-                    <CardDescription className="text-white/45">
-                      {description}
-                    </CardDescription>
-                  ) : null}
-                </CardHeader>
-                <CardContent className="flex items-center gap-2 text-xs text-white/45">
-                  <span className={cn("size-1.5 rounded-full", status.dot)} />
-                  <span>{status.label}</span>
-                  {/* Its models are gone from the picker while it is off, so
-                      there is nothing to count here either. */}
-                  {provider.enabled && provider.modelCount > 0 ? (
-                    <span className="ml-auto">
-                      {provider.modelCount} chat models
-                    </span>
-                  ) : null}
-                </CardContent>
-              </Card>
+                      className={cn(
+                        "cursor-pointer rounded-lg p-1.5 transition-colors disabled:pointer-events-none disabled:opacity-50",
+                        provider.enabled
+                          ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
+                          : "bg-white/5 text-white/30 hover:bg-white/10"
+                      )}
+                    >
+                      <HugeiconsIcon
+                        icon={provider.enabled ? PowerIcon : PowerOffIcon}
+                        strokeWidth={2}
+                        className="size-3.5"
+                      />
+                    </button>
+
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        render={
+                          <button
+                            aria-label={`${provider.name} actions`}
+                            className="cursor-pointer rounded-lg p-1 transition-colors hover:bg-white/10"
+                          />
+                        }
+                      >
+                        <HugeiconsIcon
+                          icon={MoreHorizontalIcon}
+                          strokeWidth={2}
+                          className="size-4 text-white/50"
+                        />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onClick={() => setEditing(provider)}
+                        >
+                          <span>Edit</span>
+                        </DropdownMenuItem>
+                        {provider.custom ? (
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onClick={() => void remove(provider.id)}
+                          >
+                            <span>Delete</span>
+                          </DropdownMenuItem>
+                        ) : null}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
+
+                <div className="mt-auto flex flex-wrap items-center gap-2 pt-3">
+                  <span
+                    className={cn(
+                      "rounded-full px-1.5 py-0.5 text-[10px]",
+                      status.chip
+                    )}
+                  >
+                    {status.label}
+                  </span>
+                  <span
+                    className="max-w-40 truncate font-mono text-[11px] text-white/40"
+                    title={provider.defaultModel || "No default model"}
+                  >
+                    {provider.defaultModel || "No default model"}
+                  </span>
+                  <span className="ml-auto font-mono text-[11px] text-white/30">
+                    {provider.modelCount} models
+                  </span>
+                </div>
+              </div>
             )
           })}
-
-          {!loading && visible.length === 0 ? (
-            <p className="col-span-full py-10 text-center text-sm text-white/40">
-              {needle
-                ? `No providers match “${query.trim()}”.`
-                : "No providers are available yet."}
-            </p>
-          ) : null}
         </div>
-      </div>
+      )}
 
       {adding ? (
         <AddProviderDialog
-          onOpenChange={(open) => {
-            if (!open) setAdding(false)
+          onOpenChange={(next) => {
+            if (!next) setAdding(false)
           }}
         />
       ) : null}
@@ -238,11 +268,11 @@ function ProvidersPage() {
         <ProviderDetailDialog
           key={editing.id}
           provider={editing}
-          onOpenChange={(open) => {
-            if (!open) setEditing(null)
+          onOpenChange={(next) => {
+            if (!next) setEditing(null)
           }}
         />
       ) : null}
-    </div>
+    </PageShell>
   )
 }

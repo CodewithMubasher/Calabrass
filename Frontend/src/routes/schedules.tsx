@@ -1,5 +1,7 @@
+import { TimeScheduleIcon } from "@hugeicons/core-free-icons"
 import { createRoute } from "@tanstack/react-router"
 
+import { PageEmpty, PageShell } from "@/components/page-shell"
 import { Route as rootRoute } from "@/routes/__root"
 
 export const Route = createRoute({
@@ -9,5 +11,16 @@ export const Route = createRoute({
 })
 
 function SchedulesPage() {
-  return <div className="flex-1" />
+  return (
+    <PageShell
+      title="Schedules"
+      subtitle="Run prompts and tools on a timer"
+    >
+      <PageEmpty
+        icon={TimeScheduleIcon}
+        title="Nothing scheduled yet"
+        hint="Schedules are not available yet"
+      />
+    </PageShell>
+  )
 }

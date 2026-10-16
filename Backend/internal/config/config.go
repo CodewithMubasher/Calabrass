@@ -15,6 +15,10 @@ type Config struct {
 	GeminiKey    string
 	GroqKey      string
 	SystemPrompt string
+	// WorkspacesDir is the folder that holds every workspace the agent may
+	// read and change — <project>/workspace by default. Empty means "discover
+	// the project from the working directory".
+	WorkspacesDir string
 	// ProviderPriority is the order in which providers are offered and picked
 	// as a fallback, e.g. ["groq", "google"].
 	ProviderPriority []string
@@ -31,6 +35,9 @@ func Load() Config {
 		GeminiKey:    firstNonEmpty(os.Getenv("GOOGLE_GENERATIVE_AI_API_KEY"), os.Getenv("GEMINI_API_KEY"), os.Getenv("GOOGLE_API_KEY")),
 		GroqKey:      os.Getenv("GROQ_API_KEY"),
 		SystemPrompt: envOr("CALABRASS_SYSTEM_PROMPT", defaultSystemPrompt),
+		// Empty means the workspaces folder is discovered from the working
+		// directory. CALABRASS_WORKSPACE is the older name for it.
+		WorkspacesDir: firstNonEmpty(os.Getenv("CALABRASS_WORKSPACES_DIR"), os.Getenv("CALABRASS_WORKSPACE")),
 		// Groq first: it is the provider that is verified working by default.
 		ProviderPriority: splitList(envOr("CALABRASS_PROVIDER_PRIORITY", "groq,google")),
 	}

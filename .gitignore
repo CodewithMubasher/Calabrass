@@ -34,3 +34,6 @@ pnpm-debug.log*
 # Go backend
 Backend/data/
 Backend/*.exe
+
+# The agent's workspaces: the files it creates while working
+/workspace/

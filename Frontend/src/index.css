@@ -180,6 +180,43 @@
       animation: none;
     }
   }
+
+  /*
+   * The folded line of a tool run that is still going: the text itself is
+   * painted with a moving highlight, so a glance says "still working" without
+   * a spinner beside it.
+   */
+  .tl-shimmer {
+    background: linear-gradient(
+      90deg,
+      oklch(1 0 0 / 50%) 0%,
+      oklch(1 0 0 / 80%) 50%,
+      oklch(1 0 0 / 50%) 100%
+    );
+    background-size: 200% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: tl-shimmer 1.5s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tl-shimmer {
+      /* Without the sweep, transparent text would read as nothing at all. */
+      background: none;
+      -webkit-text-fill-color: currentColor;
+      animation: none;
+    }
+  }
+}
+
+@keyframes tl-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
 }
 
 @keyframes caret-blink {

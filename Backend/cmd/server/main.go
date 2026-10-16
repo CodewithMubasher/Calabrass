@@ -7,9 +7,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/ai"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/config"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/httpapi"
@@ -57,10 +60,49 @@ func main() {
 		log.Warn("no usable AI provider; set GROQ_API_KEY or GOOGLE_GENERATIVE_AI_API_KEY in Backend/.env, or add a provider on the Providers page")
 	}
 
+	// The harness works inside one workspace folder at a time, and every
+	// workspace lives inside a single library directory: <project>/workspace
+	// unless it is configured elsewhere. A missing library is not fatal: chat
+	// still works, it just has no tools.
+	libraryDir := cfg.WorkspacesDir
+	if strings.TrimSpace(libraryDir) == "" {
+		libraryDir = filepath.Join(agent.DiscoverRoot(""), "workspace")
+	}
+
+	var (
+		library   *agent.Library
+		workspace *agent.Workspace
+	)
+	library, err = agent.NewLibrary(libraryDir)
+	if err != nil {
+		log.Warn("agent tools are off: no usable workspaces folder", "dir", libraryDir, "error", err)
+		library = nil
+	} else {
+		// The default workspace is the one a chat works in until it picks its
+		// own, so it exists from the first boot.
+		workspace, err = library.Ensure(agent.DefaultWorkspaceName)
+		if err != nil {
+			log.Warn("agent tools are off: the default workspace is unusable", "error", err)
+			workspace = nil
+		} else {
+			log.Info("agent workspace", "root", workspace.Root(), "library", library.Root())
+		}
+		if _, err := st.EnsureWorkspace(context.Background(), store.WorkspaceRecord{
+			Name:        "Default",
+			Description: "Where chats work until they pick a workspace of their own.",
+			Dir:         agent.DefaultWorkspaceName,
+			Builtin:     true,
+		}); err != nil {
+			log.Warn("could not record the default workspace", "error", err)
+		}
+	}
+
 	handler := httpapi.New(httpapi.Deps{
 		Store:        st,
 		Registry:     registry,
 		SystemPrompt: cfg.SystemPrompt,
+		Library:      library,
+		Workspace:    workspace,
 		Logger:       log,
 	})
 

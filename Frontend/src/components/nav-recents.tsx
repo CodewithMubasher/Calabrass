@@ -1,15 +1,22 @@
+import { useState } from "react"
 import { Link, useLocation, useNavigate } from "@tanstack/react-router"
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
   Chat01Icon,
-  EllipsisVerticalIcon,
-  FilterHorizontalIcon,
+  Delete02Icon,
+  FolderOpenIcon,
+  MoreHorizontalIcon,
+  PencilEdit02Icon,
+  PinIcon,
+  PinOffIcon,
 } from "@hugeicons/core-free-icons"
 
+import { RenameChatDialog } from "@/components/rename-chat-dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -20,15 +27,15 @@ import {
   SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
-  useSidebar,
 } from "@/components/ui/sidebar"
-import { deleteChat, useChats } from "@/lib/chat-store"
+import { deleteChat, togglePinChat, useChats } from "@/lib/chat-store"
+import type { Chat } from "@/types/chat"
 
 export function NavRecents() {
-  const { isMobile } = useSidebar()
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const chats = useChats()
+  const [renaming, setRenaming] = useState<Chat | null>(null)
 
   const handleDelete = (chatId: string) => {
     void deleteChat(chatId)
@@ -41,7 +48,7 @@ export function NavRecents() {
     <SidebarGroup className="group-data-[collapsible=icon]:hidden">
       <SidebarGroupLabel>Recents</SidebarGroupLabel>
       <SidebarGroupAction aria-label="Filter recents" title="Filter">
-        <HugeiconsIcon icon={FilterHorizontalIcon} strokeWidth={2} />
+        <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
       </SidebarGroupAction>
       <SidebarMenu>
         {chats.length === 0 && (
@@ -58,40 +65,67 @@ export function NavRecents() {
               isActive={pathname === `/chat/${chat.id}`}
               render={<Link to="/chat/$chatId" params={{ chatId: chat.id }} />}
             >
-              <HugeiconsIcon icon={Chat01Icon} strokeWidth={2} />
-              <span>{chat.title}</span>
+              <HugeiconsIcon
+                icon={chat.pinned ? PinIcon : Chat01Icon}
+                strokeWidth={2}
+                className="shrink-0"
+              />
+              <span className="truncate">{chat.title}</span>
             </SidebarMenuButton>
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
                   <SidebarMenuAction showOnHover>
-                    <HugeiconsIcon icon={EllipsisVerticalIcon} strokeWidth={2} />
+                    <HugeiconsIcon
+                      icon={MoreHorizontalIcon}
+                      strokeWidth={2}
+                      className="size-4"
+                    />
                     <span className="sr-only">More</span>
                   </SidebarMenuAction>
                 }
               />
-              <DropdownMenuContent
-                className="w-48 rounded-lg"
-                side={isMobile ? "bottom" : "right"}
-                align={isMobile ? "end" : "start"}
-              >
-                <DropdownMenuItem>
+              <DropdownMenuContent align="end" sideOffset={4}>
+                <DropdownMenuItem onClick={() => setRenaming(chat)}>
+                  <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
                   <span>Rename</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem>
-                  <span>Star</span>
+                <DropdownMenuItem
+                  onClick={() => void togglePinChat(chat.id, !chat.pinned)}
+                >
+                  <HugeiconsIcon
+                    icon={chat.pinned ? PinOffIcon : PinIcon}
+                    strokeWidth={2}
+                  />
+                  <span>{chat.pinned ? "Unpin chat" : "Pin chat"}</span>
                 </DropdownMenuItem>
+                <DropdownMenuItem>
+                  <HugeiconsIcon icon={FolderOpenIcon} strokeWidth={2} />
+                  <span>Add to project</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem
                   variant="destructive"
                   onClick={() => handleDelete(chat.id)}
                 >
-                  <span>Delete</span>
+                  <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
+                  <span>Delete chat</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>
         ))}
       </SidebarMenu>
+
+      {renaming ? (
+        <RenameChatDialog
+          key={renaming.id}
+          chat={renaming}
+          onOpenChange={(open) => {
+            if (!open) setRenaming(null)
+          }}
+        />
+      ) : null}
     </SidebarGroup>
   )
 }
