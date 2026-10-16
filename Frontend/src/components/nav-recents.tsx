@@ -1,8 +1,9 @@
-"use client"
-
 import { HugeiconsIcon } from "@hugeicons/react"
-import type { IconSvgElement } from "@hugeicons/react"
-import { MoreVerticalCircle01Icon } from "@hugeicons/core-free-icons"
+import {
+  Chat01Icon,
+  EllipsisVerticalIcon,
+  FilterHorizontalIcon,
+} from "@hugeicons/core-free-icons"
 
 import {
   DropdownMenu,
@@ -12,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   SidebarGroup,
+  SidebarGroupAction,
   SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuAction,
@@ -20,32 +22,34 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 
-export function NavProjects({
-  projects,
+export function NavRecents({
+  chats,
 }: {
-  projects: {
+  chats: {
     name: string
     url: string
-    icon: IconSvgElement
   }[]
 }) {
   const { isMobile } = useSidebar()
 
   return (
     <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-      <SidebarGroupLabel>Projects</SidebarGroupLabel>
+      <SidebarGroupLabel>Recents</SidebarGroupLabel>
+      <SidebarGroupAction aria-label="Filter recents" title="Filter">
+        <HugeiconsIcon icon={FilterHorizontalIcon} strokeWidth={2} />
+      </SidebarGroupAction>
       <SidebarMenu>
-        {projects.map((item) => (
-          <SidebarMenuItem key={item.name}>
-            <SidebarMenuButton render={<a href={item.url} />}>
-              <HugeiconsIcon icon={item.icon} strokeWidth={2} />
-              <span>{item.name}</span>
+        {chats.map((chat) => (
+          <SidebarMenuItem key={chat.name}>
+            <SidebarMenuButton render={<a href={chat.url} />}>
+              <HugeiconsIcon icon={Chat01Icon} strokeWidth={2} />
+              <span>{chat.name}</span>
             </SidebarMenuButton>
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
                   <SidebarMenuAction showOnHover>
-                    <HugeiconsIcon icon={MoreVerticalCircle01Icon} strokeWidth={2} />
+                    <HugeiconsIcon icon={EllipsisVerticalIcon} strokeWidth={2} />
                     <span className="sr-only">More</span>
                   </SidebarMenuAction>
                 }
@@ -56,27 +60,18 @@ export function NavProjects({
                 align={isMobile ? "end" : "start"}
               >
                 <DropdownMenuItem>
-                  <HugeiconsIcon icon={MoreVerticalCircle01Icon} strokeWidth={2} />
-                  <span>Open Project</span>
+                  <span>Rename</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem>
-                  <HugeiconsIcon icon={MoreVerticalCircle01Icon} strokeWidth={2} />
-                  <span>Share Project</span>
+                  <span>Star</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem variant="destructive">
-                  <HugeiconsIcon icon={MoreVerticalCircle01Icon} strokeWidth={2} />
-                  <span>Delete Project</span>
+                  <span>Delete</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>
         ))}
-        <SidebarMenuItem>
-          <SidebarMenuButton render={<a href="#" />}>
-            <HugeiconsIcon icon={MoreVerticalCircle01Icon} strokeWidth={2} />
-            <span>More</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
       </SidebarMenu>
     </SidebarGroup>
   )

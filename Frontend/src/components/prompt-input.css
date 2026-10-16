@@ -1,0 +1,48 @@
+/* On-mount intro for the prompt input header:
+   1) the logo drops in from the top while rotating, settles into place
+   2) once it lands, the heading is revealed left → right
+   Runs once per page load (CSS animations run on mount only). */
+
+@keyframes prompt-logo-drop {
+  0% {
+    transform: translateY(-160px) rotate(-180deg) scale(0.8);
+    opacity: 0;
+  }
+  55% {
+    opacity: 1;
+  }
+  70% {
+    transform: translateY(8px) rotate(10deg) scale(1);
+  }
+  85% {
+    transform: translateY(-4px) rotate(-4deg);
+  }
+  100% {
+    transform: translateY(0) rotate(0deg) scale(1);
+  }
+}
+
+@keyframes prompt-heading-reveal {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.prompt-logo {
+  animation: prompt-logo-drop 0.85s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+.prompt-heading {
+  /* starts after the logo has landed, then wipes in from the left */
+  animation: prompt-heading-reveal 0.6s cubic-bezier(0.65, 0, 0.35, 1) 0.75s both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prompt-logo,
+  .prompt-heading {
+    animation: none;
+  }
+}

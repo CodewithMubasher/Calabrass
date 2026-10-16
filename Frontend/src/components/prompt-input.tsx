@@ -1,5 +1,6 @@
 import { useState, useRef, type KeyboardEvent } from "react"
 import { HugeiconsIcon } from "@hugeicons/react"
+import "./prompt-input.css"
 import {
   ArrowUp01Icon,
   ChevronDownIcon,
@@ -137,9 +138,11 @@ export function PromptInput({
           <img
             src="/vite.svg"
             alt="Calabrass"
-            className={compact ? "size-5" : "size-7"}
+            className={`prompt-logo ${compact ? "size-5" : "size-7"}`}
           />
-          <h1 className={compact ? "text-lg font-medium" : "text-2xl font-medium"}>
+          <h1
+            className={`prompt-heading ${compact ? "text-lg font-medium" : "text-2xl font-medium"}`}
+          >
             {heading || "What can I do for you?"}
           </h1>
         </div>

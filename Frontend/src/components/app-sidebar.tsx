@@ -1,15 +1,14 @@
 import * as React from "react"
 import {
-  Calendar01Icon,
+  AddCircleHalfDotIcon,
+  ChartRelationshipIcon,
   Folder01Icon,
-  HelpCircleIcon,
-  PieChartIcon,
-  Search01Icon,
-  Settings01Icon,
+  Settings02Icon,
+  TimeScheduleIcon,
 } from "@hugeicons/core-free-icons"
 
 import { NavMain } from "@/components/nav-main"
-import { NavProjects } from "@/components/nav-projects"
+import { NavRecents } from "@/components/nav-recents"
 import { NavUser } from "@/components/nav-user"
 import {
   Sidebar,
@@ -30,82 +29,55 @@ const data = {
   },
   navMain: [
     {
-      title: "Search",
+      title: "New Chat",
       url: "#",
-      icon: Search01Icon,
-      items: [
-        {
-          title: "History",
-          url: "#",
-        },
-        {
-          title: "Starred",
-          url: "#",
-        },
-        {
-          title: "Settings",
-          url: "#",
-        },
-      ],
+      icon: AddCircleHalfDotIcon,
     },
     {
-      title: "Settings",
-      url: "#",
-      icon: Settings01Icon,
-      items: [
-        {
-          title: "General",
-          url: "#",
-        },
-        {
-          title: "Team",
-          url: "#",
-        },
-        {
-          title: "Billing",
-          url: "#",
-        },
-        {
-          title: "Limits",
-          url: "#",
-        },
-      ],
-    },
-    {
-      title: "Share",
-      url: "#",
-      icon: HelpCircleIcon,
-      items: [
-        {
-          title: "Supported Devices",
-          url: "#",
-        },
-        {
-          title: "Integrations",
-          url: "#",
-        },
-        {
-          title: "Log Out",
-          url: "#",
-        },
-      ],
-    },
-  ],
-  projects: [
-    {
-      name: "Design Engineering",
+      title: "Workspaces",
       url: "#",
       icon: Folder01Icon,
     },
     {
-      name: "Sales & Marketing",
+      title: "Connectors",
       url: "#",
-      icon: PieChartIcon,
+      icon: ChartRelationshipIcon,
     },
     {
-      name: "Travel",
+      title: "Schedules",
       url: "#",
-      icon: Calendar01Icon,
+      icon: TimeScheduleIcon,
+    },
+    {
+      title: "Settings",
+      url: "#",
+      icon: Settings02Icon,
+    },
+  ],
+  chats: [
+    {
+      name: "Fix TypeScript build errors in auth",
+      url: "#",
+    },
+    {
+      name: "Refactor sidebar component",
+      url: "#",
+    },
+    {
+      name: "Debug Vite HMR not reloading",
+      url: "#",
+    },
+    {
+      name: "Add dark mode toggle",
+      url: "#",
+    },
+    {
+      name: "Optimize React re-renders",
+      url: "#",
+    },
+    {
+      name: "Explain useEffect cleanup",
+      url: "#",
     },
   ],
 }
@@ -136,7 +108,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarHeader>
       <SidebarContent>
         <NavMain items={data.navMain} />
-        <NavProjects projects={data.projects} />
+        <NavRecents chats={data.chats} />
       </SidebarContent>
       <SidebarFooter>
         <NavUser user={data.user} />
