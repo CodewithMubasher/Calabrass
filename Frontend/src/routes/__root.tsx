@@ -1,4 +1,5 @@
 import { createRootRoute, Outlet } from "@tanstack/react-router"
+import { useEffect } from "react"
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
   BubbleChatTemporaryIcon,
@@ -15,12 +16,19 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
+import { hydrate } from "@/lib/chat-store"
+import { loadModels } from "@/lib/model-store"
 
 export const Route = createRootRoute({
   component: RootLayout,
 })
 
 function RootLayout() {
+  useEffect(() => {
+    void hydrate()
+    void loadModels()
+  }, [])
+
   return (
     <SidebarProvider className="h-svh overflow-hidden">
       <AppSidebar />

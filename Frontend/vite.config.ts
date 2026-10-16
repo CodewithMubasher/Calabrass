@@ -11,4 +11,14 @@ export default defineConfig({
       "@": resolve(import.meta.dirname, "./src"),
     },
   },
+  server: {
+    proxy: {
+      // The Go backend. Keep the browser on a single origin so SSE works
+      // without CORS preflight surprises.
+      "/api": {
+        target: "http://127.0.0.1:8787",
+        changeOrigin: true,
+      },
+    },
+  },
 })

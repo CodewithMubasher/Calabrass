@@ -4,7 +4,16 @@ import { useEffect, useRef } from "react"
 import { MessageBubble, StreamingMessage } from "@/components/message-bubble"
 import { PromptInput } from "@/components/prompt-input"
 import { MessageGroup } from "@/components/ui/message"
-import { sendMessage, useChats, useStreamingReply } from "@/lib/chat-store"
+import {
+  ensureChatLoaded,
+  sendMessage,
+  useChat,
+  useChatError,
+  useChatMessages,
+  useHydrated,
+  useIsStreaming,
+  useStreamingText,
+} from "@/lib/chat-store"
 import { Route as rootRoute } from "@/routes/__root"
 
 export const Route = createRoute({
@@ -15,19 +24,34 @@ export const Route = createRoute({
 
 function ChatPage() {
   const { chatId } = Route.useParams()
-  const chats = useChats()
-  const streaming = useStreamingReply(chatId)
+  const hydrated = useHydrated()
+  const chat = useChat(chatId)
+  const messages = useChatMessages(chatId)
+  const streaming = useIsStreaming(chatId)
+  const streamingText = useStreamingText(chatId)
+  const error = useChatError(chatId)
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  const chat = chats.find((item) => item.id === chatId)
-  const messageCount = chat?.messages.length ?? 0
-  const revealed = streaming?.revealed ?? 0
+  useEffect(() => {
+    void ensureChatLoaded(chatId)
+  }, [chatId])
+
+  const messageCount = messages?.length ?? 0
+  const streamingLength = streamingText.length
 
   // Keep the newest message in view while the reply streams in.
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [messageCount, revealed])
+  }, [messageCount, streamingLength])
+
+  if (!hydrated) {
+    return (
+      <div className="flex flex-1 items-center justify-center text-sm text-white/50">
+        Loading…
+      </div>
+    )
+  }
 
   if (!chat) {
     return (
@@ -44,18 +68,25 @@ function ChatPage() {
         className="scrollbar-thin min-h-0 flex-1 overflow-y-auto"
       >
         <MessageGroup className="mx-auto w-full max-w-[780px] gap-4 px-4 py-6">
-          {chat.messages.map((message) => (
+          {(messages ?? []).map((message) => (
             <MessageBubble key={message.id} message={message} />
           ))}
-          {streaming && (
-            <StreamingMessage
-              text={streaming.words.slice(0, streaming.revealed).join(" ")}
-            />
+          {streaming && streamingText !== "" && (
+            <StreamingMessage text={streamingText} />
           )}
         </MessageGroup>
       </div>
+      {error ? (
+        <p className="mx-auto w-full max-w-[780px] shrink-0 px-6 pb-1 text-sm text-red-400">
+          {error}
+        </p>
+      ) : null}
       <div className="shrink-0">
-        <PromptInput isInChat onSend={(value) => sendMessage(chat.id, value)} />
+        <PromptInput
+          isInChat
+          disabled={streaming}
+          onSend={(value) => void sendMessage(chat.id, value)}
+        />
       </div>
     </div>
   )

@@ -10,7 +10,10 @@ import {
   PlusSignIcon,
   Shield01Icon,
   ShieldAlertIcon,
+  Tick02Icon,
 } from "@hugeicons/core-free-icons"
+
+import { selectModel, useModelState } from "@/lib/model-store"
 
 const options = [
   { value: "readonly", label: "Read Only", icon: Shield01Icon },
@@ -24,6 +27,8 @@ interface PromptInputProps {
   compact?: boolean
   /** Bottom-docked composer used inside a chat thread. */
   isInChat?: boolean
+  /** Blocks input while a reply is still streaming. */
+  disabled?: boolean
 }
 
 export function PromptInput({
@@ -31,6 +36,7 @@ export function PromptInput({
   heading,
   compact = false,
   isInChat = false,
+  disabled = false,
 }: PromptInputProps) {
   const [value, setValue] = useState("")
   const [selected, setSelected] = useState("readonly")
@@ -40,10 +46,26 @@ export function PromptInput({
   const modelRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  const { providers, loading: loadingModels, error: modelError, selected: model } =
+    useModelState()
+
   const current = options.find((o) => o.value === selected)
 
+  const selectedLabel = (() => {
+    if (!model) return "Select model"
+    for (const provider of providers) {
+      const match = provider.models.find(
+        (m) => m.id === model.model && provider.id === model.provider
+      )
+      if (match) return match.label
+    }
+    return model.model
+  })()
+
+  const canSend = value.trim() !== "" && !disabled
+
   const handleSend = () => {
-    if (!value.trim()) return
+    if (!canSend) return
     onSend?.(value.trim())
     setValue("")
     textareaRef.current?.focus()
@@ -107,26 +129,67 @@ export function PromptInput({
         <div ref={modelRef} className="relative">
           <button
             onClick={() => setModelOpen(!modelOpen)}
-            className="flex h-7 cursor-pointer items-center gap-1.5 rounded-full bg-white/0 px-2.5 text-xs text-white/70 hover:bg-white/10"
+            className="flex h-7 max-w-52 cursor-pointer items-center gap-1.5 rounded-full bg-white/0 px-2.5 text-xs text-white/70 hover:bg-white/10"
           >
-            <span>Select model</span>
+            <span className="truncate">{selectedLabel}</span>
             <HugeiconsIcon
               icon={ChevronDownIcon}
               strokeWidth={2}
-              className={`size-3.5 transition-transform duration-200 ${modelOpen ? "rotate-180" : ""}`}
+              className={`size-3.5 shrink-0 transition-transform duration-200 ${modelOpen ? "rotate-180" : ""}`}
             />
           </button>
           {modelOpen && (
-            <div className="absolute right-0 bottom-full z-50 mb-1 w-50 max-h-65 overflow-y-auto overflow-x-hidden rounded-xl border border-white/10 bg-neutral-900 shadow-lg">
-              <div className="px-3 py-2 text-xs text-white/40">
-                No models available — check backend API keys.
-              </div>
+            <div className="absolute right-0 bottom-full z-50 mb-1 max-h-65 w-56 overflow-x-hidden overflow-y-auto rounded-xl border border-white/10 bg-neutral-900 shadow-lg">
+              {loadingModels && (
+                <div className="px-3 py-2 text-xs text-white/40">Loading models…</div>
+              )}
+              {!loadingModels && modelError && (
+                <div className="px-3 py-2 text-xs text-red-400">{modelError}</div>
+              )}
+              {!loadingModels && !modelError && providers.length === 0 && (
+                <div className="px-3 py-2 text-xs text-white/40">
+                  No models available — check backend API keys.
+                </div>
+              )}
+              {providers.map((provider) => (
+                <div key={provider.id}>
+                  <div className="px-3 pt-2 pb-1 text-[10px] font-medium tracking-wide text-white/40 uppercase">
+                    {provider.name}
+                  </div>
+                  {provider.models.map((item) => {
+                    const isActive =
+                      model?.provider === provider.id && model?.model === item.id
+                    return (
+                      <button
+                        key={`${provider.id}:${item.id}`}
+                        onClick={() => {
+                          selectModel({ provider: provider.id, model: item.id })
+                          setModelOpen(false)
+                        }}
+                        className={cn(
+                          "flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-1.5 text-left text-xs text-white hover:bg-white/10",
+                          isActive && "bg-white/5"
+                        )}
+                      >
+                        <span className="truncate">{item.label}</span>
+                        {isActive && (
+                          <HugeiconsIcon
+                            icon={Tick02Icon}
+                            strokeWidth={2}
+                            className="size-3.5 shrink-0 text-primary"
+                          />
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              ))}
             </div>
           )}
         </div>
         <button
           onClick={handleSend}
-          disabled={!value.trim()}
+          disabled={!canSend}
           className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-primary text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
         >
           <HugeiconsIcon icon={ArrowUp01Icon} strokeWidth={2} className="size-5" />
@@ -149,9 +212,10 @@ export function PromptInput({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
+        disabled={disabled}
         placeholder="Describe what you want to build, / Commands @ files or sessions"
         rows={2}
-        className="w-full resize-none bg-transparent px-1 text-sm text-white placeholder:text-white/50 outline-none"
+        className="w-full resize-none bg-transparent px-1 text-sm text-white placeholder:text-white/50 outline-none disabled:opacity-60"
       />
       {renderActions()}
     </div>

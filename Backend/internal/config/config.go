@@ -1,0 +1,99 @@
+package config
+
+import (
+	"bufio"
+	"os"
+	"strings"
+)
+
+const defaultSystemPrompt = "You are Calabrass, a helpful AI assistant. Answer clearly and use Markdown when it helps."
+
+// Config holds everything the server needs to boot.
+type Config struct {
+	Addr         string
+	DatabasePath string
+	GeminiKey    string
+	GroqKey      string
+	SystemPrompt string
+	// ProviderPriority is the order in which providers are offered and picked
+	// as a fallback, e.g. ["groq", "google"].
+	ProviderPriority []string
+}
+
+// Load reads configuration from the environment, after hydrating it from a
+// local .env file when present. Real environment variables always win.
+func Load() Config {
+	loadDotEnv(".env")
+
+	return Config{
+		Addr:         envOr("CALABRASS_ADDR", "127.0.0.1:8787"),
+		DatabasePath: envOr("CALABRASS_DB", "data/calabrass.db"),
+		GeminiKey:    firstNonEmpty(os.Getenv("GOOGLE_GENERATIVE_AI_API_KEY"), os.Getenv("GEMINI_API_KEY"), os.Getenv("GOOGLE_API_KEY")),
+		GroqKey:      os.Getenv("GROQ_API_KEY"),
+		SystemPrompt: envOr("CALABRASS_SYSTEM_PROMPT", defaultSystemPrompt),
+		// Groq first: it is the provider that is verified working by default.
+		ProviderPriority: splitList(envOr("CALABRASS_PROVIDER_PRIORITY", "groq,google")),
+	}
+}
+
+func splitList(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func envOr(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// loadDotEnv is a deliberately tiny .env reader: KEY=VALUE per line, optional
+// "export" prefix, # comments, surrounding quotes stripped. It never overrides
+// a variable that is already set in the process environment.
+func loadDotEnv(path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		value = strings.Trim(strings.TrimSpace(value), `"'`)
+
+		if _, exists := os.LookupEnv(key); exists {
+			continue
+		}
+		_ = os.Setenv(key, value)
+	}
+}

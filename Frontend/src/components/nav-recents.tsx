@@ -31,9 +31,9 @@ export function NavRecents() {
   const chats = useChats()
 
   const handleDelete = (chatId: string) => {
-    deleteChat(chatId)
+    void deleteChat(chatId)
     if (pathname === `/chat/${chatId}`) {
-      navigate({ to: "/" })
+      void navigate({ to: "/" })
     }
   }
 
