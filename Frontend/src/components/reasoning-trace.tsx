@@ -1,6 +1,4 @@
 import { useState } from "react"
-import { HugeiconsIcon } from "@hugeicons/react"
-import { AiBrain01Icon, Loading03Icon } from "@hugeicons/core-free-icons"
 
 import {
   Trace,
@@ -8,7 +6,6 @@ import {
   TraceCollapsibleContent,
   TraceCollapsibleTrigger,
   TraceDescription,
-  TraceIcon,
   TraceLine,
   TraceTitle,
 } from "@/components/ui/trace"
@@ -49,17 +46,6 @@ export function ReasoningTrace({
       <TraceCollapsible open={open ?? running} onOpenChange={setOpen}>
         <TraceCollapsibleTrigger>
           <TraceLine status={running ? "running" : undefined}>
-            <TraceIcon>
-              {running ? (
-                <HugeiconsIcon
-                  icon={Loading03Icon}
-                  strokeWidth={2}
-                  className="animate-spin"
-                />
-              ) : (
-                <HugeiconsIcon icon={AiBrain01Icon} strokeWidth={2} />
-              )}
-            </TraceIcon>
             <TraceTitle>{running ? "Thinking" : "Thought"}</TraceTitle>
             {seconds !== undefined && (
               <TraceDescription>for {seconds}s</TraceDescription>

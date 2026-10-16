@@ -139,7 +139,7 @@ export function PromptInput({
             />
           </button>
           {modelOpen && (
-            <div className="absolute right-0 bottom-full z-50 mb-1 max-h-65 w-56 overflow-x-hidden overflow-y-auto rounded-xl border border-white/10 bg-neutral-900 shadow-lg">
+            <div className="scrollbar-thin absolute right-0 bottom-full z-50 mb-1 max-h-65 w-56 overflow-x-hidden overflow-y-auto rounded-xl border border-white/10 bg-neutral-900 shadow-lg">
               {loadingModels && (
                 <div className="px-3 py-2 text-xs text-white/40">Loading models…</div>
               )}

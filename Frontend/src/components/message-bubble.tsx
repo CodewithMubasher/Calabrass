@@ -1,6 +1,7 @@
 import { cn } from "cn"
 import "./message-bubble.css"
 
+import { Markdown } from "@/components/markdown"
 import { ReasoningTrace } from "@/components/reasoning-trace"
 import {
   Message,
@@ -32,28 +33,30 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
   return (
     <Message align={isUser ? "end" : "start"}>
       {!isUser && <AssistantAvatar />}
-      <MessageContent className={cn(isUser ? "items-end" : "items-start")}>
+      <MessageContent className={cn(isUser ? "items-end" : "items-start pt-1")}>
         {!isUser && reasoning !== "" && (
           <ReasoningTrace text={reasoning} thinkingMs={message.thinkingMs} />
         )}
-        {message.content !== "" && (
-          <div
-            className={cn(
-              "w-fit max-w-[80%] rounded-2xl px-4 py-2 text-sm leading-relaxed whitespace-pre-wrap",
-              isUser ? "bg-primary text-white" : "bg-white/5 text-white/90"
-            )}
-          >
-            {message.content}
-          </div>
-        )}
+        {message.content !== "" &&
+          (isUser ? (
+            <div className="w-fit max-w-[80%] min-w-0 rounded-2xl bg-primary px-4 py-2 text-sm whitespace-pre-wrap text-white">
+              {message.content}
+            </div>
+          ) : (
+            // Replies are Markdown and sit directly in the content column, at
+            // the same width as the thinking rows above them.
+            <div className="w-full min-w-0">
+              <Markdown>{message.content}</Markdown>
+            </div>
+          ))}
       </MessageContent>
     </Message>
   )
 }
 
 /**
- * The in-flight reply: the model's thinking as a Trace row, then the words
- * revealed so far plus a blinking caret.
+ * The in-flight reply: the model's thinking as a Trace row, then the answer as
+ * it is written, with a caret pinned to the last rendered block.
  */
 export function StreamingMessage({
   text,
@@ -65,12 +68,11 @@ export function StreamingMessage({
   return (
     <Message align="start">
       <AssistantAvatar animated />
-      <MessageContent className="items-start">
+      <MessageContent className="items-start pt-1">
         {reasoning.trim() !== "" && <ReasoningTrace text={reasoning} running />}
         {text !== "" && (
-          <div className="w-fit max-w-[80%] rounded-2xl bg-white/5 px-4 py-2 text-sm leading-relaxed whitespace-pre-wrap text-white/90">
-            {text}
-            <span className="ml-0.5 inline-block h-3.5 w-[2px] translate-y-[2px] animate-pulse rounded-full bg-white/70" />
+          <div className="w-full min-w-0">
+            <Markdown className="streaming-caret">{text}</Markdown>
           </div>
         )}
       </MessageContent>

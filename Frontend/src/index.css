@@ -158,4 +158,36 @@
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
+
+  /*
+   * Blinking caret pinned to the end of the last rendered block, so streaming
+   * Markdown keeps the caret on the final line instead of dropping to a new one.
+   */
+  .streaming-caret > :last-child::after {
+    content: "";
+    display: inline-block;
+    width: 2px;
+    height: 0.9em;
+    margin-left: 0.15em;
+    transform: translateY(0.15em);
+    border-radius: 9999px;
+    background-color: oklch(1 0 0 / 70%);
+    animation: caret-blink 1.1s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .streaming-caret > :last-child::after {
+      animation: none;
+    }
+  }
+}
+
+@keyframes caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
 }
