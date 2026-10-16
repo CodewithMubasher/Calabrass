@@ -1,86 +1,161 @@
-import * as React from "react"
+import { useState, useRef, type KeyboardEvent } from "react"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { SentIcon } from "@hugeicons/core-free-icons"
-import { cn } from "cn"
+import {
+  ArrowUp01Icon,
+  ChevronDownIcon,
+  FlashIcon,
+  PaperclipIcon,
+  PlusSignIcon,
+  Shield01Icon,
+  ShieldAlertIcon,
+} from "@hugeicons/core-free-icons"
+
+const options = [
+  { value: "readonly", label: "Read Only", icon: Shield01Icon },
+  { value: "auto", label: "Auto", icon: FlashIcon },
+  { value: "full", label: "Full Access", icon: ShieldAlertIcon },
+]
 
 interface PromptInputProps {
-  /** Placeholder text, shown at reduced opacity */
-  placeholder?: string
-  /** Called with the trimmed text on submit (send button or Enter) */
-  onSubmit?: (value: string) => void
-  className?: string
+  onSend?: (message: string) => void
+  heading?: string
+  compact?: boolean
 }
 
-/**
- * Horizontal prompt card with a 2px primary left border, slight mica
- * transparency (so the wave background shows through), an auto-growing
- * textarea and a send button that is disabled until there is text.
- *
- * Enter submits, Shift+Enter inserts a newline.
- */
 export function PromptInput({
-  placeholder = "Describe want you want to do, / commands @ files or session",
-  onSubmit,
-  className,
+  onSend,
+  heading,
+  compact = false,
 }: PromptInputProps) {
-  const [value, setValue] = React.useState("")
-  const textareaRef = React.useRef<HTMLTextAreaElement>(null)
+  const [value, setValue] = useState("")
+  const [selected, setSelected] = useState("readonly")
+  const [open, setOpen] = useState(false)
+  const [modelOpen, setModelOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const modelRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  const canSend = value.trim().length > 0
+  const current = options.find((o) => o.value === selected)
 
-  // Auto-grow: reset to auto height, then grow up to the cap (~4 rows).
-  React.useEffect(() => {
-    const el = textareaRef.current
-    if (!el) return
-    el.style.height = "auto"
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`
-  }, [value])
-
-  const submit = () => {
-    if (!canSend) return
-    onSubmit?.(value.trim())
+  const handleSend = () => {
+    if (!value.trim()) return
+    onSend?.(value.trim())
     setValue("")
+    textareaRef.current?.focus()
   }
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault()
-      submit()
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
     }
   }
 
+  const renderActions = () => (
+    <div className="mt-3 flex items-center justify-between">
+      <div className="flex items-center gap-2.5">
+        <button className="flex size-7 cursor-pointer items-center justify-center rounded-full bg-white/5 text-white">
+          <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} className="size-4" />
+        </button>
+        <button className="flex size-7 cursor-pointer items-center justify-center rounded-full bg-white/5 text-white transition-colors hover:bg-white/10">
+          <HugeiconsIcon icon={PaperclipIcon} strokeWidth={2} className="size-4" />
+        </button>
+        <div ref={ref} className="relative">
+          <button
+            onClick={() => setOpen(!open)}
+            className="flex h-7 cursor-pointer items-center gap-1.5 rounded-full border-transparent bg-white/0 px-2.5 text-xs text-white/70 hover:bg-white/10"
+          >
+            {current && (
+              <HugeiconsIcon
+                icon={current.icon}
+                strokeWidth={2}
+                className="size-3.5"
+              />
+            )}
+            <span>{current?.label}</span>
+            <HugeiconsIcon
+              icon={ChevronDownIcon}
+              strokeWidth={2}
+              className={`size-3.5 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+            />
+          </button>
+          {open && (
+            <div className="absolute bottom-full left-0 z-50 mb-1 w-36 overflow-hidden rounded-xl border border-white/10 bg-neutral-900 shadow-lg">
+              {options.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => {
+                    setSelected(opt.value)
+                    setOpen(false)
+                  }}
+                  className={`flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-xs text-white hover:bg-white/10 ${selected === opt.value ? "bg-white/5" : ""}`}
+                >
+                  <HugeiconsIcon icon={opt.icon} strokeWidth={2} className="size-3.5" />
+                  <span>{opt.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <div ref={modelRef} className="relative">
+          <button
+            onClick={() => setModelOpen(!modelOpen)}
+            className="flex h-7 cursor-pointer items-center gap-1.5 rounded-full bg-white/0 px-2.5 text-xs text-white/70 hover:bg-white/10"
+          >
+            <span>Select model</span>
+            <HugeiconsIcon
+              icon={ChevronDownIcon}
+              strokeWidth={2}
+              className={`size-3.5 transition-transform duration-200 ${modelOpen ? "rotate-180" : ""}`}
+            />
+          </button>
+          {modelOpen && (
+            <div className="absolute right-0 bottom-full z-50 mb-1 w-50 max-h-65 overflow-y-auto overflow-x-hidden rounded-xl border border-white/10 bg-neutral-900 shadow-lg">
+              <div className="px-3 py-2 text-xs text-white/40">
+                No models available — check backend API keys.
+              </div>
+            </div>
+          )}
+        </div>
+        <button
+          onClick={handleSend}
+          disabled={!value.trim()}
+          className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-primary text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <HugeiconsIcon icon={ArrowUp01Icon} strokeWidth={2} className="size-5" />
+        </button>
+      </div>
+    </div>
+  )
+
   return (
-    <div
-      className={cn(
-        "relative flex w-full max-w-2xl items-end gap-2 rounded-2xl border border-border/60 border-l-2 border-l-primary bg-background/90 p-3 shadow-md backdrop-blur-sm",
-        className
-      )}
-      onClick={() => textareaRef.current?.focus()}
-    >
-      <textarea
-        ref={textareaRef}
-        rows={1}
-        value={value}
-        onChange={(event) => setValue(event.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder={placeholder}
-        aria-label="Prompt"
-        className="max-h-40 min-h-8 flex-1 resize-none overflow-hidden bg-transparent text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground/60"
-      />
-      <button
-        type="button"
-        onClick={submit}
-        disabled={!canSend}
-        aria-label="Send prompt"
-        className={cn(
-          "flex size-8 shrink-0 items-center justify-center rounded-full transition-colors",
-          canSend
-            ? "bg-primary text-primary-foreground hover:bg-primary/90"
-            : "cursor-not-allowed bg-muted text-muted-foreground/60"
-        )}
-      >
-        <HugeiconsIcon icon={SentIcon} strokeWidth={2} />
-      </button>
+    <div className="flex h-full -mt-20 items-center justify-center p-4">
+      <div className="flex w-full max-w-[780px] flex-col items-center gap-5">
+        <div className="flex items-center gap-2.5">
+          <img
+            src="/vite.svg"
+            alt="Calabrass"
+            className={compact ? "size-5" : "size-7"}
+          />
+          <h1 className={compact ? "text-lg font-medium" : "text-2xl font-medium"}>
+            {heading || "What can I do for you?"}
+          </h1>
+        </div>
+        <div className="w-full rounded-2xl border border-white/10 border-l-2 border-l-primary bg-white/5 px-4 pt-4 pb-2 shadow-sm backdrop-blur-[2px]">
+          <textarea
+            ref={textareaRef}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Describe what you want to build, / Commands @ files or sessions"
+            rows={2}
+            className="w-full resize-none bg-transparent px-1 text-sm text-white placeholder:text-white/50 outline-none"
+          />
+          {renderActions()}
+        </div>
+      </div>
     </div>
   )
 }

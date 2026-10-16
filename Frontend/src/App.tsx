@@ -54,8 +54,8 @@ export function App() {
             </Button>
           </div>
         </header>
-        <main className="relative z-10 flex flex-1 flex-col items-center justify-center p-4">
-          <PromptInput onSubmit={(value) => console.log("prompt:", value)} />
+        <main className="relative z-10 flex flex-1 flex-col">
+          <PromptInput onSend={(value) => console.log("prompt:", value)} />
         </main>
       </SidebarInset>
     </SidebarProvider>
