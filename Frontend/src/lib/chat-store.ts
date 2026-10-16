@@ -4,15 +4,35 @@ import type { Chat, ChatMessage } from "@/types/chat"
 
 const STORAGE_KEY = "calabrass-chats"
 const TITLE_MAX_LENGTH = 42
+const STREAM_TICK_MS = 75
 
 /**
  * Canned assistant reply used while there is no backend connected.
  */
-export const DEMO_REPLY =
-  "This is a placeholder reply from Calabrass. Once the model is connected, real responses will stream in here."
+export const DEMO_REPLY = [
+  "Here is a placeholder reply from Calabrass.",
+  "The model isn't connected yet, so this text is canned and streams in word by word on a timer to mimic real token output.",
+  "Once the backend is wired up, actual tokens will arrive over the same channel and this demo loop will be removed.",
+  "For now the reply is stored in localStorage, so it survives a refresh and shows up in the Recents list.",
+].join(" ")
 
-let chats: Chat[] = load()
+export interface StreamingReply {
+  chatId: string
+  messageId: string
+  words: string[]
+  revealed: number
+  rate: number
+  startedAt: number
+}
+
+interface StoreState {
+  chats: Chat[]
+  streaming: Record<string, StreamingReply>
+}
+
+let state: StoreState = { chats: load(), streaming: {} }
 const listeners = new Set<() => void>()
+const timers = new Map<string, ReturnType<typeof setInterval>>()
 
 function load(): Chat[] {
   if (typeof window === "undefined") return []
@@ -26,7 +46,7 @@ function load(): Chat[] {
   }
 }
 
-function persist() {
+function persist(chats: Chat[]) {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(chats))
   } catch {
@@ -38,6 +58,11 @@ function emit() {
   for (const listener of listeners) listener()
 }
 
+function setState(next: StoreState) {
+  state = next
+  emit()
+}
+
 function subscribe(listener: () => void) {
   listeners.add(listener)
   return () => {
@@ -46,12 +71,25 @@ function subscribe(listener: () => void) {
 }
 
 function getSnapshot() {
-  return chats
+  return state
+}
+
+function withoutKey<T>(record: Record<string, T>, key: string) {
+  const next: Record<string, T> = {}
+  for (const k of Object.keys(record)) {
+    if (k !== key) next[k] = record[k]
+  }
+  return next
 }
 
 /** Subscribe to the chat list. Returns a stable array reference per change. */
 export function useChats() {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot).chats
+}
+
+/** The in-flight reply for a chat, or undefined when nothing is streaming. */
+export function useStreamingReply(chatId: string) {
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot).streaming[chatId]
 }
 
 function newMessageId() {
@@ -85,18 +123,103 @@ export function createChat(): Chat {
     createdAt: now,
     updatedAt: now,
   }
-  chats = [chat, ...chats]
-  persist()
-  emit()
+  setState({ ...state, chats: [chat, ...state.chats] })
+  persist(state.chats)
   return chat
 }
 
 export function getChat(chatId: string) {
-  return chats.find((chat) => chat.id === chatId)
+  return state.chats.find((chat) => chat.id === chatId)
+}
+
+function cancelStream(chatId: string) {
+  const timer = timers.get(chatId)
+  if (timer) {
+    clearInterval(timer)
+    timers.delete(chatId)
+  }
+}
+
+/** Commit the finished reply as a normal, persisted message. */
+function finishStream(chatId: string) {
+  cancelStream(chatId)
+  const reply = state.streaming[chatId]
+  if (!reply) return
+
+  const now = Date.now()
+  const chats = state.chats.map((chat) =>
+    chat.id === chatId
+      ? {
+          ...chat,
+          messages: [
+            ...chat.messages,
+            {
+              id: reply.messageId,
+              role: "assistant" as const,
+              content: reply.words.join(" "),
+              createdAt: now,
+            },
+          ],
+          updatedAt: now,
+        }
+      : chat
+  )
+
+  persist(chats)
+  setState({ chats, streaming: withoutKey(state.streaming, chatId) })
+}
+
+/** Simulate a streaming reply with a live tokens/sec readout. */
+function startStream(chatId: string) {
+  cancelStream(chatId)
+
+  const reply: StreamingReply = {
+    chatId,
+    messageId: newMessageId(),
+    words: DEMO_REPLY.split(" "),
+    revealed: 0,
+    rate: 0,
+    startedAt: Date.now(),
+  }
+  setState({
+    ...state,
+    streaming: { ...state.streaming, [chatId]: reply },
+  })
+
+  const timer = setInterval(() => {
+    const current = state.streaming[chatId]
+    if (!current) {
+      cancelStream(chatId)
+      return
+    }
+
+    const step = 1 + Math.floor(Math.random() * 2)
+    const revealed = Math.min(current.revealed + step, current.words.length)
+
+    if (revealed >= current.words.length) {
+      finishStream(chatId)
+      return
+    }
+
+    const elapsed = (Date.now() - current.startedAt) / 1000
+    setState({
+      ...state,
+      streaming: {
+        ...state.streaming,
+        [chatId]: {
+          ...current,
+          revealed,
+          rate: elapsed > 0 ? Math.round(revealed / elapsed) : 0,
+        },
+      },
+    })
+  }, STREAM_TICK_MS)
+
+  timers.set(chatId, timer)
 }
 
 /**
- * Append the user message plus a placeholder assistant reply.
+ * Append the user message, then stream a placeholder assistant reply.
  * The chat title is derived from the very first user message.
  */
 export function sendMessage(chatId: string, text: string) {
@@ -104,17 +227,11 @@ export function sendMessage(chatId: string, text: string) {
   if (!clean) return
 
   const now = Date.now()
-  chats = chats.map((chat) => {
+  const chats = state.chats.map((chat) => {
     if (chat.id !== chatId) return chat
     const messages: ChatMessage[] = [
       ...chat.messages,
       { id: newMessageId(), role: "user", content: clean, createdAt: now },
-      {
-        id: newMessageId(),
-        role: "assistant",
-        content: DEMO_REPLY,
-        createdAt: now + 1,
-      },
     ]
     return {
       ...chat,
@@ -123,12 +240,15 @@ export function sendMessage(chatId: string, text: string) {
       updatedAt: now,
     }
   })
-  persist()
-  emit()
+
+  persist(chats)
+  setState({ ...state, chats })
+  startStream(chatId)
 }
 
 export function deleteChat(chatId: string) {
-  chats = chats.filter((chat) => chat.id !== chatId)
-  persist()
-  emit()
+  cancelStream(chatId)
+  const chats = state.chats.filter((chat) => chat.id !== chatId)
+  persist(chats)
+  setState({ chats, streaming: withoutKey(state.streaming, chatId) })
 }

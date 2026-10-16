@@ -1,5 +1,6 @@
 import { useState, useRef, type KeyboardEvent } from "react"
 import { HugeiconsIcon } from "@hugeicons/react"
+import { cn } from "cn"
 import "./prompt-input.css"
 import {
   ArrowUp01Icon,
@@ -135,7 +136,14 @@ export function PromptInput({
   )
 
   const renderComposer = () => (
-    <div className="w-full rounded-2xl border border-white/10 border-l-2 border-l-primary bg-white/5 px-4 pt-4 pb-2 shadow-sm backdrop-blur-[2px]">
+    <div
+      className={cn(
+        "w-full rounded-2xl border border-white/10 border-l-2 border-l-primary px-4 pt-4 pb-2 shadow-sm",
+        isInChat
+          ? "bg-neutral-900/80 backdrop-blur-xl"
+          : "bg-white/5 backdrop-blur-[2px]"
+      )}
+    >
       <textarea
         ref={textareaRef}
         value={value}
