@@ -22,7 +22,7 @@ export const Route = createRootRoute({
 
 function RootLayout() {
   return (
-    <SidebarProvider>
+    <SidebarProvider className="h-svh overflow-hidden">
       <AppSidebar />
       <SidebarInset className="relative overflow-hidden bg-background">
         <WaveBackground fixed />
@@ -59,9 +59,9 @@ function RootLayout() {
             </Button>
           </div>
         </header>
-        <main className="relative z-10 flex flex-1 flex-col">
+        <div className="relative z-10 flex min-h-0 flex-1 flex-col">
           <Outlet />
-        </main>
+        </div>
       </SidebarInset>
     </SidebarProvider>
   )

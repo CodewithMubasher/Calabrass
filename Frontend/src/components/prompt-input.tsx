@@ -140,7 +140,7 @@ export function PromptInput({
       className={cn(
         "w-full rounded-2xl border border-white/10 border-l-2 border-l-primary px-4 pt-4 pb-2 shadow-sm",
         isInChat
-          ? "bg-neutral-900/80 backdrop-blur-xl"
+          ? "bg-black/40 backdrop-blur-xl"
           : "bg-white/5 backdrop-blur-[2px]"
       )}
     >

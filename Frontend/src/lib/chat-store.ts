@@ -21,8 +21,6 @@ export interface StreamingReply {
   messageId: string
   words: string[]
   revealed: number
-  rate: number
-  startedAt: number
 }
 
 interface StoreState {
@@ -178,8 +176,6 @@ function startStream(chatId: string) {
     messageId: newMessageId(),
     words: DEMO_REPLY.split(" "),
     revealed: 0,
-    rate: 0,
-    startedAt: Date.now(),
   }
   setState({
     ...state,
@@ -201,16 +197,11 @@ function startStream(chatId: string) {
       return
     }
 
-    const elapsed = (Date.now() - current.startedAt) / 1000
     setState({
       ...state,
       streaming: {
         ...state.streaming,
-        [chatId]: {
-          ...current,
-          revealed,
-          rate: elapsed > 0 ? Math.round(revealed / elapsed) : 0,
-        },
+        [chatId]: { ...current, revealed },
       },
     })
   }, STREAM_TICK_MS)
