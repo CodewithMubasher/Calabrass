@@ -2,6 +2,7 @@ import { createRouter } from "@tanstack/react-router"
 
 import { Route as rootRoute } from "@/routes/__root"
 import { Route as indexRoute } from "@/routes/index"
+import { Route as loginRoute } from "@/routes/login"
 import { Route as workspacesRoute } from "@/routes/workspaces"
 import { Route as workspaceViewRoute } from "@/routes/workspace-view"
 import { Route as connectorsRoute } from "@/routes/connectors"
@@ -14,6 +15,7 @@ import { Route as chatRoute } from "@/routes/chat"
 const routeTree = rootRoute.addChildren([
   indexRoute,
   chatRoute,
+  loginRoute,
   calLiveRoute,
   workspacesRoute,
   workspaceViewRoute,
