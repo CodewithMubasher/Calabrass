@@ -1,14 +1,12 @@
-"use client"
-
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
-  BadgeCheckIcon,
-  More01Icon,
-  BellIcon,
-  CreditCardIcon,
   LogOutIcon,
+  More01Icon,
+  Settings02Icon,
   SparklesIcon,
+  UserCircleIcon,
 } from "@hugeicons/core-free-icons"
+import { Link, useNavigate } from "@tanstack/react-router"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
@@ -26,17 +24,32 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
+import { signOut, useSession } from "@/lib/auth"
 
-export function NavUser({
-  user,
-}: {
-  user: {
-    name: string
-    email: string
-    avatar: string
-  }
-}) {
+/**
+ * The account at the foot of the sidebar: who is signed in, and the way out.
+ *
+ * The name and the email are the session's, not a placeholder — this is the one
+ * place in the app that says who it thinks you are. Signing out drops the
+ * session and hands the router the login page, which the gate in the root route
+ * then keeps shut behind you.
+ *
+ * Renders nothing without a session, which only happens on the way to the login
+ * page: there is nobody to show.
+ */
+export function NavUser() {
+  const user = useSession()
   const { isMobile } = useSidebar()
+  const navigate = useNavigate()
+
+  if (!user) return null
+
+  const initials = user.name.trim().slice(0, 2).toUpperCase() || "?"
+
+  const handleSignOut = () => {
+    signOut()
+    void navigate({ to: "/login" })
+  }
 
   return (
     <SidebarMenu>
@@ -50,7 +63,7 @@ export function NavUser({
               >
                 <Avatar className="size-8 rounded-lg">
                   <AvatarFallback className="rounded-lg">
-                    {user.name.slice(0, 2).toUpperCase()}
+                    {initials}
                   </AvatarFallback>
                 </Avatar>
                 <div className="grid flex-1 text-left leading-tight">
@@ -75,7 +88,7 @@ export function NavUser({
               <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
                 <Avatar className="size-8 rounded-lg">
                   <AvatarFallback className="rounded-lg">
-                    {user.name.slice(0, 2).toUpperCase()}
+                    {initials}
                   </AvatarFallback>
                 </Avatar>
                 <div className="grid flex-1 text-left leading-tight">
@@ -94,20 +107,20 @@ export function NavUser({
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuItem>
-                <HugeiconsIcon icon={BadgeCheckIcon} strokeWidth={2} />
-                Account
+                <HugeiconsIcon icon={UserCircleIcon} strokeWidth={2} />
+                Profile
               </DropdownMenuItem>
-              <DropdownMenuItem>
-                <HugeiconsIcon icon={CreditCardIcon} strokeWidth={2} />
-                Billing
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <HugeiconsIcon icon={BellIcon} strokeWidth={2} />
-                Notifications
-              </DropdownMenuItem>
+              <DropdownMenuItem
+                render={
+                  <Link to="/settings">
+                    <HugeiconsIcon icon={Settings02Icon} strokeWidth={2} />
+                    Settings
+                  </Link>
+                }
+              />
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={handleSignOut}>
               <HugeiconsIcon icon={LogOutIcon} strokeWidth={2} />
               Log out
             </DropdownMenuItem>
