@@ -25,9 +25,9 @@ export const Route = createRootRoute({
 
 function RootLayout() {
   const { pathname } = useLocation()
-  // Only the home screen carries the bar across the top: every other page is
+  // The home screen and a chat carry the bar across the top: every other page is
   // its own full-height surface, the way the reference project lays them out.
-  const isHome = pathname === "/"
+  const showsTopbar = pathname === "/" || pathname.startsWith("/chat")
 
   useEffect(() => {
     void hydrate()
@@ -39,7 +39,7 @@ function RootLayout() {
       <AppSidebar />
       <SidebarInset className="relative overflow-hidden bg-background">
         <WaveBackground fixed />
-        {isHome ? (
+        {showsTopbar ? (
           <header className="relative z-10 flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear">
             <div className="flex items-center gap-2 px-4">
               <SidebarTrigger className="-ml-1 size-[29px]" />
