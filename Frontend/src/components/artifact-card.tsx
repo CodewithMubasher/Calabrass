@@ -1,6 +1,7 @@
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Download01Icon, File01Icon } from "@hugeicons/core-free-icons"
 
+import { ARTIFACT_DRAG_TYPE, encodeArtifactDrag } from "@/lib/artifact-drag"
 import { kindFor, titleFrom, type ArtifactFile } from "@/lib/artifacts"
 
 /**
@@ -22,6 +23,10 @@ import { kindFor, titleFrom, type ArtifactFile } from "@/lib/artifacts"
  * download sits inside it. A real button cannot nest in a button, hence the
  * role: the row takes the keyboard itself, and the download swallows its own
  * click so the row does not also fire.
+ *
+ * The row also picks up: it is what carries a file to the composer, and the
+ * browser's own drag image is a snapshot of it, so what follows the cursor is
+ * the row as it appears here rather than a generic file.
  */
 export function ArtifactCard({
   file,
@@ -41,6 +46,11 @@ export function ArtifactCard({
     <div
       role="button"
       tabIndex={0}
+      draggable
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = "copy"
+        event.dataTransfer.setData(ARTIFACT_DRAG_TYPE, encodeArtifactDrag(file))
+      }}
       onClick={onSelect}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {

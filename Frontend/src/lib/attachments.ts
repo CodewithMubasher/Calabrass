@@ -1,4 +1,4 @@
-import { previewFor } from "@/lib/artifacts"
+import { previewFor, type ArtifactFile } from "@/lib/artifacts"
 
 /**
  * What the composer knows about a file someone attached.
@@ -58,4 +58,18 @@ export async function attachmentFromFile(
   }
 
   return attachment
+}
+
+/**
+ * Describes a file dragged out of a workspace. The rail already knows what the
+ * listing knows — name, type, size — so a drop is described the moment it lands,
+ * with nothing read: the file is on disk, not in the browser, and a card only
+ * needs to say what it is. The length, when it is known at all, comes from the
+ * other route in: a file the browser itself was handed.
+ */
+export function attachmentFromArtifact(
+  file: ArtifactFile,
+  id: string
+): AttachmentFile {
+  return { id, name: file.name, extension: file.extension, size: file.size }
 }

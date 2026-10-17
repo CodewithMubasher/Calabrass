@@ -1,4 +1,4 @@
-import { useState, useRef, type ChangeEvent, type KeyboardEvent } from "react"
+import { useState, useRef, type ChangeEvent, type DragEvent, type KeyboardEvent } from "react"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { cn } from "cn"
 import "./prompt-input.css"
@@ -14,7 +14,12 @@ import {
 } from "@hugeicons/core-free-icons"
 
 import { Attachment } from "@/components/attachment"
-import { attachmentFromFile, type AttachmentFile } from "@/lib/attachments"
+import { ARTIFACT_DRAG_TYPE, decodeArtifactDrag, isArtifactDrag } from "@/lib/artifact-drag"
+import {
+  attachmentFromArtifact,
+  attachmentFromFile,
+  type AttachmentFile,
+} from "@/lib/attachments"
 import { selectModel, useModelState } from "@/lib/model-store"
 
 const options = [
@@ -45,12 +50,16 @@ export function PromptInput({
   const [open, setOpen] = useState(false)
   const [modelOpen, setModelOpen] = useState(false)
   const [attachments, setAttachments] = useState<AttachmentFile[]>([])
+  /** True while a file from the artifacts rail is over the composer. */
+  const [dropping, setDropping] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const modelRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Only ever used to tell one card from another.
   const attachmentId = useRef(0)
+  // How deep into the composer the drag in flight is.
+  const dragDepth = useRef(0)
 
   const { providers, loading: loadingModels, error: modelError, selected: model } =
     useModelState()
@@ -69,6 +78,9 @@ export function PromptInput({
   })()
 
   const canSend = value.trim() !== "" && !disabled
+
+  const addAttachments = (added: AttachmentFile[]) =>
+    setAttachments((current) => [...current, ...added])
 
   const handleSend = () => {
     if (!canSend) return
@@ -95,7 +107,47 @@ export function PromptInput({
         attachmentFromFile(file, String(attachmentId.current++))
       )
     )
-    setAttachments((current) => [...current, ...described])
+    addAttachments(described)
+  }
+
+  /**
+   * A file dragged out of the artifacts rail. The composer lights up while it is
+   * overhead, and the drop describes the file the way the rail already does.
+   */
+  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    if (disabled || !isArtifactDrag(event.dataTransfer.types)) return
+    // Enter fires again for each nested element the drag crosses, and leave is
+    // not guaranteed to pair up, so leaving the composer is what a count of zero
+    // means.
+    dragDepth.current += 1
+    setDropping(true)
+  }
+
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (disabled || !isArtifactDrag(event.dataTransfer.types)) return
+    // A drop is only allowed on something that says so.
+    event.preventDefault()
+    event.dataTransfer.dropEffect = "copy"
+  }
+
+  const handleDragLeave = () => {
+    dragDepth.current = Math.max(0, dragDepth.current - 1)
+    if (dragDepth.current === 0) setDropping(false)
+  }
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (!isArtifactDrag(event.dataTransfer.types)) return
+    event.preventDefault()
+    dragDepth.current = 0
+    setDropping(false)
+    if (disabled) return
+
+    const raw = event.dataTransfer.getData(ARTIFACT_DRAG_TYPE)
+    const file = decodeArtifactDrag(raw)
+    if (file) {
+      const id = String(attachmentId.current++)
+      addAttachments([attachmentFromArtifact(file, id)])
+    }
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -240,11 +292,16 @@ export function PromptInput({
 
   const renderComposer = () => (
     <div
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
       className={cn(
-        "w-full rounded-2xl border border-white/10 border-l-2 border-l-primary px-4 pt-4 pb-2 shadow-sm",
+        "w-full rounded-2xl border border-white/10 border-l-2 border-l-primary px-4 pt-4 pb-2 shadow-sm transition-colors",
         isInChat
           ? "bg-black/40 backdrop-blur-xl"
-          : "bg-white/5 backdrop-blur-[2px]"
+          : "bg-white/5 backdrop-blur-[2px]",
+        dropping && "border-primary/60 ring-1 ring-primary/30"
       )}
     >
       {attachments.length > 0 ? (
