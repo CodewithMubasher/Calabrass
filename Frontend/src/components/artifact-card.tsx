@@ -15,18 +15,36 @@ import { Download01Icon, File01Icon } from "@hugeicons/core-free-icons"
  * gap under it, while the text and the download keep the card's own centre. The
  * card's `overflow-hidden` trims the tile's square bottom corners to match the
  * card's rounding.
+ *
+ * The whole row opens the artifact, so it is the interactive element and the
+ * download sits inside it. A real button cannot nest in a button, hence the
+ * role: the row takes the keyboard itself, and the download swallows its own
+ * click so the row does not also fire.
  */
 export function ArtifactCard({
   title,
   kind,
   extension,
+  onSelect,
 }: {
   title: string
   kind: string
   extension: string
+  onSelect: () => void
 }) {
   return (
-    <div className="group flex cursor-pointer items-center gap-4 overflow-hidden rounded-2xl border border-white/10 p-3.5 transition-colors hover:border-white/25">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault()
+          onSelect()
+        }
+      }}
+      className="group flex cursor-pointer items-center gap-4 overflow-hidden rounded-2xl border border-white/10 p-3.5 outline-none transition-colors hover:border-white/25 focus-visible:ring-2 focus-visible:ring-white/20"
+    >
       {/* `-mb-3.5` is the card's `p-3.5`; the two move together. The bottom
           border is dropped so the tile reads as tucked into the card's base. */}
       <div className="grid size-14 shrink-0 -mb-3.5 self-end place-items-center rounded-t-xl border border-b-0 border-white/10 transition-colors group-hover:bg-white/5">
@@ -47,6 +65,9 @@ export function ArtifactCard({
       <button
         type="button"
         aria-label={`Download ${title}`}
+        // Downloading is not wired yet; the click stops here either way, so the
+        // row's open handler does not fire behind it.
+        onClick={(event) => event.stopPropagation()}
         className="grid size-9 shrink-0 cursor-pointer place-items-center rounded-full text-white/50 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-white/20"
       >
         <HugeiconsIcon
