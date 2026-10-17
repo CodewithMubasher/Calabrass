@@ -133,8 +133,7 @@ func (s *Server) delegateWork(ctx context.Context, chat store.ChatDetail, args a
 	}
 
 	workspace := s.workspaceFor(chat.Chat)
-	tools := agent.Tools(workspace)
-	system := agent.SystemPrompt(workspace, s.system)
+	setup := s.setupTurn(ctx, workspace)
 
 	// The worker continues the conversation, so it knows what has been said
 	// already, and the task is its instruction.
@@ -151,9 +150,9 @@ func (s *Server) delegateWork(ctx context.Context, chat store.ChatDetail, args a
 	reply, err := s.registry.Stream(ctx, ai.StreamRequest{
 		ProviderID: providerID,
 		Model:      modelID,
-		System:     system,
+		System:     setup.system,
 		Messages:   turns,
-		Tools:      tools,
+		Tools:      setup.tools,
 		MaxSteps:   agent.DefaultMaxSteps,
 	}, ai.Handlers{
 		OnText:      func(string) error { return nil },

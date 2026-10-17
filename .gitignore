@@ -35,5 +35,11 @@ pnpm-debug.log*
 Backend/data/
 Backend/*.exe
 
+# MCP servers we ship: the built binary, and the temporary file the Go toolchain
+# leaves beside it when the binary was in use while it was being rebuilt
+MCP/*/*.exe
+MCP/*/*.exe~
+MCP/*/*.test
+
 # The agent's workspaces: the files it creates while working
 /workspace/

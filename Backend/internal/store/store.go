@@ -714,8 +714,7 @@ type ConnectorRecord struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	Command string `json:"command"`
-	// Enabled is whether the agent may use the connector. Nothing starts it
-	// yet, so this is the switch the UI sets and stores.
+	// Enabled is whether the agent may start the connector and use its tools.
 	Enabled   bool  `json:"enabled"`
 	CreatedAt int64 `json:"createdAt"`
 	UpdatedAt int64 `json:"updatedAt"`

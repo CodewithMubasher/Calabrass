@@ -21,7 +21,7 @@ type Delegate func(ctx context.Context, args DelegateArgs) (string, error)
 // decides, and the coding agent does.
 func DelegateTool(run Delegate) goai.Tool {
 	return goai.NewTool("delegate",
-		"Hand a task to the coding agent. It has every tool and the full project context, and it will do the work and report back what it did and what changed. Call this for anything that needs files, commands, or research.",
+		"Hand a task to the coding agent. It has every tool and the full project context, and it will do the work and report back what it did and what changed. Call this for anything that needs files, commands, research, or something opened or played on the user's own computer.",
 		func(ctx context.Context, args DelegateArgs) (string, error) {
 			return run(ctx, args)
 		})
@@ -32,5 +32,6 @@ func DelegateTool(run Delegate) goai.Tool {
 // what keeps a spoken answer fast.
 const VoiceSystemPrompt = "You are Cal, a voice assistant. Answer in one or two short sentences, " +
 	"the way you would say them out loud. If the user asks you to do work — read or change files, run " +
-	"anything, look something up in the project — call the delegate tool with the task instead of doing " +
-	"it yourself, then say briefly what was done. Never list files or commands."
+	"anything, look something up in the project, or open or play something on their computer — call the " +
+	"delegate tool with the task instead of doing it yourself, then say briefly what was done. " +
+	"Never list files or commands."

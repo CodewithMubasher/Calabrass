@@ -324,24 +324,18 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		turns = append(turns, ai.Message{Role: ai.RoleUser, Content: req.Content})
 	}
 
-	// The harness: the tools for the workspace, and a prompt that explains the
-	// project the model is working in. Without a workspace the turn is a plain
-	// completion, which is what a fresh checkout without a project looks like.
-	workspace := s.workspaceFor(chat.Chat)
-	tools := agent.Tools(workspace)
-	system := s.system
-	if workspace != nil {
-		system = agent.SystemPrompt(workspace, s.system)
-	}
+	// The harness: the prompt that explains what the model is working with — the
+	// project, and the machine the connectors reach — and the tools it may call.
+	setup := s.setupTurn(ctx, s.workspaceFor(chat.Chat))
 
 	started := time.Now()
 	var lastTrace ai.Trace
 	reply, genErr := s.registry.Stream(ctx, ai.StreamRequest{
 		ProviderID: providerID,
 		Model:      modelID,
-		System:     system,
+		System:     setup.system,
 		Messages:   turns,
-		Tools:      tools,
+		Tools:      setup.tools,
 		MaxSteps:   agent.DefaultMaxSteps,
 	}, ai.Handlers{
 		OnText: func(delta string) error {

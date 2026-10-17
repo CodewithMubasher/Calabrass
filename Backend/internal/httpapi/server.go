@@ -14,6 +14,7 @@ import (
 
 	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/ai"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/connectors"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/voice"
 )
@@ -37,7 +38,10 @@ type Deps struct {
 	// than the one that does its work. Empty means "use the chat model".
 	VoiceProvider string
 	VoiceModel    string
-	Logger        *slog.Logger
+	// Connectors holds the MCP servers the agent may start. When it is nil one
+	// is built here, which is what tests get.
+	Connectors *connectors.Pool
+	Logger     *slog.Logger
 }
 
 // Server holds the HTTP handlers.
@@ -51,6 +55,7 @@ type Server struct {
 	speaker       voice.Speaker
 	voiceProvider string
 	voiceModelID  string
+	connectors    *connectors.Pool
 	log           *slog.Logger
 }
 
@@ -59,6 +64,11 @@ func New(deps Deps) http.Handler {
 	log := deps.Logger
 	if log == nil {
 		log = slog.Default()
+	}
+
+	pool := deps.Connectors
+	if pool == nil {
+		pool = connectors.New(deps.Store, "", log)
 	}
 
 	s := &Server{
@@ -71,6 +81,7 @@ func New(deps Deps) http.Handler {
 		speaker:       voice.NewSpeaker(deps.MistralKey),
 		voiceProvider: deps.VoiceProvider,
 		voiceModelID:  deps.VoiceModel,
+		connectors:    pool,
 		log:           log,
 	}
 
@@ -88,6 +99,7 @@ func New(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/connectors", s.handleCreateConnector)
 	mux.HandleFunc("PATCH /api/connectors/{connectorID}", s.handleUpdateConnector)
 	mux.HandleFunc("DELETE /api/connectors/{connectorID}", s.handleDeleteConnector)
+	mux.HandleFunc("GET /api/connectors/{connectorID}/tools", s.handleConnectorTools)
 	mux.HandleFunc("GET /api/voice", s.handleVoiceStream)
 	mux.HandleFunc("GET /api/chats", s.handleListChats)
 	mux.HandleFunc("POST /api/chats", s.handleCreateChat)

@@ -15,6 +15,7 @@ import (
 	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/ai"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/config"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/connectors"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/httpapi"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
 )
@@ -97,6 +98,12 @@ func main() {
 		}
 	}
 
+	// The MCP servers the agent may start. They are started when a turn first
+	// needs them and stopped when they have been idle, or when this process
+	// ends — the connector's own process lives inside this one.
+	pool := connectors.New(st, agent.DiscoverRoot(""), log)
+	defer pool.Close()
+
 	handler := httpapi.New(httpapi.Deps{
 		Store:         st,
 		Registry:      registry,
@@ -106,6 +113,7 @@ func main() {
 		MistralKey:    cfg.MistralKey,
 		VoiceProvider: cfg.VoiceProvider,
 		VoiceModel:    cfg.VoiceModel,
+		Connectors:    pool,
 		Logger:        log,
 	})
 
