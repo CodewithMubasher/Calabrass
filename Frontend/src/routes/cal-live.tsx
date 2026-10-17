@@ -19,19 +19,15 @@ function CalLivePage() {
   // The microphone is open as soon as the stage is, so there is nothing to
   // click to start talking. The orb is the one control left: it pauses the
   // session, and clicking again carries on.
-  const { phase, caption, messages, error, supported, toggle } = useVoice(GREETING)
+  const { phase, caption, turn, error, supported, toggle } = useVoice(GREETING)
   const hostRef = useRef<HTMLDivElement | null>(null)
   const logRef = useRef<HTMLDivElement | null>(null)
 
-  // Keep the newest line in view, unless the reader has scrolled back to read
-  // something.
+  // A long answer can still run past the box: keep its end in view.
   useEffect(() => {
     const log = logRef.current
-    if (!log) return
-    if (log.scrollHeight - log.scrollTop - log.clientHeight < 48) {
-      log.scrollTop = log.scrollHeight
-    }
-  }, [messages, caption])
+    if (log) log.scrollTop = log.scrollHeight
+  }, [turn, caption])
 
   // The orb breathes with the voice, the way the intro always did.
   useEffect(() => {
@@ -73,27 +69,33 @@ function CalLivePage() {
       <div className="max-w-md text-center">
         <h1 className="text-xl font-semibold text-white">Cal Live</h1>
 
-        {/* The conversation: everything said so far, with the line still being
-            heard or answered arriving underneath it. */}
+        {/* One exchange at a time: the question, then the answer, and the line
+            still being heard while there is not one yet. The whole conversation
+            is in the chat, not here. */}
         <div
           ref={logRef}
           className="scrollbar-thin mt-3 max-h-52 space-y-1.5 overflow-y-auto text-left"
         >
-          {messages.map((message, index) => (
-            <p
-              key={index}
-              className={cn(
-                "text-xs leading-5",
-                message.role === "user" ? "text-white/55" : "text-white/90"
-              )}
-            >
+          {turn.user ? (
+            <p className="text-xs leading-5 text-white/55">
               <span className="mr-1.5 text-[10px] tracking-wide text-white/30 uppercase">
-                {message.role === "user" ? "You" : "Cal"}
+                You
               </span>
-              {message.text}
+              {turn.user}
             </p>
-          ))}
+          ) : null}
 
+          {turn.assistant ? (
+            <p className="text-xs leading-5 text-white/90">
+              <span className="mr-1.5 text-[10px] tracking-wide text-white/30 uppercase">
+                Cal
+              </span>
+              {turn.assistant}
+            </p>
+          ) : null}
+
+          {/* Live words while a question is still being heard, and the status
+              when there is nothing to hear: paused, not connected, quiet. */}
           {caption ? (
             <p className="text-xs leading-5 text-white/45 italic">{caption}</p>
           ) : null}

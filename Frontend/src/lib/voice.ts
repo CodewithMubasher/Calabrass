@@ -13,18 +13,22 @@ import { connectVoice, type VoiceEvent, type VoiceSocket } from "@/lib/voice/soc
 /** What the stage is doing. The orb's only control pauses and resumes it. */
 export type VoicePhase = "idle" | "listening" | "thinking" | "speaking" | "paused"
 
-/** One thing said in the conversation, shown beside the orb. */
-export interface VoiceMessage {
-  role: "user" | "assistant"
-  text: string
+/** The exchange on stage: the question being answered, and the answer. */
+export interface VoiceTurn {
+  user: string
+  assistant: string
 }
 
 export interface VoiceState {
   phase: VoicePhase
-  /** The line under the heading: live captions, then the answer. */
+  /** The line still being heard or written, before it joins the turn. */
   caption: string
-  /** Everything said so far, newest last. */
-  messages: VoiceMessage[]
+  /**
+   * The exchange being had right now, and only that one: the stage shows a
+   * question and its answer, then clears when the next question begins. The
+   * whole conversation lives in the chat the session created.
+   */
+  turn: VoiceTurn
   error: string | null
   /** Whether the socket to the backend is open. */
   live: boolean
@@ -50,7 +54,7 @@ export function useVoice(greeting: string): VoiceState {
   )
   const [error, setError] = useState<string | null>(null)
   const [live, setLive] = useState(false)
-  const [messages, setMessages] = useState<VoiceMessage[]>([])
+  const [turn, setTurn] = useState<VoiceTurn>({ user: "", assistant: "" })
 
   const phaseRef = useRef<VoicePhase>("idle")
   const socketRef = useRef<VoiceSocket | null>(null)
@@ -109,17 +113,17 @@ export function useVoice(greeting: string): VoiceState {
           break
         case "user":
           // A new turn has been heard, so the previous answer is over: whatever
-          // arrives next belongs to this reply and may play. The question is part
-          // of the conversation now, so it is not repeated as the live line.
+          // arrives next belongs to this reply and may play. The question takes
+          // the stage, and clears the exchange before it.
           playbackRef.current.reset()
           setCaption("")
-          setMessages((current) =>
-            [...current, { role: "user" as const, text: event.user }].slice(-24)
-          )
+          setTurn({ user: event.user, assistant: "" })
           break
         case "token":
+          // The answer is written into the stage as it arrives, so it reads as
+          // one reply rather than a line under a line.
           replyRef.current += event.text
-          setCaption(replyRef.current)
+          setTurn((current) => ({ ...current, assistant: replyRef.current }))
           break
         case "audio":
           // Audio only arrives while Cal is talking, greeting or answer alike.
@@ -128,13 +132,11 @@ export function useVoice(greeting: string): VoiceState {
           break
         case "spoken":
           // The greeting is done: the visitor can be listened to from here, and
-          // what Cal just said is part of the conversation like anything else.
+          // what Cal just said stands on the stage until the first question.
           mutedUntilRef.current = 0
           if (!greetingRef.current) {
             greetingRef.current = true
-            setMessages((current) =>
-              [...current, { role: "assistant" as const, text: greeting }].slice(-24)
-            )
+            setTurn({ user: "", assistant: greeting })
           }
           setPhase("listening")
           break
@@ -144,12 +146,8 @@ export function useVoice(greeting: string): VoiceState {
           break
         case "done":
           replyRef.current = event.text || replyRef.current
-          // The answer belongs to the history now, not to the line still being
-          // written.
           setCaption("")
-          setMessages((current) =>
-            [...current, { role: "assistant" as const, text: replyRef.current }].slice(-24)
-          )
+          setTurn((current) => ({ ...current, assistant: replyRef.current }))
           setPhase("listening")
           break
         case "error":
@@ -286,6 +284,9 @@ export function useVoice(greeting: string): VoiceState {
         }
         setPhase("listening")
         replyRef.current = ""
+        // The question clears the stage: one exchange at a time, and the words
+        // being heard take over as the live line.
+        setTurn({ user: "", assistant: "" })
         setError(null)
         quietSinceRef.current = 0
         console.info("[voice] speech started", level.toFixed(4))
@@ -391,5 +392,5 @@ export function useVoice(greeting: string): VoiceState {
     }
   }, [supported, connectSocket, startMic, stopMic])
 
-  return { phase, caption, messages, error, live, supported, toggle }
+  return { phase, caption, turn, error, live, supported, toggle }
 }
