@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react"
 import {
   Cancel01Icon,
   Copy01Icon,
+  Download01Icon,
   File01Icon,
   Maximize01Icon,
   Minimize01Icon,
@@ -12,7 +13,14 @@ import {
 import { cn } from "cn"
 import { CodeBlock } from "@/components/code-block"
 import { MarkdownRenderer } from "@/components/markdown-renderer"
-import { languageFor, previewFor, type Artifact } from "@/lib/artifacts"
+import { api, startDownload } from "@/lib/api"
+import {
+  directoryOf,
+  languageFor,
+  previewFor,
+  titleFrom,
+  type ArtifactFile,
+} from "@/lib/artifacts"
 
 /**
  * The rail's header buttons: square, quiet, and the same size as the download
@@ -23,25 +31,37 @@ const HEADER_BUTTON =
 
 /**
  * One artifact, opened. The header takes the place of "Artifacts" — the file's
- * own icon, name and extension, then maximize, copy and close — and the body
- * takes the place of the rows.
+ * icon, folder, name and extension, then maximize, download, copy and close —
+ * and the body takes the place of the rows.
  *
  * It returns the header and the body as two siblings rather than wrapping them,
  * because the panel's card is already the flex column that lays them out.
  * Keeping the frame in one place is what stops the two views from drifting.
+ *
+ * The file is read from disk, not carried in the listing: `modified` is part of
+ * the key, so a file that changes while it is open is read again and the view
+ * follows the agent as it writes. The panel mounts one of these per path, which
+ * is what gives each file a clean slate.
  */
 export function ArtifactDetail({
-  artifact,
+  chatId,
+  file,
   maximized,
   onToggleMaximize,
   onClose,
 }: {
-  artifact: Artifact
+  chatId: string
+  file: ArtifactFile
   maximized: boolean
   onToggleMaximize: () => void
   onClose: () => void
 }) {
-  const preview = previewFor(artifact.extension)
+  const preview = previewFor(file.extension)
+  const [content, setContent] = useState("")
+  const [loaded, setLoaded] = useState(false)
+  const [binary, setBinary] = useState(false)
+  const [truncated, setTruncated] = useState(false)
+  const [failed, setFailed] = useState(false)
   const [copied, setCopied] = useState(false)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -49,15 +69,42 @@ export function ArtifactDetail({
     return () => clearTimeout(copyTimer.current)
   }, [])
 
-  // Nothing to put on the clipboard when there is no text to show either.
-  const canCopy = preview !== "none"
+  useEffect(() => {
+    let cancelled = false
+
+    api
+      .readArtifact(chatId, file.path)
+      .then((result) => {
+        if (cancelled) return
+        setContent(result.content)
+        setBinary(result.binary)
+        setTruncated(result.truncated)
+        setFailed(false)
+        setLoaded(true)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setFailed(true)
+        setLoaded(true)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [chatId, file.path, file.modified])
+
+  // A file we cannot read as text has nothing to put on the clipboard either.
+  const canCopy = loaded && !failed && !binary && preview !== "none"
 
   function handleCopy() {
-    navigator.clipboard.writeText(artifact.content)
+    navigator.clipboard.writeText(content)
     setCopied(true)
     clearTimeout(copyTimer.current)
     copyTimer.current = setTimeout(() => setCopied(false), 2000)
   }
+
+  const directory = directoryOf(file)
+  const readable = loaded && !failed && !binary && preview !== "none"
 
   return (
     <>
@@ -67,12 +114,19 @@ export function ArtifactDetail({
           strokeWidth={2}
           className="size-4 shrink-0 text-white/50"
         />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-white">
-          {artifact.title}
-        </span>
-        <span className="shrink-0 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-white/50">
-          {artifact.extension}
-        </span>
+        <p className="flex min-w-0 flex-1 items-baseline gap-1.5" title={file.path}>
+          {directory !== "" ? (
+            <span className="truncate text-xs text-white/35">{directory}</span>
+          ) : null}
+          <span className="truncate text-sm font-medium text-white">
+            {titleFrom(file.name)}
+          </span>
+        </p>
+        {file.extension !== "" ? (
+          <span className="shrink-0 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-white/50">
+            {file.extension}
+          </span>
+        ) : null}
 
         <div className="flex shrink-0 items-center gap-0.5">
           <button
@@ -84,6 +138,18 @@ export function ArtifactDetail({
           >
             <HugeiconsIcon
               icon={maximized ? Minimize01Icon : Maximize01Icon}
+              strokeWidth={2}
+              className="size-3.5"
+            />
+          </button>
+          <button
+            type="button"
+            aria-label={`Download ${file.name}`}
+            onClick={() => startDownload(api.artifactFileUrl(chatId, file.path))}
+            className={HEADER_BUTTON}
+          >
+            <HugeiconsIcon
+              icon={Download01Icon}
               strokeWidth={2}
               className="size-3.5"
             />
@@ -120,7 +186,32 @@ export function ArtifactDetail({
       </header>
 
       <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-5">
-        {preview === "none" ? (
+        {failed ? (
+          <p className="text-xs text-white/40">
+            {file.name} could not be read. It may have been moved or deleted.
+          </p>
+        ) : !loaded ? null : readable ? (
+          // The measure is capped for the same reason the reply caps it: a file
+          // read at full screen is a line nobody can follow.
+          <div className="mx-auto w-full max-w-[42em]">
+            {preview === "code" ? (
+              <CodeBlock language={languageFor(file.extension)}>
+                {content}
+              </CodeBlock>
+            ) : (
+              // Same container the reply uses, so a document here is typeset by
+              // the same stylesheet, at the same size and measure.
+              <div className="typeset typeset-chat">
+                <MarkdownRenderer content={content} />
+              </div>
+            )}
+            {truncated ? (
+              <p className="mt-4 text-xs text-white/40">
+                Only the first 32 KB is shown. Download the file for the rest.
+              </p>
+            ) : null}
+          </div>
+        ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
             <div className="grid size-12 place-items-center rounded-xl border border-white/10">
               <HugeiconsIcon
@@ -130,22 +221,10 @@ export function ArtifactDetail({
               />
             </div>
             <p className="text-xs text-white/40">
-              No preview for {artifact.extension} files yet.
+              No preview for{" "}
+              {file.extension === "" ? "this file" : `${file.extension} files`} —
+              download it to open it.
             </p>
-          </div>
-        ) : preview === "code" ? (
-          // The measure is capped for the same reason the reply caps it: a code
-          // file read at full screen is a line nobody can follow.
-          <div className="mx-auto w-full max-w-[42em]">
-            <CodeBlock language={languageFor(artifact.extension)}>
-              {artifact.content}
-            </CodeBlock>
-          </div>
-        ) : (
-          // Same container the reply uses, so a document here is typeset by the
-          // same stylesheet, at the same size and measure.
-          <div className="typeset typeset-chat mx-auto w-full max-w-[42em]">
-            <MarkdownRenderer content={artifact.content} />
           </div>
         )}
       </div>

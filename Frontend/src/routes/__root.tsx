@@ -21,7 +21,7 @@ import {
 import { hydrate } from "@/lib/chat-store"
 import { loadModels } from "@/lib/model-store"
 import { toggleArtifacts, usePanelState } from "@/lib/panel-store"
-import { hasTopbar } from "@/lib/routes"
+import { hasTopbar, chatIdFrom } from "@/lib/routes"
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -92,7 +92,9 @@ function RootLayout() {
               <Outlet />
             </div>
           </div>
-          {showsTopbar ? <ArtifactsPanel open={artifactsOpen} /> : null}
+          {showsTopbar ? (
+            <ArtifactsPanel open={artifactsOpen} chatId={chatIdFrom(pathname)} />
+          ) : null}
         </div>
       </SidebarInset>
     </SidebarProvider>

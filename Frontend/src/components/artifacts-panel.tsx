@@ -1,11 +1,12 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Download01Icon, Note01Icon } from "@hugeicons/core-free-icons"
 
 import { cn } from "cn"
 import { ArtifactCard } from "@/components/artifact-card"
 import { ArtifactDetail } from "@/components/artifact-detail"
-import { PLACEHOLDER_ARTIFACTS, type Artifact } from "@/lib/artifacts"
+import { useArtifactFiles, watchArtifacts } from "@/lib/artifact-store"
+import { api, startDownload } from "@/lib/api"
 
 /**
  * The Artifacts rail: a right-hand panel that *pushes* the page instead of
@@ -19,18 +20,29 @@ import { PLACEHOLDER_ARTIFACTS, type Artifact } from "@/lib/artifacts"
  * detail's maximize: the rail grows to fill the row and the app column gives up
  * its width, rather than the panel lifting out and covering it.
  *
- * Two views live in the one card: the list, and the artifact opened from it.
+ * What it lists is real: the files in the workspace this chat works in, read
+ * from disk by the backend and pushed here whenever they change, so a file the
+ * agent writes is in the list without a reload, and one it deletes leaves it.
+ * The list is only followed while the rail is open — reopening draws the last
+ * listing it had, and the connection corrects it immediately.
+ *
+ * Two views live in the one card: the list, and the file opened from it.
  * Dismissing either the rail or the detail returns to the list — and returns
  * the rail to its own width, since maximizing is part of reading a document.
  *
- * It is closed from the file icon in the topbar or the `d` key; the header's
- * download icon is the list's own action for whatever is selected there.
- *
- * The rows in `PLACEHOLDER_ARTIFACTS` are fakes that shape the UI. The real
- * list and the content behind each entry come from the artifacts store next.
+ * The header's download icon takes the whole workspace as one archive, since a
+ * browser starts one download per click; each row and the detail have their own
+ * for a single file.
  */
-export function ArtifactsPanel({ open }: { open: boolean }) {
-  const [selected, setSelected] = useState<Artifact | null>(null)
+export function ArtifactsPanel({
+  open,
+  chatId,
+}: {
+  open: boolean
+  chatId: string
+}) {
+  const files = useArtifactFiles(chatId)
+  const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [maximized, setMaximized] = useState(false)
 
   // A closed rail is a dismissed detail: reopening always lands on the list
@@ -45,15 +57,27 @@ export function ArtifactsPanel({ open }: { open: boolean }) {
   if (wasOpen !== open) {
     setWasOpen(open)
     if (open) {
-      setSelected(null)
+      setSelectedPath(null)
       setMaximized(false)
     }
   }
 
+  // Follow the workspace for as long as the rail is on screen.
+  useEffect(() => {
+    if (!open) return
+    return watchArtifacts(chatId)
+  }, [open, chatId])
+
   function closeDetail() {
-    setSelected(null)
+    setSelectedPath(null)
     setMaximized(false)
   }
+
+  // Taken from the listing rather than held as a copy, so the open file is
+  // always the freshest one — and a file that is deleted closes the detail by
+  // itself, since it is no longer in the list to find.
+  const selected =
+    files.find((file) => file.path === selectedPath) ?? null
 
   return (
     <aside
@@ -75,7 +99,9 @@ export function ArtifactsPanel({ open }: { open: boolean }) {
       >
         {selected ? (
           <ArtifactDetail
-            artifact={selected}
+            key={selected.path}
+            chatId={chatId}
+            file={selected}
             maximized={maximized}
             onToggleMaximize={() => setMaximized((value) => !value)}
             onClose={closeDetail}
@@ -91,8 +117,10 @@ export function ArtifactsPanel({ open }: { open: boolean }) {
               <span className="text-sm font-medium text-white">Artifacts</span>
               <button
                 type="button"
-                aria-label="Download"
-                className="ml-auto grid size-7 cursor-pointer place-items-center rounded-lg text-white/50 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-white/20"
+                aria-label="Download all"
+                onClick={() => startDownload(api.artifactsArchiveUrl(chatId))}
+                disabled={files.length === 0}
+                className="ml-auto grid size-7 cursor-pointer place-items-center rounded-lg text-white/50 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-white/20 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-white/50"
               >
                 <HugeiconsIcon
                   icon={Download01Icon}
@@ -103,19 +131,23 @@ export function ArtifactsPanel({ open }: { open: boolean }) {
             </header>
 
             <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-3">
-              {PLACEHOLDER_ARTIFACTS.length === 0 ? (
-                <div className="flex h-full items-center justify-center">
-                  <p className="text-xs text-white/40">Nothing here yet.</p>
+              {files.length === 0 ? (
+                <div className="flex h-full items-center justify-center px-6 text-center">
+                  <p className="text-xs text-white/40">
+                    No files in this workspace yet. Anything the agent writes
+                    lands here.
+                  </p>
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
-                  {PLACEHOLDER_ARTIFACTS.map((artifact) => (
+                  {files.map((file) => (
                     <ArtifactCard
-                      key={artifact.id}
-                      title={artifact.title}
-                      kind={artifact.kind}
-                      extension={artifact.extension}
-                      onSelect={() => setSelected(artifact)}
+                      key={file.path}
+                      file={file}
+                      onSelect={() => setSelectedPath(file.path)}
+                      onDownload={() =>
+                        startDownload(api.artifactFileUrl(chatId, file.path))
+                      }
                     />
                   ))}
                 </div>

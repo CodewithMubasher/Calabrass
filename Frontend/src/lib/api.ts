@@ -48,6 +48,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T
 }
 
+/** Query for the artifact endpoints: a chat scopes them to its workspace, and
+ *  no chat means the project's default one. */
+function artifactQuery(chatId: string, extra: Record<string, string> = {}) {
+  const params = new URLSearchParams(extra)
+  if (chatId) params.set("chatId", chatId)
+  return params.toString()
+}
+
 export const api = {
   health: () => request<{ status: string; providers: Record<string, boolean> }>("/health"),
 
@@ -141,6 +149,43 @@ export const api = {
 
   deleteChat: (chatId: string) =>
     request<{ deleted: boolean }>(`/chats/${chatId}`, { method: "DELETE" }),
+
+  /** The workspace listing, as a stream: it arrives complete, and again as soon
+   *  as the folder changes. */
+  artifactStreamUrl: (chatId: string) =>
+    `${BASE}/artifacts/stream?${artifactQuery(chatId)}`,
+
+  /** A file's text for the detail view. A binary file answers with
+   *  `binary: true` instead of bytes, and a long one is cut short. */
+  readArtifact: (chatId: string, path: string) =>
+    request<{
+      binary: boolean
+      content: string
+      truncated: boolean
+      size: number
+    }>(`/artifacts/content?${artifactQuery(chatId, { path })}`),
+
+  /** One file as it is on disk, which is what the browser saves. */
+  artifactFileUrl: (chatId: string, path: string) =>
+    `${BASE}/artifacts/file?${artifactQuery(chatId, { path })}`,
+
+  /** Every file in the workspace, in one archive. */
+  artifactsArchiveUrl: (chatId: string) =>
+    `${BASE}/artifacts/archive?${artifactQuery(chatId)}`,
+}
+
+/**
+ * Start a download without leaving the page. The artifact endpoints answer with
+ * Content-Disposition, so the browser saves the response rather than navigating
+ * to it — a link is all it takes.
+ */
+export function startDownload(url: string) {
+  const link = document.createElement("a")
+  link.href = url
+  link.rel = "noopener"
+  document.body.append(link)
+  link.click()
+  link.remove()
 }
 
 export interface StreamHandlers {

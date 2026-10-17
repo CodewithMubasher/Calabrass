@@ -7,3 +7,13 @@
 export function hasTopbar(pathname: string) {
   return pathname === "/" || pathname.startsWith("/chat")
 }
+
+/**
+ * The chat a path belongs to, or "". The rail is mounted above the routes, so
+ * it reads the chat from the URL rather than from route params. No chat means
+ * the workspace the project works in by default.
+ */
+export function chatIdFrom(pathname: string) {
+  const match = /^\/chat\/([^/]+)/.exec(pathname)
+  return match ? decodeURIComponent(match[1]) : ""
+}
