@@ -139,7 +139,7 @@ export function Markdown({
   return (
     <div
       className={cn(
-        "min-w-0 text-[0.9375rem] leading-relaxed wrap-break-word",
+        "min-w-0 text-base leading-relaxed wrap-break-word",
         className
       )}
     >

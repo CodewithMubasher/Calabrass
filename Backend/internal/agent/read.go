@@ -90,7 +90,7 @@ func (w *Workspace) readFile(args readFileArgs) (string, error) {
 		fmt.Fprintf(&b, "%5d| %s\n", i+1, line)
 		written += len(line) + 8
 		if written >= readFileMaxBytes {
-			fmt.Fprintf(&b, "… [output capped at %d KB; continue with offset=%d]\n", readFileMaxBytes>>10, i+2)
+			fmt.Fprintf(&b, "… [stopped at %d KB; continue with offset=%d, or search with grep]\n", readFileMaxBytes>>10, i+2)
 			break
 		}
 	}

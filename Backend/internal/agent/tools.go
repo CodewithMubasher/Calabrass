@@ -18,8 +18,10 @@ const (
 	// readFileLines is how many lines read_file returns when the model does not
 	// ask for a window of its own.
 	readFileLines = 400
-	// readFileMaxBytes caps one read, so a huge file cannot flood the context.
-	readFileMaxBytes = 200 << 10
+	// readFileMaxBytes caps one read. It is the guard that keeps a read from
+	// filling the context by itself: 32 KB is roughly eight thousand tokens, and
+	// a file with very long lines reaches that in a few dozen of them.
+	readFileMaxBytes = 32 << 10
 	// readFileLineBytes caps a single line, so minified files stay readable.
 	readFileLineBytes = 2000
 	// binarySniffBytes is how much of a file is checked for NUL bytes before
@@ -50,11 +52,12 @@ func Tools(ws *Workspace) []goai.Tool {
 	if ws == nil {
 		return nil
 	}
-	tools := ReadTools(ws)
-	return append(tools,
+	return append(ReadTools(ws),
 		createDirTool(ws),
 		writeFileTool(ws),
 		editFileTool(ws),
+		editLinesTool(ws),
+		shellTool(ws),
 	)
 }
 
