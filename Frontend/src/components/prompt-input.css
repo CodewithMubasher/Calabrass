@@ -46,3 +46,81 @@
     animation: none;
   }
 }
+
+/* A file from the artifacts rail being held over the composer. The border turns
+   into the brand's four colours as one band that travels around it: a conic
+   gradient of the palette, rotated by an angle that animates, so the band chases
+   its own tail instead of sitting still.
+   
+   The four are the app's own — the orb's `PALETTE` and the wave background's
+   `DEFAULT_COLORS` are the same four — repeated in both places rather than
+   shared, which is worth unifying if a third user turns up. */
+
+@property --drop-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+/* The ring goes on a wrapper around the composer rather than on the composer
+   itself: an absolutely positioned box is placed against the padding box, and
+   the composer's left border is two pixels, so a ring anchored to the composer
+   would sit a pixel out on three sides and miss the left edge entirely. On a
+   wrapper with no border, the two boxes are the same rectangle. */
+.drop-ring {
+  position: relative;
+}
+
+/* The band stands in for the border, so the border underneath must not show
+   through it. Said here rather than with a Tailwind class because the composer's
+   accent is on one side only (`border-l-primary`), and which of two colour
+   utilities wins is decided by the order Tailwind happens to emit them in. */
+.drop-ring > * {
+  border-color: transparent;
+}
+
+.drop-ring::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  /* Two pixels: at least as thick as the composer's own thickest border, so the
+     band covers the border rather than sitting beside it. */
+  padding: 2px;
+  background: conic-gradient(
+    from var(--drop-angle),
+    #6bffe0 0deg,
+    #5b7fff 90deg,
+    #a07cff 180deg,
+    #ff8fb8 270deg,
+    #6bffe0 360deg
+  );
+  /* Keep the band, drop the middle: what is left is the ring. */
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  /* Four pastels at full strength are loud for something you are only holding a
+     file over; dimmed, they read as a highlight rather than a headline. */
+  opacity: 0.5;
+  animation: drop-ring-turn 2.4s linear infinite;
+  /* The band lies over the composer's edge, so it must not swallow the drag
+     events meant for the composer underneath it. */
+  pointer-events: none;
+}
+
+@keyframes drop-ring-turn {
+  to {
+    --drop-angle: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drop-ring::after {
+    animation: none;
+  }
+}
