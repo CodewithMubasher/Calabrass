@@ -1,4 +1,4 @@
-import { useState, useRef, type KeyboardEvent } from "react"
+import { useState, useRef, type ChangeEvent, type KeyboardEvent } from "react"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { cn } from "cn"
 import "./prompt-input.css"
@@ -13,6 +13,8 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons"
 
+import { Attachment } from "@/components/attachment"
+import { attachmentFromFile, type AttachmentFile } from "@/lib/attachments"
 import { selectModel, useModelState } from "@/lib/model-store"
 
 const options = [
@@ -42,9 +44,13 @@ export function PromptInput({
   const [selected, setSelected] = useState("readonly")
   const [open, setOpen] = useState(false)
   const [modelOpen, setModelOpen] = useState(false)
+  const [attachments, setAttachments] = useState<AttachmentFile[]>([])
   const ref = useRef<HTMLDivElement>(null)
   const modelRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  // Only ever used to tell one card from another.
+  const attachmentId = useRef(0)
 
   const { providers, loading: loadingModels, error: modelError, selected: model } =
     useModelState()
@@ -68,7 +74,28 @@ export function PromptInput({
     if (!canSend) return
     onSend?.(value.trim())
     setValue("")
+    // The attachments went with the message. They are only described here for
+    // now — nothing reads them on the way out — so the composer starts clean.
+    setAttachments([])
     textareaRef.current?.focus()
+  }
+
+  /**
+   * Picked files become cards. Each one is read in the browser for its length
+   * and nothing else: no upload, no bytes kept.
+   */
+  const handlePickedFiles = async (event: ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(event.target.files ?? [])
+    // Cleared so picking the same file twice in a row still counts as a pick.
+    event.target.value = ""
+    if (picked.length === 0) return
+
+    const described = await Promise.all(
+      picked.map((file) =>
+        attachmentFromFile(file, String(attachmentId.current++))
+      )
+    )
+    setAttachments((current) => [...current, ...described])
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -84,7 +111,20 @@ export function PromptInput({
         <button className="flex size-7 cursor-pointer items-center justify-center rounded-full bg-white/5 text-white">
           <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} className="size-4" />
         </button>
-        <button className="flex size-7 cursor-pointer items-center justify-center rounded-full bg-white/5 text-white transition-colors hover:bg-white/10">
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={handlePickedFiles}
+        />
+        <button
+          type="button"
+          aria-label="Attach files"
+          disabled={disabled}
+          onClick={() => fileInputRef.current?.click()}
+          className="flex size-7 cursor-pointer items-center justify-center rounded-full bg-white/5 text-white transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+        >
           <HugeiconsIcon icon={PaperclipIcon} strokeWidth={2} className="size-4" />
         </button>
         <div ref={ref} className="relative">
@@ -207,6 +247,21 @@ export function PromptInput({
           : "bg-white/5 backdrop-blur-[2px]"
       )}
     >
+      {attachments.length > 0 ? (
+        <div className="mb-3 flex flex-wrap items-start gap-3 px-1">
+          {attachments.map((file) => (
+            <Attachment
+              key={file.id}
+              file={file}
+              onRemove={() =>
+                setAttachments((current) =>
+                  current.filter((item) => item.id !== file.id)
+                )
+              }
+            />
+          ))}
+        </div>
+      ) : null}
       <textarea
         ref={textareaRef}
         value={value}
@@ -230,7 +285,9 @@ export function PromptInput({
   }
 
   return (
-    <div className="flex h-full -mt-20 items-center justify-center p-4">
+    // Anchored from the top rather than centred: attaching a file grows the
+    // composer downward, and the heading above it stays where it is.
+    <div className="flex h-full flex-col items-center px-4 pt-[20vh] pb-4">
       <div className="flex w-full max-w-[780px] flex-col items-center gap-5">
         <div className="flex items-center gap-2.5">
           <img
