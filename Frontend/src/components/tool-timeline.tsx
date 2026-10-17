@@ -81,7 +81,7 @@ export function ToolTimeline({
         }}
         aria-expanded={expanded}
         className={cn(
-          "flex cursor-pointer items-center gap-1.5 rounded-md text-left text-[14px] leading-5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-white/20",
+          "flex cursor-pointer items-center gap-1.5 rounded-md text-left text-[14px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-white/20",
           failed
             ? "text-red-400/80 hover:text-red-300"
             : "text-white/50 hover:text-white/70"

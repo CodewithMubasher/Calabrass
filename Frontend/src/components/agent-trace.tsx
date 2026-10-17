@@ -1,6 +1,6 @@
 import { cn } from "cn"
 
-import { Markdown } from "@/components/markdown"
+import { MarkdownRenderer } from "@/components/markdown-renderer"
 import { ToolTimeline } from "@/components/tool-timeline"
 import { isCallLive } from "@/lib/tool-registry"
 import type { TracePart, TurnTrace } from "@/types/chat"
@@ -61,17 +61,24 @@ export function AgentTrace({
   )
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-2.5">
+    <div className="flex w-full min-w-0 flex-col">
       {blocks.map((block, index) => {
         // Blocks are keyed by position: a live tail is replaced in place by the
         // snapshot that captures it, so the element under the reader's cursor
         // must survive the swap.
         if (block.kind === "text") {
           return (
-            <div key={index} className="w-full min-w-0">
-              <Markdown className={cn(block.live && running && "streaming-caret")}>
-                {block.text}
-              </Markdown>
+            <div
+              key={index}
+              className={cn(
+                "typeset typeset-chat mb-1 w-full min-w-0 max-w-[42em]",
+                block.live && running && "streaming-caret"
+              )}
+            >
+              <MarkdownRenderer
+                content={block.text}
+                isStreaming={block.live && running}
+              />
             </div>
           )
         }

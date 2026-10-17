@@ -2,6 +2,10 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/inter";
+@import "@fontsource-variable/outfit";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+@import "./typeset.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -115,6 +119,30 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.552 0.016 285.938);
+}
+
+/*
+ * shadcn/typeset (https://ui.shadcn.com/docs/typeset) styles rendered markdown
+ * inside a `typeset` container and touches nothing outside it. The stylesheet is
+ * imported at the top of this file; the preset below is this project's chat
+ * surface for it. It is left unlayered on purpose, so its values beat the
+ * defaults typeset.css sets in `@layer components`.
+ *
+ * The class is not applied to any surface yet.
+ */
+:root {
+  --font-outfit: 'Outfit Variable', sans-serif;
+  --font-geist: 'Geist Variable', sans-serif;
+  --font-geist-mono: 'Geist Mono Variable', monospace;
+}
+
+.typeset-chat {
+  --typeset-font-body: var(--font-outfit);
+  --typeset-font-heading: var(--font-geist);
+  --typeset-font-mono: var(--font-geist-mono);
+  --typeset-size: 14px;
+  --typeset-leading: 1.6;
+  --typeset-flow: 1em;
 }
 
 @layer base {
