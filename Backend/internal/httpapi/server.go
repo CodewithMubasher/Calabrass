@@ -57,10 +57,20 @@ type Server struct {
 	voiceModelID  string
 	connectors    *connectors.Pool
 	log           *slog.Logger
+	// handler is the routed and wrapped mux, kept so the server itself can be
+	// handed to http.Server.
+	handler http.Handler
 }
 
 // New builds the fully wired HTTP handler.
 func New(deps Deps) http.Handler {
+	return NewServer(deps)
+}
+
+// NewServer builds the server and its routes. main holds the result so it can
+// start the scheduler on the same wiring and hand the same value to
+// http.Server.
+func NewServer(deps Deps) *Server {
 	log := deps.Logger
 	if log == nil {
 		log = slog.Default()
@@ -112,8 +122,20 @@ func New(deps Deps) http.Handler {
 	mux.HandleFunc("DELETE /api/chats/{chatID}", s.handleDeleteChat)
 	mux.HandleFunc("POST /api/chats/{chatID}/messages", s.handleSendMessage)
 	mux.HandleFunc("DELETE /api/chats/{chatID}/messages/{messageID}", s.handleDeleteMessage)
+	mux.HandleFunc("GET /api/schedules", s.handleListSchedules)
+	mux.HandleFunc("POST /api/schedules", s.handleCreateSchedule)
+	mux.HandleFunc("GET /api/schedules/stream", s.handleScheduleStream)
+	mux.HandleFunc("PATCH /api/schedules/{taskID}", s.handleUpdateSchedule)
+	mux.HandleFunc("DELETE /api/schedules/{taskID}", s.handleDeleteSchedule)
 
-	return s.withCORS(s.withLogging(mux))
+	s.handler = s.withCORS(s.withLogging(mux))
+	return s
+}
+
+// ServeHTTP is what lets the server be handed to http.Server directly, so main
+// can keep the same value it started the scheduler with.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.handler.ServeHTTP(w, r)
 }
 
 // --- middleware -------------------------------------------------------------

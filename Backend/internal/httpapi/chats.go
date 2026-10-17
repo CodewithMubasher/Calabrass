@@ -326,7 +326,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	// The harness: the prompt that explains what the model is working with — the
 	// project, and the machine the connectors reach — and the tools it may call.
-	setup := s.setupTurn(ctx, s.workspaceFor(chat.Chat))
+	setup := s.setupTurn(ctx, s.workspaceFor(chat.Chat), chatID)
 
 	started := time.Now()
 	var lastTrace ai.Trace

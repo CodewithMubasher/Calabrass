@@ -19,7 +19,11 @@ type turnSetup struct {
 // the model is about to be given. A model told only about the project, and then
 // handed the tools that reach the desktop, answers "open the settings app" by
 // reading the project.
-func (s *Server) setupTurn(ctx context.Context, workspace *agent.Workspace) turnSetup {
+//
+// chatID is the conversation the turn belongs to, which is what a task booked
+// during it is bound to: the answer then lands where it was asked for. An empty
+// id means there is no conversation to bind to.
+func (s *Server) setupTurn(ctx context.Context, workspace *agent.Workspace, chatID string) turnSetup {
 	tools := agent.Tools(workspace)
 	var described []agent.Connector
 
@@ -40,6 +44,14 @@ func (s *Server) setupTurn(ctx context.Context, workspace *agent.Workspace) turn
 				Tools:        without(brief.Tools, skipped),
 			})
 		}
+	}
+
+	// The scheduler is the server's own tool rather than the workspace's: a task
+	// is a row in the database and a turn of its own, not something done to the
+	// project. It needs a store to write that row to, which is what keeps it out
+	// of the tests that build a server for its workspace alone.
+	if s.store != nil {
+		tools = append(tools, s.scheduleTool(chatID))
 	}
 
 	// With no project and nothing acting on the machine, there is no harness to

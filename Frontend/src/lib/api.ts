@@ -8,6 +8,9 @@ import type {
   ProviderInfo,
   ProviderInput,
   ProviderRow,
+  ScheduledTask,
+  ScheduledTaskInput,
+  ScheduledTaskPatch,
   TurnTrace,
   Usage,
   WorkspaceInput,
@@ -146,6 +149,29 @@ export const api = {
     request<{ deleted: boolean }>(`/chats/${chatId}/messages/${messageId}`, {
       method: "DELETE",
     }),
+
+  listSchedules: () =>
+    request<{ tasks: ScheduledTask[] }>("/schedules").then((r) => r.tasks ?? []),
+
+  createSchedule: (input: ScheduledTaskInput) =>
+    request<{ tasks: ScheduledTask[] }>("/schedules", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).then((r) => r.tasks ?? []),
+
+  updateSchedule: (taskId: string, patch: ScheduledTaskPatch) =>
+    request<{ tasks: ScheduledTask[] }>(`/schedules/${taskId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }).then((r) => r.tasks ?? []),
+
+  deleteSchedule: (taskId: string) =>
+    request<{ tasks: ScheduledTask[] }>(`/schedules/${taskId}`, {
+      method: "DELETE",
+    }).then((r) => r.tasks ?? []),
+
+  /** The task list as a stream: it arrives complete, and again on every change. */
+  scheduleStreamUrl: () => `${BASE}/schedules/stream`,
 
   deleteChat: (chatId: string) =>
     request<{ deleted: boolean }>(`/chats/${chatId}`, { method: "DELETE" }),

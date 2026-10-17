@@ -38,7 +38,17 @@ func SystemPrompt(ws *Workspace, base string, connectors []Connector) string {
 		fmt.Fprintf(&b, "Project root: %s\n", ws.Root())
 		b.WriteString("All tool paths are resolved inside that directory; anything outside it is refused.\n")
 	}
-	fmt.Fprintf(&b, "Operating system: %s. Today: %s.\n\n", runtime.GOOS, time.Now().Format("2006-01-02"))
+
+	// The clock is stated rather than left to be inferred: a model that does not
+	// know what time it is on this machine cannot set a timer for "in ten
+	// minutes" or turn "at nine tonight" into a time, and guesses.
+	now := time.Now()
+	fmt.Fprintf(&b, "Operating system: %s. It is %s local time (%s), on %s.\n\n",
+		runtime.GOOS,
+		now.Format("15:04"),
+		now.Format("MST"),
+		now.Format("Monday 2 January 2006"),
+	)
 
 	if section := machineSection(connectors); section != "" {
 		b.WriteString(section)
@@ -53,6 +63,7 @@ func SystemPrompt(ws *Workspace, base string, connectors []Connector) string {
 		"- Change files with edit_lines, naming the lines read_file numbered and the text to put in their place; every edit in the call lands together, so a multi-part change is one call. Use edit_file for an exact piece of text that is not a whole line range, and write_file for a new file or a full rewrite.",
 		"- Use create_dir when a directory is missing; write_file creates missing parents on its own.",
 		"- Use run_command to build, test, install and inspect the project with its own tools. It runs in the project root. For reading code, read_file, glob and grep cost far less context.",
+		"- Use schedule_task when the user wants something to happen later rather than now — after a delay, or at a clock time. The instruction you give it runs in this conversation with your tools, so write it as what to do then, and tell the user the time it is set for.",
 		"- Gather what you need in as few calls as possible. Do not repeat a call that already answered the question.",
 		"- If a tool fails, read the error and adjust; do not retry the same call unchanged.",
 		"",

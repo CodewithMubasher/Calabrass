@@ -104,7 +104,7 @@ func main() {
 	pool := connectors.New(st, agent.DiscoverRoot(""), log)
 	defer pool.Close()
 
-	handler := httpapi.New(httpapi.Deps{
+	handler := httpapi.NewServer(httpapi.Deps{
 		Store:         st,
 		Registry:      registry,
 		SystemPrompt:  cfg.SystemPrompt,
@@ -116,6 +116,12 @@ func main() {
 		Connectors:    pool,
 		Logger:        log,
 	})
+
+	// The scheduled tasks run here: the loop looks for what has come due, runs
+	// it as a turn of its own, and stops with the process.
+	schedulerCtx, stopScheduler := context.WithCancel(context.Background())
+	defer stopScheduler()
+	go handler.RunScheduler(schedulerCtx)
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,

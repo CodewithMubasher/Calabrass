@@ -173,6 +173,24 @@ CREATE TABLE IF NOT EXISTS connectors (
 	created_at INTEGER NOT NULL,
 	updated_at INTEGER NOT NULL
 );
+
+-- One row per scheduled task: an instruction, the conversation it speaks in, and
+-- the time it is due. A timer rather than a cron — last_run_at is what stops a
+-- task from coming due twice.
+CREATE TABLE IF NOT EXISTS scheduled_tasks (
+	id           TEXT PRIMARY KEY,
+	prompt       TEXT NOT NULL,
+	chat_id      TEXT NOT NULL DEFAULT '',
+	run_at       INTEGER NOT NULL,
+	enabled      INTEGER NOT NULL DEFAULT 1,
+	last_run_at  INTEGER NOT NULL DEFAULT 0,
+	last_status  TEXT NOT NULL DEFAULT '',
+	last_error   TEXT NOT NULL DEFAULT '',
+	created_at   INTEGER NOT NULL,
+	updated_at   INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_tasks(enabled, last_run_at, run_at);
 `
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("store: migrate: %w", err)

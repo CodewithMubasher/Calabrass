@@ -162,6 +162,44 @@ export interface ConnectorInput {
   command: string
 }
 
+/**
+ * One instruction the scheduler will run, once, at a time of its own.
+ *
+ * It is a timer rather than a cron: the row remembers its run, and giving it a
+ * new time arms it again.
+ */
+export interface ScheduledTask {
+  id: string
+  /** What the model is asked to do when the time comes. */
+  prompt: string
+  /** The conversation it speaks in; empty until it has run once. */
+  chatId: string
+  /** When it is due, in Unix milliseconds. */
+  runAt: number
+  enabled: boolean
+  /** When it last ran, zero while it has not. */
+  lastRunAt: number
+  /** How the last run went: "" while it has not run, then "ok", "error" or "missed". */
+  lastStatus: string
+  /** What went wrong, when something did. */
+  lastError: string
+  createdAt: number
+  updatedAt: number
+}
+
+/** The fields a new task is booked with. */
+export interface ScheduledTaskInput {
+  prompt: string
+  runAt: number
+}
+
+/** What an edit can change about a task. */
+export interface ScheduledTaskPatch {
+  prompt?: string
+  runAt?: number
+  enabled?: boolean
+}
+
 export interface Usage {
   inputTokens: number
   outputTokens: number
