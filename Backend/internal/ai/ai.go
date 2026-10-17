@@ -108,6 +108,10 @@ type ProviderSummary struct {
 // providers merges the built-in specs with the stored rows: built-ins in
 // priority order, then custom providers by name. A read failure is not fatal;
 // it just leaves the built-ins.
+// GroqKey is the Groq credential the audio endpoints fall back to when nothing
+// is stored for Groq.
+func (r *Registry) GroqKey() string { return r.groqKey }
+
 func (r *Registry) providers(ctx context.Context) []resolvedProvider {
 	records := map[string]ProviderRecord{}
 	if r.source != nil {

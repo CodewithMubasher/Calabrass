@@ -1,11 +1,13 @@
 package httpapi
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/ai"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/voice"
 )
 
 // Deps are the collaborators the HTTP layer needs.
@@ -27,17 +30,28 @@ type Deps struct {
 	// chat uses until it picks one of its own. When it is nil the chat runs
 	// without tools.
 	Workspace *agent.Workspace
-	Logger    *slog.Logger
+	// MistralKey is the credential Cal Live listens with. Empty falls back to
+	// Groq's Whisper.
+	MistralKey string
+	// VoiceProvider and VoiceModel let the voice agent think with a faster model
+	// than the one that does its work. Empty means "use the chat model".
+	VoiceProvider string
+	VoiceModel    string
+	Logger        *slog.Logger
 }
 
 // Server holds the HTTP handlers.
 type Server struct {
-	store     *store.Store
-	registry  *ai.Registry
-	system    string
-	library   *agent.Library
-	workspace *agent.Workspace
-	log       *slog.Logger
+	store         *store.Store
+	registry      *ai.Registry
+	system        string
+	library       *agent.Library
+	workspace     *agent.Workspace
+	mistralKey    string
+	speaker       voice.Speaker
+	voiceProvider string
+	voiceModelID  string
+	log           *slog.Logger
 }
 
 // New builds the fully wired HTTP handler.
@@ -48,12 +62,16 @@ func New(deps Deps) http.Handler {
 	}
 
 	s := &Server{
-		store:     deps.Store,
-		registry:  deps.Registry,
-		system:    deps.SystemPrompt,
-		library:   deps.Library,
-		workspace: deps.Workspace,
-		log:       log,
+		store:         deps.Store,
+		registry:      deps.Registry,
+		system:        deps.SystemPrompt,
+		library:       deps.Library,
+		workspace:     deps.Workspace,
+		mistralKey:    deps.MistralKey,
+		speaker:       voice.NewSpeaker(deps.MistralKey),
+		voiceProvider: deps.VoiceProvider,
+		voiceModelID:  deps.VoiceModel,
+		log:           log,
 	}
 
 	mux := http.NewServeMux()
@@ -70,6 +88,7 @@ func New(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/connectors", s.handleCreateConnector)
 	mux.HandleFunc("PATCH /api/connectors/{connectorID}", s.handleUpdateConnector)
 	mux.HandleFunc("DELETE /api/connectors/{connectorID}", s.handleDeleteConnector)
+	mux.HandleFunc("GET /api/voice", s.handleVoiceStream)
 	mux.HandleFunc("GET /api/chats", s.handleListChats)
 	mux.HandleFunc("POST /api/chats", s.handleCreateChat)
 	mux.HandleFunc("GET /api/chats/{chatID}", s.handleGetChat)
@@ -97,6 +116,17 @@ func (r *statusRecorder) Flush() {
 	if f, ok := r.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+// Hijack lets a handler take the connection over. The voice socket needs it, and
+// without this the recorder hides the interface from the upgrade check — which
+// is what turned a WebSocket handshake into a 501.
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	return hijacker.Hijack()
 }
 
 func (s *Server) withLogging(next http.Handler) http.Handler {

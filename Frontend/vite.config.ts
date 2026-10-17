@@ -13,11 +13,13 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      // The Go backend. Keep the browser on a single origin so SSE works
-      // without CORS preflight surprises.
+      // The Go backend. Keep the browser on a single origin so SSE and the
+      // voice socket work without CORS preflight surprises.
       "/api": {
         target: "http://127.0.0.1:8787",
         changeOrigin: true,
+        // Cal Live streams the microphone over this proxy.
+        ws: true,
       },
     },
   },

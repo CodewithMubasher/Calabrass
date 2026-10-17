@@ -419,6 +419,27 @@
   }
 }
 
+/* Listening and thinking: the halo breathes faster and the ball stays lit,
+   so the orb reads as an open ear and a busy mind without adding anything to
+   the page. The speaking pulse itself comes from --level. */
+.cal-live--listening .cal-live-orb__glow,
+.cal-live--thinking .cal-live-orb__glow {
+  opacity: 0.95;
+  animation-duration: 1s, 1.6s;
+  animation-delay: 0s, 0s;
+}
+
+.cal-live--thinking .cal-live-orb__waves {
+  animation-duration: 1s, 1.8s;
+  animation-delay: 0s, 0s;
+}
+
+/* Paused: the ball dims and holds still until the orb is clicked again. */
+.cal-live--paused .cal-live-orb__glow {
+  opacity: 0.25;
+  animation: none;
+}
+
 /* Land on the finished frame for anyone who asked for less motion. */
 @media (prefers-reduced-motion: reduce) {
   .cal-live-orb__glow,

@@ -98,12 +98,15 @@ func main() {
 	}
 
 	handler := httpapi.New(httpapi.Deps{
-		Store:        st,
-		Registry:     registry,
-		SystemPrompt: cfg.SystemPrompt,
-		Library:      library,
-		Workspace:    workspace,
-		Logger:       log,
+		Store:         st,
+		Registry:      registry,
+		SystemPrompt:  cfg.SystemPrompt,
+		Library:       library,
+		Workspace:     workspace,
+		MistralKey:    cfg.MistralKey,
+		VoiceProvider: cfg.VoiceProvider,
+		VoiceModel:    cfg.VoiceModel,
+		Logger:        log,
 	})
 
 	srv := &http.Server{

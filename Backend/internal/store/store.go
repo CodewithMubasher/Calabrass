@@ -60,8 +60,8 @@ type Message struct {
 	// Replay is the provider transcript for the turn, kept so a later turn can
 	// replay its tool calls. It is an implementation detail and never sent to
 	// the frontend.
-	Replay json.RawMessage `json:"-"`
-	CreatedAt    int64 `json:"createdAt"`
+	Replay    json.RawMessage `json:"-"`
+	CreatedAt int64           `json:"createdAt"`
 }
 
 // ChatDetail is a chat together with its messages.

@@ -291,6 +291,11 @@ export async function togglePinChat(chatId: string, pinned: boolean) {
   }
 }
 
+/** Remember a chat the server created, so the sidebar shows it. */
+export function rememberChat(chat: Chat) {
+  setState({ chats: upsertChat(state.chats, chat), backendError: null })
+}
+
 /** The shared streaming path, for a fresh turn and for a regeneration. */
 async function runStream(chatId: string, content: string, regenerate = false) {
   const selection = getSelectedModel()

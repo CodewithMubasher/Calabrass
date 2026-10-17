@@ -14,7 +14,14 @@ type Config struct {
 	DatabasePath string
 	GeminiKey    string
 	GroqKey      string
+	// MistralKey is the credential for the realtime transcription endpoint that
+	// Cal Live listens with. Empty means "fall back to Groq Whisper".
+	MistralKey   string
 	SystemPrompt string
+	// VoiceProvider and VoiceModel let the voice agent think with a faster model
+	// than the one that does its work. Empty means "use the chat model".
+	VoiceProvider string
+	VoiceModel    string
 	// WorkspacesDir is the folder that holds every workspace the agent may
 	// read and change — <project>/workspace by default. Empty means "discover
 	// the project from the working directory".
@@ -30,11 +37,14 @@ func Load() Config {
 	loadDotEnv(".env")
 
 	return Config{
-		Addr:         envOr("CALABRASS_ADDR", "127.0.0.1:8787"),
-		DatabasePath: envOr("CALABRASS_DB", "data/calabrass.db"),
-		GeminiKey:    firstNonEmpty(os.Getenv("GOOGLE_GENERATIVE_AI_API_KEY"), os.Getenv("GEMINI_API_KEY"), os.Getenv("GOOGLE_API_KEY")),
-		GroqKey:      os.Getenv("GROQ_API_KEY"),
-		SystemPrompt: envOr("CALABRASS_SYSTEM_PROMPT", defaultSystemPrompt),
+		Addr:          envOr("CALABRASS_ADDR", "127.0.0.1:8787"),
+		DatabasePath:  envOr("CALABRASS_DB", "data/calabrass.db"),
+		GeminiKey:     firstNonEmpty(os.Getenv("GOOGLE_GENERATIVE_AI_API_KEY"), os.Getenv("GEMINI_API_KEY"), os.Getenv("GOOGLE_API_KEY")),
+		GroqKey:       os.Getenv("GROQ_API_KEY"),
+		MistralKey:    os.Getenv("MISTRAL_API_KEY"),
+		VoiceProvider: os.Getenv("CALABRASS_VOICE_PROVIDER"),
+		VoiceModel:    os.Getenv("CALABRASS_VOICE_MODEL"),
+		SystemPrompt:  envOr("CALABRASS_SYSTEM_PROMPT", defaultSystemPrompt),
 		// Empty means the workspaces folder is discovered from the working
 		// directory. CALABRASS_WORKSPACE is the older name for it.
 		WorkspacesDir: firstNonEmpty(os.Getenv("CALABRASS_WORKSPACES_DIR"), os.Getenv("CALABRASS_WORKSPACE")),
