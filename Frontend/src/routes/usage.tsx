@@ -6,7 +6,6 @@ import { ArrowDown01Icon } from "@hugeicons/core-free-icons"
 import { createRoute } from "@tanstack/react-router"
 
 import { PageShell } from "@/components/page-shell"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Select,
   SelectContent,
@@ -82,7 +81,7 @@ function CircularGauge({ percentage }: { percentage: number }) {
   )
 }
 
-/** One panel in the usage grid; its content is still to come. */
+/** One panel in the usage grid, on the same translucent surface as the rest. */
 function UsageCard({
   className,
   children,
@@ -91,9 +90,14 @@ function UsageCard({
   children?: ReactNode
 }) {
   return (
-    <Card size="sm" className={cn("min-h-40", className)}>
+    <div
+      className={cn(
+        "flex flex-col rounded-2xl border border-white/10 bg-white/5 p-4",
+        className
+      )}
+    >
       {children}
-    </Card>
+    </div>
   )
 }
 
@@ -123,19 +127,22 @@ function RequestRow({
   )
 }
 
+/**
+ * The request figures for every provider. The card grows with its content and
+ * only the list is capped, so a long provider list scrolls inside the card
+ * instead of stretching the grid or spilling onto the page.
+ */
 function TotalRequestsCard({ providers }: { providers: ProviderRow[] }) {
   return (
-    <UsageCard>
-      <CardHeader>
-        <CardTitle className="px-1 text-sm">Total request</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ul className="flex flex-col gap-1">
-          {providers.map((provider, index) => (
-            <RequestRow key={provider.id} provider={provider} index={index} />
-          ))}
-        </ul>
-      </CardContent>
+    <UsageCard className="min-h-40">
+      <h2 className="shrink-0 text-sm font-medium text-white/80">
+        Total request
+      </h2>
+      <ul className="mt-3 flex max-h-40 min-h-0 scrollbar-thin flex-col gap-1 overflow-y-auto pr-1">
+        {providers.map((provider, index) => (
+          <RequestRow key={provider.id} provider={provider} index={index} />
+        ))}
+      </ul>
     </UsageCard>
   )
 }
@@ -209,8 +216,8 @@ function UsagePage() {
       }
     >
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <UsageCard />
-        <UsageCard />
+        <UsageCard className="min-h-40" />
+        <UsageCard className="min-h-40" />
         <TotalRequestsCard providers={visibleProviders} />
         <UsageCard className="min-h-64 sm:col-span-3" />
       </div>
