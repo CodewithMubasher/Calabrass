@@ -5,8 +5,6 @@ import {
   Add01Icon,
   MoreHorizontalIcon,
   Plug01Icon,
-  PowerIcon,
-  PowerOffIcon,
 } from "@hugeicons/core-free-icons"
 import { createRoute } from "@tanstack/react-router"
 
@@ -23,7 +21,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Switch } from "@/components/ui/switch"
 import { ConnectorDialog } from "@/components/connector-dialog"
+import { connectorIcon } from "@/lib/connector-icons"
 import {
   clearConnectorsError,
   deleteConnector,
@@ -96,7 +96,11 @@ function ConnectorsPage() {
             className="gap-2 rounded-full"
             onClick={() => setAdding(true)}
           >
-            <HugeiconsIcon icon={Add01Icon} strokeWidth={2} className="size-4" />
+            <HugeiconsIcon
+              icon={Add01Icon}
+              strokeWidth={2}
+              className="size-4"
+            />
             <span>New connector</span>
           </Button>
         </>
@@ -107,7 +111,9 @@ function ConnectorsPage() {
       ) : visible.length === 0 ? (
         <PageEmpty
           icon={Plug01Icon}
-          title={needle ? "No connectors match your search" : "No connectors yet"}
+          title={
+            needle ? "No connectors match your search" : "No connectors yet"
+          }
           hint={needle ? undefined : "Add an MCP server to get started"}
         />
       ) : (
@@ -121,8 +127,8 @@ function ConnectorsPage() {
                 <div className="flex min-w-0 items-center gap-3">
                   <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-white/5">
                     <HugeiconsIcon
-                      icon={Plug01Icon}
-                      strokeWidth={2}
+                      icon={connectorIcon(connector.name)}
+                      strokeWidth={1.8}
                       className="size-4 text-white/50"
                     />
                   </div>
@@ -140,27 +146,14 @@ function ConnectorsPage() {
                 </div>
 
                 <div className="flex shrink-0 items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void setConnectorEnabled(connector.id, !connector.enabled)
-                    }
+                  <Switch
+                    checked={connector.enabled}
                     disabled={pending.includes(connector.id)}
-                    title={connector.enabled ? "Disable" : "Enable"}
+                    onCheckedChange={(checked) =>
+                      void setConnectorEnabled(connector.id, checked)
+                    }
                     aria-label={`Turn ${connector.name} ${connector.enabled ? "off" : "on"}`}
-                    className={cn(
-                      "cursor-pointer rounded-lg p-1.5 transition-colors disabled:pointer-events-none disabled:opacity-50",
-                      connector.enabled
-                        ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
-                        : "bg-white/5 text-white/30 hover:bg-white/10"
-                    )}
-                  >
-                    <HugeiconsIcon
-                      icon={connector.enabled ? PowerIcon : PowerOffIcon}
-                      strokeWidth={2}
-                      className="size-3.5"
-                    />
-                  </button>
+                  />
 
                   <DropdownMenu>
                     <DropdownMenuTrigger
