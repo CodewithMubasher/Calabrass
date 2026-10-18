@@ -78,6 +78,9 @@ func (s *Server) voiceTurn(ctx context.Context, chat store.ChatDetail, transcrip
 		OnTrace:     func(trace ai.Trace) error { lastTrace = trace; return nil },
 	})
 	elapsed := time.Since(started)
+	if genErr == nil || reply.Usage.InputTokens+reply.Usage.OutputTokens > 0 {
+		s.recordUsage(ctx, providerID, modelID, reply.Usage)
+	}
 	if genErr != nil {
 		return "", ai.Trace{}, fmt.Errorf("the reply failed: %w", genErr)
 	}
@@ -162,6 +165,7 @@ func (s *Server) delegateWork(ctx context.Context, chat store.ChatDetail, args a
 	if err != nil {
 		return "", fmt.Errorf("the work failed: %w", err)
 	}
+	s.recordUsage(ctx, providerID, modelID, reply.Usage)
 
 	answer := reply.Text
 	if final := reply.Trace.AnswerText(); strings.TrimSpace(final) != "" {

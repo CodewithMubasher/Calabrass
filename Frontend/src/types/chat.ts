@@ -245,3 +245,53 @@ export interface Usage {
   outputTokens: number
   model: string
 }
+
+/** How much was used in one window: request count and the tokens reported. */
+export interface UsageTotals {
+  requests: number
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+}
+
+/** One day of the weekly chart. */
+export interface UsageDay extends UsageTotals {
+  /** The local calendar day, as YYYY-MM-DD. */
+  date: string
+}
+
+/** One model's free-tier allowance, as listed in model_free_tier_quotas.md. */
+export interface UsageModel {
+  id: string
+  name: string
+  rpmLimit: number
+  rpdLimit: number
+  tpmLimit: number
+  status: string
+}
+
+/** A provider's usage today, its allowance, and its last seven days. */
+export interface UsageProvider extends UsageTotals {
+  id: string
+  name: string
+  enabled: boolean
+  /** The daily request allowance summed across the provider's models. */
+  rpdLimit: number
+  /** The per-minute token allowance summed across its models. */
+  tpmLimit: number
+  /** Tokens used in the last minute. */
+  minute: UsageTotals
+  models: UsageModel[]
+  daily: UsageDay[]
+}
+
+/** Everything the Usage page needs for one refresh. */
+export interface UsageSnapshot {
+  today: UsageTotals
+  minute: UsageTotals
+  limits: { rpd: number; tpm: number }
+  providers: UsageProvider[]
+  daily: UsageDay[]
+  /** When the backend assembled the snapshot, in Unix milliseconds. */
+  generatedAt: number
+}

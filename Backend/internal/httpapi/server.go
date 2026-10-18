@@ -15,6 +15,7 @@ import (
 	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/ai"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/connectors"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/quota"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/voice"
 )
@@ -41,7 +42,10 @@ type Deps struct {
 	// Connectors holds the MCP servers the agent may start. When it is nil one
 	// is built here, which is what tests get.
 	Connectors *connectors.Pool
-	Logger     *slog.Logger
+	// Quotas holds the free-tier limits read from model_free_tier_quotas.md.
+	// Nil means no limits are known, which is how a missing file is handled.
+	Quotas *quota.Catalog
+	Logger *slog.Logger
 }
 
 // Server holds the HTTP handlers.
@@ -56,6 +60,7 @@ type Server struct {
 	voiceProvider string
 	voiceModelID  string
 	connectors    *connectors.Pool
+	quotas        *quota.Catalog
 	log           *slog.Logger
 	// handler is the routed and wrapped mux, kept so the server itself can be
 	// handed to http.Server.
@@ -92,12 +97,14 @@ func NewServer(deps Deps) *Server {
 		voiceProvider: deps.VoiceProvider,
 		voiceModelID:  deps.VoiceModel,
 		connectors:    pool,
+		quotas:        deps.Quotas,
 		log:           log,
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/models", s.handleModels)
+	mux.HandleFunc("GET /api/usage", s.handleUsage)
 	mux.HandleFunc("GET /api/providers", s.handleListProviders)
 	mux.HandleFunc("POST /api/providers", s.handleCreateProvider)
 	mux.HandleFunc("PUT /api/providers/{providerID}", s.handleUpdateProvider)

@@ -142,6 +142,10 @@ func (s *Server) runScheduledTask(ctx context.Context, task store.ScheduledTask)
 	}, ai.Handlers{})
 	elapsed := time.Since(started)
 
+	if genErr == nil || reply.Usage.InputTokens+reply.Usage.OutputTokens > 0 {
+		s.recordUsage(ctx, providerID, modelID, reply.Usage)
+	}
+
 	content := reply.Text
 	if answer := reply.Trace.AnswerText(); strings.TrimSpace(answer) != "" {
 		content = answer

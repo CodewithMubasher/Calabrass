@@ -352,6 +352,12 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	})
 	elapsed := time.Since(started)
 
+	// The call counts against the provider's allowance once it reached the
+	// model: a failure before that leaves no usage behind.
+	if genErr == nil || reply.Usage.InputTokens+reply.Usage.OutputTokens > 0 {
+		s.recordUsage(ctx, providerID, modelID, reply.Usage)
+	}
+
 	// The visible answer is the model's closing text; narration from earlier
 	// steps stays in the trace, where the tool calls it introduces live.
 	content := reply.Text

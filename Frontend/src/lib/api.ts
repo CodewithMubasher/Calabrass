@@ -15,6 +15,7 @@ import type {
   ScheduledTaskPatch,
   TurnTrace,
   Usage,
+  UsageSnapshot,
   WorkspaceInput,
   WorkspaceRow,
 } from "@/types/chat"
@@ -63,6 +64,9 @@ function artifactQuery(chatId: string, extra: Record<string, string> = {}) {
 
 export const api = {
   health: () => request<{ status: string; providers: Record<string, boolean> }>("/health"),
+
+  /** A fresh usage snapshot: totals, allowances and the last seven days. */
+  getUsage: () => request<UsageSnapshot>("/usage"),
 
   listModels: () =>
     request<{ providers: ProviderInfo[] }>("/models").then((r) => r.providers ?? []),

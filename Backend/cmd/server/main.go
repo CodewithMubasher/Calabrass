@@ -17,6 +17,7 @@ import (
 	"github.com/CodewithMubasher/Calabrass/backend/internal/config"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/connectors"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/httpapi"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/quota"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
 )
 
@@ -104,6 +105,17 @@ func main() {
 	pool := connectors.New(st, agent.DiscoverRoot(""), log)
 	defer pool.Close()
 
+	// The free-tier limits live in the project root, beside the code. A missing
+	// or unreadable file is not fatal: usage still works, it just has no
+	// allowances to measure against.
+	quotas, quotaErr := quota.Load(filepath.Join(agent.DiscoverRoot(""), "model_free_tier_quotas.md"))
+	if quotaErr != nil {
+		log.Warn("usage limits are off: could not read model_free_tier_quotas.md", "error", quotaErr)
+		quotas = nil
+	} else {
+		log.Info("usage limits loaded", "file", filepath.Join(agent.DiscoverRoot(""), "model_free_tier_quotas.md"))
+	}
+
 	handler := httpapi.NewServer(httpapi.Deps{
 		Store:         st,
 		Registry:      registry,
@@ -114,6 +126,7 @@ func main() {
 		VoiceProvider: cfg.VoiceProvider,
 		VoiceModel:    cfg.VoiceModel,
 		Connectors:    pool,
+		Quotas:        quotas,
 		Logger:        log,
 	})
 

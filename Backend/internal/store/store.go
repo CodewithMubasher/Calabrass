@@ -207,6 +207,20 @@ CREATE TABLE IF NOT EXISTS agents (
 	created_at   INTEGER NOT NULL,
 	updated_at   INTEGER NOT NULL
 );
+
+-- One row per model call: where it went and how many tokens it reported. The
+-- usage page reads this; nothing else does.
+CREATE TABLE IF NOT EXISTS usage_events (
+	id            INTEGER PRIMARY KEY AUTOINCREMENT,
+	provider_id   TEXT NOT NULL,
+	model_id      TEXT NOT NULL DEFAULT '',
+	input_tokens  INTEGER NOT NULL DEFAULT 0,
+	output_tokens INTEGER NOT NULL DEFAULT 0,
+	created_at    INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_created ON usage_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_events(provider_id, created_at);
 `
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("store: migrate: %w", err)

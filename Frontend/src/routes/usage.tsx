@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { cn } from "cn"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons"
@@ -14,8 +14,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { loadProviders, useProvidersState } from "@/lib/provider-store"
-import type { ProviderRow } from "@/types/chat"
+import { clearUsageError, useLiveUsage } from "@/lib/usage-store"
+import type { UsageDay, UsageProvider, UsageTotals } from "@/types/chat"
 import { Route as rootRoute } from "@/routes/__root"
 
 export const Route = createRoute({
@@ -26,15 +26,31 @@ export const Route = createRoute({
 
 type Option = { value: string; label: string }
 
-/** The day's allowance each provider's row is measured against. */
-const REQUESTS_PER_DAY = 20
+const ZERO: UsageTotals = {
+  requests: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+  totalTokens: 0,
+}
 
-/**
- * Placeholder request counts until a usage endpoint exists. They are spread
- * across the providers so the card reads like a real day; a provider beyond
- * the end of the list starts at zero rather than inventing a number.
- */
-const SAMPLE_REQUESTS = [12, 9, 7, 5, 4, 3]
+const fullNumber = new Intl.NumberFormat("en-US")
+
+function full(value: number): string {
+  return fullNumber.format(value)
+}
+
+/** A shortened figure for the small line: "800", "15.9k", "1.2M". */
+function compact(value: number): string {
+  if (value >= 1_000_000) return `${trim(value / 1_000_000)}M`
+  if (value >= 1_000) return `${trim(value / 1_000)}k`
+  return full(value)
+}
+
+function trim(value: number): string {
+  return value >= 10
+    ? String(Math.round(value))
+    : value.toFixed(1).replace(/\.0$/, "")
+}
 
 /**
  * A ring that fills clockwise to the given percentage. It is the progress mark
@@ -101,32 +117,69 @@ function UsageCard({
   )
 }
 
-/** The token allowance left for the cycle, at a glance. */
-function TokensCard() {
+/**
+ * Tokens used today. The free tiers cap tokens per minute rather than per day,
+ * so the small line is the room left in that minute, not a daily balance.
+ */
+function TokensCard({
+  used,
+  remaining,
+  limited,
+}: {
+  used: number
+  remaining: number
+  limited: boolean
+}) {
   return (
-    <UsageCard className="min-h-28 flex-row items-center justify-between gap-4">
+    <UsageCard className="min-h-20 flex-row items-start justify-between gap-4">
       <div className="min-w-0">
-        <h2 className="text-sm font-medium text-white/80">Total tokens</h2>
-        <p className="mt-1 text-xs text-white/40">Tokens left</p>
+        <h2 className="text-sm font-medium text-white/80">Tokens used</h2>
+        <p
+          className="mt-1 text-xs text-white/40"
+          title={
+            limited
+              ? "Free-tier token room left in the current minute"
+              : undefined
+          }
+        >
+          {limited ? `Remaining: ${compact(remaining)} /min` : "Today"}
+        </p>
       </div>
-      {/* Placeholder figure until a usage endpoint exists. */}
-      <span className="shrink-0 text-4xl font-semibold tracking-tight text-white/90 tabular-nums">
-        500k
+      <span className="shrink-0 text-3xl font-medium whitespace-nowrap text-white/60 tabular-nums">
+        {full(used)}
+      </span>
+    </UsageCard>
+  )
+}
+
+/** The request count for today, with the day's allowance still available. */
+function RequestsCard({
+  used,
+  remaining,
+}: {
+  used: number
+  remaining: number | null
+}) {
+  return (
+    <UsageCard className="min-h-20 flex-row items-start justify-between gap-4">
+      <div className="min-w-0">
+        <h2 className="text-sm font-medium text-white/80">Total requests</h2>
+        <p className="mt-1 text-xs text-white/40">
+          {remaining === null ? "Today" : `Remaining: ${compact(remaining)}`}
+        </p>
+      </div>
+      <span className="shrink-0 text-3xl font-medium whitespace-nowrap text-white/60 tabular-nums">
+        {full(used)}
       </span>
     </UsageCard>
   )
 }
 
 /** One provider's request row: a gauge, its name, and where it stands. */
-function RequestRow({
-  provider,
-  index,
-}: {
-  provider: ProviderRow
-  index: number
-}) {
-  const used = SAMPLE_REQUESTS[index] ?? 0
-  const percentage = (used / REQUESTS_PER_DAY) * 100
+function RequestRow({ provider }: { provider: UsageProvider }) {
+  const used = provider.requests
+  const limit = provider.rpdLimit
+  const percentage = limit > 0 ? (used / limit) * 100 : 0
 
   return (
     <li className="flex items-center gap-3 px-1 py-1">
@@ -136,8 +189,15 @@ function RequestRow({
       <span className="min-w-0 truncate text-sm text-white/80">
         {provider.name}
       </span>
-      <span className="ml-auto shrink-0 font-mono text-xs font-medium text-white/40 tabular-nums">
-        {used}/{REQUESTS_PER_DAY} RPD
+      <span
+        className="ml-auto shrink-0 font-mono text-xs font-medium text-white/40 tabular-nums"
+        title={
+          limit > 0
+            ? `${full(used)} of ${full(limit)} requests used today`
+            : "No published free-tier request limit"
+        }
+      >
+        {limit > 0 ? `${full(used)}/${full(limit)} RPD` : `${full(used)} requests`}
       </span>
     </li>
   )
@@ -151,42 +211,122 @@ function TotalRequestsCard({
   providers,
   className,
 }: {
-  providers: ProviderRow[]
+  providers: UsageProvider[]
   className?: string
 }) {
   return (
     <UsageCard className={cn("min-h-40", className)}>
       <h2 className="shrink-0 text-sm font-medium text-white/80">
-        Total request
+        Overall usage
       </h2>
       <ul className="mt-3 flex flex-col gap-1">
-        {providers.map((provider, index) => (
-          <RequestRow key={provider.id} provider={provider} index={index} />
+        {providers.map((provider) => (
+          <RequestRow key={provider.id} provider={provider} />
         ))}
       </ul>
     </UsageCard>
   )
 }
 
+function weekday(date: string): string {
+  const parsed = new Date(`${date}T00:00:00`)
+  if (Number.isNaN(parsed.getTime())) return date
+  return parsed.toLocaleDateString("en-US", { weekday: "short" })
+}
+
 /**
- * What the models have been used for, once there is something to show.
+ * A week of daily tokens and requests, as paired bars in the logo colours.
+ *
+ * The two series are scaled against their own busiest day: real token counts
+ * are thousands of times the request counts, and sharing one scale would leave
+ * the request bars invisible. The absolute numbers sit in each bar's tooltip.
+ */
+function WeeklyUsageCard({ daily }: { daily: UsageDay[] }) {
+  const maxTokens = Math.max(1, ...daily.map((day) => day.totalTokens))
+  const maxRequests = Math.max(1, ...daily.map((day) => day.requests))
+  const empty = daily.every(
+    (day) => day.totalTokens === 0 && day.requests === 0
+  )
+
+  return (
+    <UsageCard className="min-h-64 sm:col-span-2">
+      <h2 className="text-sm font-medium text-white/80">Weekly usage</h2>
+
+      <div className="mt-4 flex flex-1 flex-col">
+        <div className="relative flex h-44 items-end gap-2 border-b border-white/10 pb-px">
+          {[0.25, 0.5, 0.75, 1].map((step) => (
+            <div
+              key={step}
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 border-t border-dashed border-white/5"
+              style={{ bottom: `${step * 100}%` }}
+            />
+          ))}
+
+          {empty ? (
+            <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-white/25">
+              No model calls yet
+            </p>
+          ) : null}
+
+          {daily.map((day) => (
+            <div
+              key={day.date}
+              title={`${weekday(day.date)} ${day.date}: ${full(day.totalTokens)} tokens, ${full(day.requests)} requests`}
+              className="group flex h-full flex-1 items-end justify-center gap-[2px]"
+            >
+              <div
+                className="w-full max-w-8 rounded-t-md bg-[#5B7FFF] opacity-80 transition-opacity group-hover:opacity-100"
+                style={{ height: `${(day.totalTokens / maxTokens) * 100}%` }}
+              />
+              <div
+                className="w-full max-w-8 rounded-t-md bg-[#FF8FB8] opacity-80 transition-opacity group-hover:opacity-100"
+                style={{ height: `${(day.requests / maxRequests) * 100}%` }}
+              />
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-2 flex gap-2 text-[0.65rem] text-white/30 tabular-nums">
+          {daily.map((day) => (
+            <span key={day.date} className="flex-1 text-center">
+              {weekday(day.date)}
+            </span>
+          ))}
+        </div>
+
+        <div className="mt-3 flex items-center gap-4 text-xs text-white/50">
+          <span className="flex items-center gap-1.5">
+            <span className="size-2 rounded-full bg-[#5B7FFF]" />
+            Tokens
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="size-2 rounded-full bg-[#FF8FB8]" />
+            Requests
+          </span>
+        </div>
+      </div>
+    </UsageCard>
+  )
+}
+
+/**
+ * What the models have been used for, refreshed while the page is open.
  *
  * Two short panels top-left, the request total down the right-hand side for
- * the full height, and one wide panel under the first two. Only the request
- * total has content so far. The provider picker in the corner narrows both the
- * cards and the rows inside them.
+ * the full height, and one wide panel under the first two. The provider picker
+ * in the corner narrows every card, not just the rows.
  */
 function UsagePage() {
-  const { providers } = useProvidersState()
+  const { snapshot, error } = useLiveUsage()
   const [providerId, setProviderId] = useState("")
 
-  useEffect(() => {
-    void loadProviders()
-  }, [])
-
   const sorted = useMemo(
-    () => [...providers].sort((a, b) => a.name.localeCompare(b.name)),
-    [providers]
+    () =>
+      [...(snapshot?.providers ?? [])].sort((a, b) =>
+        a.name.localeCompare(b.name)
+      ),
+    [snapshot]
   )
 
   const options = useMemo<Option[]>(
@@ -200,6 +340,19 @@ function UsagePage() {
     [sorted]
   )
 
+  const selected =
+    sorted.find((provider) => provider.id === providerId) ?? null
+  const totals = selected ?? snapshot?.today ?? ZERO
+  const daily = selected ? selected.daily : (snapshot?.daily ?? [])
+  const rpdLimit = selected ? selected.rpdLimit : (snapshot?.limits.rpd ?? 0)
+  const tpmLimit = selected ? selected.tpmLimit : (snapshot?.limits.tpm ?? 0)
+  const minuteTokens = selected
+    ? selected.minute.totalTokens
+    : (snapshot?.minute.totalTokens ?? 0)
+  const requestsRemaining =
+    rpdLimit > 0 ? Math.max(0, rpdLimit - totals.requests) : null
+  const tokensRemaining = Math.max(0, tpmLimit - minuteTokens)
+
   const visibleProviders = providerId
     ? sorted.filter((provider) => provider.id === providerId)
     : sorted
@@ -207,44 +360,59 @@ function UsagePage() {
   return (
     <PageShell
       title="Usage"
-      subtitle="See where your tokens go"
+      subtitle="Live token and request usage across your providers"
+      error={error}
+      onDismissError={clearUsageError}
       actions={
-        <Select
-          value={providerId}
-          onValueChange={(next) => setProviderId(next ?? "")}
-          items={options}
-        >
-          <SelectTrigger
-            aria-label="Filter usage by provider"
-            className="h-8 w-44 rounded-full"
+        <>
+          <span
+            title="Refreshes every 5 seconds"
+            className="hidden items-center gap-1.5 text-[0.65rem] font-medium text-white/30 sm:flex"
           >
-            <SelectValue placeholder="All providers" />
-            <SelectIcon>
-              <HugeiconsIcon
-                icon={ArrowDown01Icon}
-                strokeWidth={2}
-                className="size-3.5"
-              />
-            </SelectIcon>
-          </SelectTrigger>
-          <SelectContent>
-            {options.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+            <span className="size-1.5 animate-pulse rounded-full bg-[#6BFFE0]" />
+            Live
+          </span>
+          <Select
+            value={providerId}
+            onValueChange={(next) => setProviderId(next ?? "")}
+            items={options}
+          >
+            <SelectTrigger
+              aria-label="Filter usage by provider"
+              className="h-8 w-44 rounded-full"
+            >
+              <SelectValue placeholder="All providers" />
+              <SelectIcon>
+                <HugeiconsIcon
+                  icon={ArrowDown01Icon}
+                  strokeWidth={2}
+                  className="size-3.5"
+                />
+              </SelectIcon>
+            </SelectTrigger>
+            <SelectContent>
+              {options.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </>
       }
     >
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <TokensCard />
-        <UsageCard className="min-h-28" />
+        <TokensCard
+          used={totals.totalTokens}
+          remaining={tokensRemaining}
+          limited={tpmLimit > 0}
+        />
+        <RequestsCard used={totals.requests} remaining={requestsRemaining} />
         <TotalRequestsCard
           providers={visibleProviders}
           className="sm:col-start-3 sm:row-span-2 sm:row-start-1"
         />
-        <UsageCard className="min-h-64 sm:col-span-2" />
+        <WeeklyUsageCard daily={daily} />
       </div>
     </PageShell>
   )
