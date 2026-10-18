@@ -118,8 +118,8 @@ export function PromptInput({
   const isMobile = useIsMobile()
   const placeholder =
     isMobile && !isInChat
-      ? "Describe what you want to do"
-      : "Describe what you want to build, / Commands @ files or sessions"
+      ? "Describe what you want to do, or /image a sunset"
+      : "Describe what you want to build, / Commands @ files or sessions, /image a landscape"
 
   // The one the thumb is wearing: its fill, and the colour its label reads in.
   const activeMode = MODES.find((item) => item.value === mode) ?? MODES[0]

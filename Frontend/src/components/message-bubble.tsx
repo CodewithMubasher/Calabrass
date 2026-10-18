@@ -13,6 +13,7 @@ import {
 } from "@hugeicons/core-free-icons"
 
 import { AgentTrace } from "@/components/agent-trace"
+import { ImageGenerationPlaceholder } from "@/components/image-generation-placeholder"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -165,6 +166,14 @@ function MessageActions({
   )
 }
 
+/** Check if a message content is an image generation placeholder */
+function isImageGenerationMessage(content: string): string | null {
+  if (content.startsWith("__IMAGE_GENERATION__:")) {
+    return content.slice("__IMAGE_GENERATION__:".length)
+  }
+  return null
+}
+
 export function MessageBubble({
   message,
   streaming = false,
@@ -181,6 +190,8 @@ export function MessageBubble({
   const isUser = message.role === "user"
   const done =
     !isUser && !streaming && !message.pending && message.content !== ""
+  
+  const imagePrompt = !isUser ? isImageGenerationMessage(message.content) : null
 
   return (
     <Message align={isUser ? "end" : "start"}>
@@ -188,21 +199,14 @@ export function MessageBubble({
       <MessageContent className={cn(isUser ? "items-end" : "items-start pt-1")}>
         {isUser ? (
           message.content !== "" && (
-            // The bubble is a typeset container, so the user side shares the
-            // reply's typography: Outfit at 14px, 1.6 leading, flowing from the
-            // same stylesheet. `text-white` is load-bearing — it keeps the blue
-            // bubble white in light mode, where typeset would otherwise use the
-            // theme's dark foreground. `text-sm` is gone on purpose: it would
-            // win over typeset's size and lose the small-screen bump.
             <div className="typeset typeset-chat w-fit max-w-[80%] min-w-0 rounded-2xl bg-primary px-4 py-2 whitespace-pre-wrap text-white">
               {message.content}
             </div>
           )
+        ) : imagePrompt ? (
+          // Render image generation placeholder
+          <ImageGenerationPlaceholder prompt={imagePrompt} />
         ) : (
-          // One component renders both the in-flight reply and the stored one,
-          // so the turn does not reflow when it is committed: the trace is the
-          // record either way, and only what has not reached a trace snapshot
-          // yet is taken from the stream.
           <AgentTrace
             trace={message.trace}
             content={streaming ? undefined : message.content}
@@ -213,7 +217,7 @@ export function MessageBubble({
             running={streaming}
           />
         )}
-        {done && (
+        {done && !imagePrompt && (
           <MessageActions
             message={message}
             onRetry={onRetry}

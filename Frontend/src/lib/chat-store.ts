@@ -4,6 +4,46 @@ import { api, streamMessage, ApiError } from "@/lib/api"
 import { getSelectedModel } from "@/lib/model-store"
 import type { Chat, ChatMessage, TurnTrace } from "@/types/chat"
 
+/** Detect if a message is an image generation request */
+function isImageGenerationRequest(text: string): boolean {
+  const lower = text.toLowerCase().trim()
+  return (
+    lower.startsWith("/image") ||
+    lower.startsWith("/generate") ||
+    lower.startsWith("generate image") ||
+    lower.startsWith("create image") ||
+    lower.startsWith("make an image") ||
+    lower.startsWith("draw") ||
+    lower.startsWith("paint")
+  )
+}
+
+/** Extract the prompt from an image generation request */
+function extractImagePrompt(text: string): string {
+  const lower = text.toLowerCase().trim()
+  // Remove common prefixes
+  let prompt = text
+  const prefixes = [
+    "/image",
+    "/generate",
+    "generate image",
+    "create image",
+    "make an image",
+    "make image",
+    "draw",
+    "paint",
+  ]
+  for (const prefix of prefixes) {
+    if (lower.startsWith(prefix)) {
+      prompt = text.slice(prefix.length).trim()
+      // Remove leading "of", "a", "an", "the"
+      prompt = prompt.replace(/^(of|a|an|the)\s+/i, "").trim()
+      break
+    }
+  }
+  return prompt || "A beautiful scene"
+}
+
 interface ChatState {
   chats: Chat[]
   messages: Record<string, ChatMessage[]>
@@ -184,6 +224,42 @@ export async function createChat(workspaceId?: string, agentId?: string): Promis
 export async function sendMessage(chatId: string, content: string) {
   const text = content.trim()
   if (!text) return
+
+  // Check if this is an image generation request
+  if (isImageGenerationRequest(text)) {
+    const imagePrompt = extractImagePrompt(text)
+    
+    const optimistic: ChatMessage = {
+      id: `local-${Date.now()}`,
+      chatId,
+      role: "user",
+      content: text,
+      createdAt: Date.now(),
+      pending: true,
+    }
+
+    // Create a special assistant message that will render the image generation placeholder
+    const assistantMessage: ChatMessage = {
+      id: `local-${Date.now()}-assistant`,
+      chatId,
+      role: "assistant",
+      content: `__IMAGE_GENERATION__:${imagePrompt}`,
+      createdAt: Date.now(),
+      pending: true,
+    }
+
+    setState({
+      messages: {
+        ...state.messages,
+        [chatId]: [...(state.messages[chatId] ?? []), optimistic, assistantMessage],
+      },
+      // Don't set streaming for image generation - no inFlight message needed
+      reasoning: { ...state.reasoning, [chatId]: "" },
+      traces: without(state.traces, chatId),
+      errors: without(state.errors, chatId),
+    })
+    return
+  }
 
   const optimistic: ChatMessage = {
     id: `local-${Date.now()}`,
