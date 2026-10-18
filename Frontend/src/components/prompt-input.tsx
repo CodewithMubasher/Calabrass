@@ -11,6 +11,7 @@ import { cn } from "cn"
 import "./prompt-input.css"
 import {
   ArrowUp01Icon,
+  BotIcon,
   ChevronDownIcon,
   PlusSignIcon,
   Tick02Icon,
@@ -24,6 +25,7 @@ import {
   type AttachmentFile,
 } from "@/lib/attachments"
 import { selectModel, useModelState } from "@/lib/model-store"
+import { useAgentsState } from "@/lib/agent-store"
 import { useIsMobile } from "@/hooks/use-mobile"
 
 /**
@@ -107,6 +109,7 @@ export function PromptInput({
 
   const { providers, loading: loadingModels, error: modelError, selected: model } =
     useModelState()
+  const { agents } = useAgentsState()
 
   // A phone's composer is a phone's width. The long placeholder — the one with
   // the slashes in it — is cut off mid-word there, so a phone is asked the one
@@ -123,6 +126,11 @@ export function PromptInput({
 
   const selectedLabel = (() => {
     if (!model) return "Select model"
+    // Check if it's an agent selection
+    if (model.agentId) {
+      const agent = agents.find((a) => a.id === model.agentId)
+      if (agent) return `${agent.name} (Agent)`
+    }
     for (const provider of providers) {
       const match = provider.models.find(
         (m) => m.id === model.model && provider.id === model.provider
@@ -341,9 +349,44 @@ export function PromptInput({
               {!loadingModels && modelError && (
                 <div className="px-3 py-2 text-xs text-red-400">{modelError}</div>
               )}
-              {!loadingModels && !modelError && providers.length === 0 && (
+              {!loadingModels && !modelError && providers.length === 0 && agents.length === 0 && (
                 <div className="px-3 py-2 text-xs text-white/40">
                   No models available — check backend API keys.
+                </div>
+              )}
+              {agents.length > 0 && (
+                <div>
+                  <div className="px-3 pt-2 pb-1 text-[10px] font-medium tracking-wide text-white/40 uppercase">
+                    Agents
+                  </div>
+                  {agents.map((agent) => {
+                    const isActive = model?.agentId === agent.id
+                    return (
+                      <button
+                        key={`agent:${agent.id}`}
+                        onClick={() => {
+                          selectModel({ provider: "", model: "", agentId: agent.id })
+                          setModelOpen(false)
+                        }}
+                        className={cn(
+                          "flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-1.5 text-left text-xs text-white hover:bg-white/10",
+                          isActive && "bg-white/5"
+                        )}
+                      >
+                        <span className="truncate flex items-center gap-2">
+                          <HugeiconsIcon icon={BotIcon} strokeWidth={2} className="size-3.5 text-white/50" />
+                          {agent.name}
+                        </span>
+                        {isActive && (
+                          <HugeiconsIcon
+                            icon={Tick02Icon}
+                            strokeWidth={2}
+                            className="size-3.5 shrink-0 text-primary"
+                          />
+                        )}
+                      </button>
+                    )
+                  })}
                 </div>
               )}
               {providers.map((provider) => (
@@ -353,7 +396,7 @@ export function PromptInput({
                   </div>
                   {provider.models.map((item) => {
                     const isActive =
-                      model?.provider === provider.id && model?.model === item.id
+                      model?.provider === provider.id && model?.model === item.id && !model?.agentId
                     return (
                       <button
                         key={`${provider.id}:${item.id}`}

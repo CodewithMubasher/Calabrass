@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react"
 
-import { api, streamMessage } from "@/lib/api"
+import { api, streamMessage, ApiError } from "@/lib/api"
 import { getSelectedModel } from "@/lib/model-store"
 import type { Chat, ChatMessage, TurnTrace } from "@/types/chat"
 
@@ -106,6 +106,10 @@ function errorMessage(err: unknown) {
   return err instanceof Error ? err.message : "Something went wrong."
 }
 
+function is401(err: unknown): err is ApiError {
+  return err instanceof ApiError && err.status === 401
+}
+
 function without<T>(record: Record<string, T>, key: string) {
   const next: Record<string, T> = {}
   for (const k of Object.keys(record)) {
@@ -138,6 +142,7 @@ export async function hydrate() {
     const chats = await api.listChats()
     setState({ chats, hydrated: true, backendError: null })
   } catch (err) {
+    if (is401(err)) throw err
     setState({ hydrated: true, backendError: errorMessage(err) })
   }
 }
@@ -154,6 +159,7 @@ export async function ensureChatLoaded(chatId: string) {
       backendError: null,
     })
   } catch (err) {
+    if (is401(err)) throw err
     setState({
       messages: { ...state.messages, [chatId]: [] },
       errors: { ...state.errors, [chatId]: errorMessage(err) },
@@ -161,13 +167,18 @@ export async function ensureChatLoaded(chatId: string) {
   }
 }
 
-export async function createChat(workspaceId?: string): Promise<Chat> {
-  const chat = await api.createChat(getSelectedModel(), workspaceId)
-  setState({
-    chats: upsertChat(state.chats, chat),
-    messages: { ...state.messages, [chat.id]: [] },
-  })
-  return chat
+export async function createChat(workspaceId?: string, agentId?: string): Promise<Chat> {
+  try {
+    const chat = await api.createChat(getSelectedModel(), workspaceId, agentId)
+    setState({
+      chats: upsertChat(state.chats, chat),
+      messages: { ...state.messages, [chat.id]: [] },
+    })
+    return chat
+  } catch (err) {
+    if (is401(err)) throw err
+    throw err
+  }
 }
 
 export async function sendMessage(chatId: string, content: string) {
@@ -287,6 +298,7 @@ export async function togglePinChat(chatId: string, pinned: boolean) {
     const chat = await api.updateChat(chatId, { pinned })
     setState({ chats: upsertChat(state.chats, chat) })
   } catch (err) {
+    if (is401(err)) throw err
     setState({ chats: previous, backendError: errorMessage(err) })
   }
 }

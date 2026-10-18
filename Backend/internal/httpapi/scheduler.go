@@ -128,7 +128,7 @@ func (s *Server) runScheduledTask(ctx context.Context, task store.ScheduledTask)
 	}
 	turns = append(turns, ai.Message{Role: ai.RoleUser, Content: task.Prompt})
 
-	setup := s.setupTurnFor(ctx, task.UserID, s.workspaceForUser(task.UserID, chat.Chat), chatID)
+	setup := s.setupTurnFor(ctx, task.UserID, s.workspaceForUser(task.UserID, chat.Chat), chatID, chat.AgentID)
 
 	started := time.Now()
 	reply, genErr := s.registryFor(task.UserID).Stream(ctx, ai.StreamRequest{

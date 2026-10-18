@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
+	"github.com/xuri/excelize/v2"
 )
 
 // Artifacts are the files in a workspace, listed from disk as they are rather
@@ -276,6 +278,12 @@ func (s *Server) handleArtifactContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Special handling for Excel files: extract sheets as CSV/JSON
+	if isExcelFile(payload.Name) {
+		s.handleExcelContent(w, abs, payload)
+		return
+	}
+
 	file, err := os.Open(abs)
 	if err != nil {
 		writeError(w, artifactStatus(err), err)
@@ -306,6 +314,72 @@ func (s *Server) handleArtifactContent(w http.ResponseWriter, r *http.Request) {
 		"content":   string(data),
 		"truncated": truncated,
 		"size":      payload.Size,
+	})
+}
+
+func isExcelFile(name string) bool {
+	ext := strings.ToLower(filepath.Ext(name))
+	return ext == ".xlsx" || ext == ".xls"
+}
+
+func (s *Server) handleExcelContent(w http.ResponseWriter, abs string, payload artifactPayload) {
+	f, err := excelize.OpenFile(abs)
+	if err != nil {
+		s.log.Warn("could not open excel file for preview", "path", abs, "error", err)
+		// Fall back to binary
+		writeJSON(w, http.StatusOK, map[string]any{
+			"binary":    true,
+			"content":   "",
+			"truncated": false,
+			"size":      payload.Size,
+		})
+		return
+	}
+	defer func() { _ = f.Close() }()
+
+	sheets := f.GetSheetList()
+	if len(sheets) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"binary":    true,
+			"content":   "",
+			"truncated": false,
+			"size":      payload.Size,
+		})
+		return
+	}
+
+	type SheetData struct {
+		Name string   `json:"name"`
+		Rows [][]string `json:"rows"`
+	}
+
+	var allSheets []SheetData
+	for _, sheet := range sheets {
+		rows, err := f.GetRows(sheet)
+		if err != nil {
+			s.log.Warn("could not read sheet", "sheet", sheet, "error", err)
+			continue
+		}
+		// Limit rows for preview
+		if len(rows) > 200 {
+			rows = rows[:200]
+		}
+		allSheets = append(allSheets, SheetData{
+			Name: sheet,
+			Rows: rows,
+		})
+	}
+
+	// Convert to JSON string for the content field
+	contentBytes, _ := json.Marshal(allSheets)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"binary":    false,
+		"content":   string(contentBytes),
+		"truncated": false,
+		"size":      payload.Size,
+		"preview":   "table",
+		"sheets":    allSheets,
 	})
 }
 

@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react"
 
 import { api } from "@/lib/api"
+import { setArtifactsOpen } from "@/lib/panel-store"
 import type { ArtifactFile } from "@/lib/artifacts"
 
 /**
@@ -27,6 +28,9 @@ let state: ArtifactState = { chatId: "", files: [] }
 const NO_FILES: ArtifactFile[] = []
 
 const listeners = new Set<() => void>()
+
+/** Previous file paths per chatId to detect new files. */
+const previousFiles = new Map<string, Set<string>>()
 
 function emit(next: ArtifactState) {
   state = next
@@ -63,7 +67,25 @@ export function watchArtifacts(chatId: string) {
     const payload = JSON.parse((event as MessageEvent<string>).data) as {
       files?: ArtifactFile[]
     }
-    emit({ chatId, files: payload.files ?? [] })
+    const files = payload.files ?? []
+
+    // Detect new files and auto-open panel
+    const prevPaths = previousFiles.get(chatId) ?? new Set<string>()
+    const newFiles = files.filter((f) => !prevPaths.has(f.path))
+    previousFiles.set(chatId, new Set(files.map((f) => f.path)))
+
+    // Auto-open artifact panel if new files appeared and panel is closed
+    if (newFiles.length > 0) {
+      // Check if panel is currently closed
+      const currentState = getSnapshot()
+      if (currentState.chatId === chatId) {
+        // Panel is for this chat, check if it's open via panel-store
+        // We'll trigger open regardless - panel-store will handle idempotency
+        setArtifactsOpen(true)
+      }
+    }
+
+    emit({ chatId, files })
   })
 
   return () => source.close()

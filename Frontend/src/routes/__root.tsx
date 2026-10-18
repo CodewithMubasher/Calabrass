@@ -59,19 +59,24 @@ function RootLayout() {
   const showsTopbar = hasTopbar(pathname)
   const { artifactsOpen } = usePanelState()
 
+  // Validate session on mount, then hydrate data. If the token is expired or
+  // revoked, refreshSession clears it and we redirect to login. Only after a
+  // valid session do we load models and chats, so we never hit 401 on those calls.
   useEffect(() => {
-    void hydrate()
-    void loadModels()
-  }, [])
-
-  // The stored token may have been revoked or expired since the last visit.
-  // Check it once; the gate above already let this page render from storage.
-  useEffect(() => {
-    void refreshSession().then((current) => {
+    let mounted = true
+    void (async () => {
+      const current = await refreshSession()
+      if (!mounted) return
       if (!current && !isStandalone(window.location.pathname)) {
         void navigate({ to: "/login", replace: true })
+        return
       }
-    })
+      void hydrate()
+      void loadModels()
+    })()
+    return () => {
+      mounted = false
+    }
   }, [navigate])
 
   // The login page stands on its own: nothing from the shell is around it, not

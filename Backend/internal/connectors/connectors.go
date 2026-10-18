@@ -96,6 +96,7 @@ type ToolInfo struct {
 // Brief is a connector as the agent should be told about it: what it is called,
 // what it says it is for, and the tools it is actually offering.
 type Brief struct {
+	ID           string   `json:"id"`
 	Name         string   `json:"name"`
 	Instructions string   `json:"instructions"`
 	Tools        []string `json:"tools"`
@@ -172,6 +173,7 @@ func (p *Pool) Turn(ctx context.Context, userID string) ([]Brief, []goai.Tool) {
 
 		tools = append(tools, kept...)
 		briefs = append(briefs, Brief{
+			ID:           record.ID,
 			Name:         record.Name,
 			Instructions: running.instructions,
 			Tools:        toolNames(kept),

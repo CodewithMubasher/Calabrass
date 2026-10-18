@@ -6,6 +6,7 @@ import (
 	goai "github.com/zendev-sh/goai"
 
 	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/connectors"
 )
 
 // turnSetup is what a turn takes from the harness: the prompt to think with, and
@@ -21,7 +22,7 @@ type turnSetup struct {
 // setupTurn builds a turn for the shipped admin account. Handlers use
 // setupTurnFor with the signed-in account.
 func (s *Server) setupTurn(ctx context.Context, workspace *agent.Workspace, chatID string) turnSetup {
-	return s.setupTurnFor(ctx, "", workspace, chatID)
+	return s.setupTurnFor(ctx, "", workspace, chatID, "")
 }
 
 // setupTurnFor builds both together, because the prompt has to describe the
@@ -32,23 +33,49 @@ func (s *Server) setupTurn(ctx context.Context, workspace *agent.Workspace, chat
 // chatID is the conversation the turn belongs to, which is what a task booked
 // during it is bound to: the answer then lands where it was asked for. An empty
 // id means there is no conversation to bind to. userID scopes the connectors and
-// the tasks the turn may see.
-func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *agent.Workspace, chatID string) turnSetup {
+// the tasks the turn may see. agentID is the agent this chat is associated with.
+func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *agent.Workspace, chatID, agentID string) turnSetup {
 	tools := agent.Tools(workspace)
 	var described []agent.Connector
 	var origins map[string]string
+	var agentSystemPrompt string
+	var agentConnectorID string
 
+	// If this chat is associated with an agent, load its configuration
+	if agentID != "" {
+		agentRec, err := s.store.GetAgent(ctx, agentID, userID)
+		if err == nil {
+			// Use agent's system prompt (or prompt as fallback) as the system prompt
+			agentSystemPrompt = agentRec.SystemPrompt
+			if agentSystemPrompt == "" {
+				agentSystemPrompt = agentRec.Prompt
+			}
+			agentConnectorID = agentRec.ConnectorID
+		}
+	}
+
+	// Start with workspace tools
 	if s.connectors != nil {
 		briefs, offered := s.connectors.Turn(ctx, userID)
 		var skipped []string
+
+		// If agent has a specific connector, only use that one
+		if agentConnectorID != "" {
+			filteredBriefs := []connectors.Brief{}
+			for _, brief := range briefs {
+				if brief.ID == agentConnectorID {
+					filteredBriefs = append(filteredBriefs, brief)
+					break
+				}
+			}
+			briefs = filteredBriefs
+		}
+
 		tools, skipped = mergeTools(tools, offered)
 		for _, name := range skipped {
 			s.log.Warn("a connector tool was skipped: the name is already taken", "tool", name)
 		}
 
-		// The prompt describes the tools that are really there, so one that lost
-		// its name to a built-in is dropped from the description as well. The
-		// same kept names are what the trace uses to place a call.
 		origins = make(map[string]string)
 		for _, brief := range briefs {
 			kept := without(brief.Tools, skipped)
@@ -71,13 +98,19 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 		tools = append(tools, s.scheduleTool(chatID, userID))
 	}
 
-	// With no project and nothing acting on the machine, there is no harness to
-	// explain: the turn is a plain completion, and the application's own prompt
-	// is the whole of it.
-	if workspace == nil && len(described) == 0 {
-		return turnSetup{system: s.system, tools: tools, origins: origins}
+	// Determine the system prompt to use
+	systemPrompt := s.system
+	if agentSystemPrompt != "" {
+		// Agent's system prompt REPLACES the global system prompt entirely
+		systemPrompt = agentSystemPrompt
 	}
-	return turnSetup{system: agent.SystemPrompt(workspace, s.system, described), tools: tools, origins: origins}
+
+	// With no project and nothing acting on the machine, there is no harness to
+	// explain: the turn is a plain completion with the system prompt.
+	if workspace == nil && len(described) == 0 {
+		return turnSetup{system: systemPrompt, tools: tools, origins: origins}
+	}
+	return turnSetup{system: agent.SystemPrompt(workspace, systemPrompt, described), tools: tools, origins: origins}
 }
 
 // mergeTools adds what the connectors offer to a turn's tools, leaving out the

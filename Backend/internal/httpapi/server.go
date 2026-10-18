@@ -149,6 +149,7 @@ func NewServer(deps Deps) *Server {
 	mux.HandleFunc("GET /api/connectors/{connectorID}/tools", s.handleConnectorTools)
 	mux.HandleFunc("GET /api/agents", s.handleListAgents)
 	mux.HandleFunc("POST /api/agents", s.handleCreateAgent)
+	mux.HandleFunc("GET /api/agents/{agentID}", s.handleGetAgent)
 	mux.HandleFunc("PUT /api/agents/{agentID}", s.handleUpdateAgent)
 	mux.HandleFunc("DELETE /api/agents/{agentID}", s.handleDeleteAgent)
 	mux.HandleFunc("GET /api/voice", s.handleVoiceStream)

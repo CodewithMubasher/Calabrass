@@ -26,14 +26,15 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 // agentRequest is the form the Agents page writes: everything an agent needs to
 // be handed work, all of it optional except the name.
 type agentRequest struct {
-	Name        string `json:"name"`
-	Prompt      string `json:"prompt"`
-	Mode        string `json:"mode"`
-	ConnectorID string `json:"connectorId"`
-	Provider    string `json:"provider"`
-	Model       string `json:"model"`
-	AltProvider string `json:"altProvider"`
-	AltModel    string `json:"altModel"`
+	Name           string `json:"name"`
+	Prompt         string `json:"prompt"`
+	SystemPrompt   string `json:"systemPrompt"`
+	Mode           string `json:"mode"`
+	ConnectorID    string `json:"connectorId"`
+	Provider       string `json:"provider"`
+	Model          string `json:"model"`
+	AltProvider    string `json:"altProvider"`
+	AltModel       string `json:"altModel"`
 }
 
 // record validates the request and turns it into a stored row. Only the name is
@@ -54,15 +55,18 @@ func (a agentRequest) record() (store.AgentRecord, error) {
 		return store.AgentRecord{}, errors.New(`mode must be "build" or "plan"`)
 	}
 
+	systemPrompt := strings.TrimSpace(a.SystemPrompt)
+
 	return store.AgentRecord{
-		Name:        name,
-		Prompt:      strings.TrimSpace(a.Prompt),
-		Mode:        mode,
-		ConnectorID: strings.TrimSpace(a.ConnectorID),
-		Provider:    strings.TrimSpace(a.Provider),
-		Model:       strings.TrimSpace(a.Model),
-		AltProvider: strings.TrimSpace(a.AltProvider),
-		AltModel:    strings.TrimSpace(a.AltModel),
+		Name:           name,
+		Prompt:         strings.TrimSpace(a.Prompt),
+		SystemPrompt:   systemPrompt,
+		Mode:           mode,
+		ConnectorID:    strings.TrimSpace(a.ConnectorID),
+		Provider:       strings.TrimSpace(a.Provider),
+		Model:          strings.TrimSpace(a.Model),
+		AltProvider:    strings.TrimSpace(a.AltProvider),
+		AltModel:       strings.TrimSpace(a.AltModel),
 	}, nil
 }
 
@@ -125,4 +129,19 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.listAgents(w, r)
+}
+
+// handleGetAgent returns a single agent by ID.
+func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r.Context())
+	rec, err := s.store.GetAgent(r.Context(), r.PathValue("agentID"), user.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"agent": rec})
 }

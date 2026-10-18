@@ -136,7 +136,7 @@ func (s *Server) delegateWork(ctx context.Context, userID string, chat store.Cha
 	}
 
 	workspace := s.workspaceForUser(userID, chat.Chat)
-	setup := s.setupTurnFor(ctx, userID, workspace, chat.ID)
+	setup := s.setupTurnFor(ctx, userID, workspace, chat.ID, chat.AgentID)
 
 	// The worker continues the conversation, so it knows what has been said
 	// already, and the task is its instruction.

@@ -22,7 +22,7 @@ export interface ArtifactFile {
   modified: number
 }
 
-export type ArtifactPreview = "markdown" | "code" | "none"
+export type ArtifactPreview = "markdown" | "code" | "table" | "none"
 
 /** Extensions shiki has a grammar for. */
 const CODE_LANGUAGES: Record<string, string> = {
@@ -59,6 +59,7 @@ const DATA_EXTENSIONS = new Set(["CSV", "TSV", "XML", "LOG"])
 export function previewFor(extension: string): ArtifactPreview {
   const ext = extension.toUpperCase()
   if (ext === "MD" || ext === "MDX") return "markdown"
+  if (ext === "XLSX" || ext === "XLS") return "table"
   return CODE_LANGUAGES[ext] !== undefined ? "code" : "none"
 }
 

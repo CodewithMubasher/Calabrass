@@ -84,3 +84,8 @@ export async function saveAgent(agentId: string, input: AgentInput) {
 export async function deleteAgent(agentId: string) {
   setState({ agents: await api.deleteAgent(agentId), error: null })
 }
+
+/** Fetch a single agent by ID. */
+export async function getAgent(agentId: string): Promise<AgentRow> {
+  return api.getAgent(agentId)
+}

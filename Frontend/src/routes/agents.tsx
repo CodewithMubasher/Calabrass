@@ -25,17 +25,16 @@ export const Route = createRoute({
 function AgentCard({
   agent,
   connectorName,
-  onOpen,
+  onClick,
 }: {
   agent: AgentRow
   connectorName: string
-  onOpen: () => void
+  onClick: () => void
 }) {
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="flex flex-col rounded-2xl border border-white/10 bg-white/5 p-4 text-left transition-colors hover:border-white/20"
+    <div
+      className="flex flex-col rounded-2xl border border-white/10 bg-white/5 p-4 text-left transition-colors hover:border-white/20 cursor-pointer"
+      onClick={onClick}
     >
       <span className="flex w-full items-start gap-3">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-white/5">
@@ -81,8 +80,13 @@ function AgentCard({
             Fallback · {agent.altModel}
           </span>
         ) : null}
+        {agent.systemPrompt ? (
+          <span className="rounded-full bg-primary/20 px-2 py-0.5 text-primary">
+            Custom System Prompt
+          </span>
+        ) : null}
       </span>
-    </button>
+    </div>
   )
 }
 
@@ -154,7 +158,7 @@ function AgentsPage() {
               key={agent.id}
               agent={agent}
               connectorName={connectorNames.get(agent.connectorId) ?? ""}
-              onOpen={() => setEditing(agent)}
+              onClick={() => setEditing(agent)}
             />
           ))}
         </div>

@@ -20,6 +20,8 @@ import type {
   WorkspaceRow,
 } from "@/types/chat"
 import { getToken, type AuthSession, type AuthUser } from "@/lib/session"
+import { clearSession } from "@/lib/session"
+import { navigate } from "@/lib/navigation"
 
 const BASE = import.meta.env.VITE_API_BASE || "/api"
 
@@ -43,6 +45,8 @@ async function readError(res: Response): Promise<string> {
   return `Request failed with status ${res.status}`
 }
 
+let isHandling401 = false
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken()
   const res = await fetch(`${BASE}${path}`, {
@@ -54,7 +58,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   })
   if (!res.ok) {
-    throw new ApiError(await readError(res), res.status)
+    const message = await readError(res)
+    const error = new ApiError(message, res.status)
+    // Global 401 handling: if any API call returns 401, the session is invalid.
+    // Clear local session and redirect to login (once per session).
+    if (res.status === 401 && !isHandling401) {
+      isHandling401 = true
+      clearSession()
+      // Use a small delay to let the current render complete, then navigate.
+      setTimeout(() => {
+        navigate({ to: "/login", replace: true })
+        isHandling401 = false
+      }, 0)
+    }
+    throw error
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
@@ -143,12 +160,13 @@ export const api = {
   getChat: (chatId: string) =>
     request<{ chat: ChatDetail }>(`/chats/${chatId}`).then((r) => r.chat),
 
-  createChat: (selection?: ModelSelection | null, workspaceId?: string) =>
+  createChat: (selection?: ModelSelection | null, workspaceId?: string, agentId?: string) =>
     request<{ chat: Chat }>("/chats", {
       method: "POST",
       body: JSON.stringify({
         ...(selection ?? {}),
         ...(workspaceId ? { workspaceId } : {}),
+        ...(agentId ? { agentId } : {}),
       }),
     }).then((r) => r.chat),
 
@@ -182,6 +200,9 @@ export const api = {
 
   listAgents: () =>
     request<{ agents: AgentRow[] }>("/agents").then((r) => r.agents ?? []),
+
+  getAgent: (agentId: string) =>
+    request<{ agent: AgentRow }>(`/agents/${agentId}`).then((r) => r.agent),
 
   createAgent: (input: AgentInput) =>
     request<{ agents: AgentRow[] }>("/agents", {
@@ -252,6 +273,8 @@ export const api = {
       content: string
       truncated: boolean
       size: number
+      preview?: string
+      sheets?: Array<{ name: string; rows: string[][] }>
     }>(`/artifacts/content?${artifactQuery(chatId, { path })}`),
 
   /** One file as it is on disk, which is what the browser saves. */

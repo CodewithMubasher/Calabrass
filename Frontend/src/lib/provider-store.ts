@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react"
 
-import { api } from "@/lib/api"
+import { api, ApiError } from "@/lib/api"
 import { loadModels } from "@/lib/model-store"
 import type { ProviderInput, ProviderRow } from "@/types/chat"
 
@@ -46,6 +46,10 @@ function reason(err: unknown, fallback: string) {
   return err instanceof Error ? err.message : fallback
 }
 
+function is401(err: unknown): err is ApiError {
+  return err instanceof ApiError && err.status === 401
+}
+
 let inFlight = false
 
 /** Fetch the providers the backend can serve. */
@@ -57,6 +61,7 @@ export async function loadProviders() {
   try {
     setState({ providers: await api.listProviders(), loading: false })
   } catch (err) {
+    if (is401(err)) throw err
     setState({
       loading: false,
       error: reason(err, "Could not load providers."),
@@ -86,6 +91,7 @@ export async function setProviderEnabled(providerID: string, enabled: boolean) {
   try {
     setState({ providers: await api.updateProvider(providerID, { enabled }) })
   } catch (err) {
+    if (is401(err)) throw err
     setState({
       providers: previous,
       error: reason(err, "Could not update the provider."),
@@ -106,18 +112,33 @@ export function clearProvidersError() {
  * the dialog can show it next to the form.
  */
 export async function createProvider(input: ProviderInput) {
-  setState({ providers: await api.createProvider(input), error: null })
+  try {
+    setState({ providers: await api.createProvider(input), error: null })
+  } catch (err) {
+    if (is401(err)) throw err
+    throw err
+  }
   await loadModels()
 }
 
 /** Save edits to a provider. Throws on failure. */
 export async function saveProvider(providerID: string, input: ProviderInput) {
-  setState({ providers: await api.updateProvider(providerID, input), error: null })
+  try {
+    setState({ providers: await api.updateProvider(providerID, input), error: null })
+  } catch (err) {
+    if (is401(err)) throw err
+    throw err
+  }
   await loadModels()
 }
 
 /** Remove a custom provider. Throws on failure. */
 export async function deleteProvider(providerID: string) {
-  setState({ providers: await api.deleteProvider(providerID), error: null })
+  try {
+    setState({ providers: await api.deleteProvider(providerID), error: null })
+  } catch (err) {
+    if (is401(err)) throw err
+    throw err
+  }
   await loadModels()
 }

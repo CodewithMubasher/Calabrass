@@ -49,11 +49,14 @@ func (s *Server) handleListChats(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r.Context())
 	var req struct {
-		Provider string `json:"provider"`
-		Model    string `json:"model"`
+		Provider   string `json:"provider"`
+		Model      string `json:"model"`
 		// WorkspaceID binds the chat to one workspace's folder. Empty means the
 		// default workspace.
 		WorkspaceID string `json:"workspaceId"`
+		// AgentID binds the chat to an agent's configuration. When set, the agent's
+		// provider, model, connector and system prompt are used.
+		AgentID string `json:"agentId"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -74,9 +77,42 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 		workspaceDir = record.Dir
 	}
 
-	providerID, modelID := s.resolveModelFor(r.Context(), user.ID, req.Provider, req.Model)
+	// If agentId is provided, load the agent and use its configuration
+	agentID := strings.TrimSpace(req.AgentID)
+	providerID := strings.TrimSpace(req.Provider)
+	modelID := strings.TrimSpace(req.Model)
 
-	chat, err := s.store.CreateChat(r.Context(), providerID, modelID, workspaceDir, user.ID)
+	if agentID != "" {
+		agent, err := s.store.GetAgent(r.Context(), agentID, user.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusBadRequest, errors.New("unknown agent"))
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		// Use agent's provider/model if not explicitly provided
+		if providerID == "" {
+			providerID = agent.Provider
+		}
+		if modelID == "" {
+			modelID = agent.Model
+		}
+		// If still no provider/model, resolve from registry
+		if providerID == "" || modelID == "" {
+			providerID, modelID = s.resolveModelFor(r.Context(), user.ID, providerID, modelID)
+		}
+	} else {
+		providerID, modelID = s.resolveModelFor(r.Context(), user.ID, providerID, modelID)
+	}
+
+	if providerID == "" || modelID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("no model is available; add a provider key or turn a provider on under Providers"))
+		return
+	}
+
+	chat, err := s.store.CreateChat(r.Context(), providerID, modelID, workspaceDir, agentID, user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -350,7 +386,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	// The harness: the prompt that explains what the model is working with — the
 	// project, and the machine the connectors reach — and the tools it may call.
-	setup := s.setupTurnFor(ctx, user.ID, s.workspaceForUser(user.ID, chat.Chat), chatID)
+	setup := s.setupTurnFor(ctx, user.ID, s.workspaceForUser(user.ID, chat.Chat), chatID, chat.AgentID)
 
 	started := time.Now()
 	var lastTrace ai.Trace

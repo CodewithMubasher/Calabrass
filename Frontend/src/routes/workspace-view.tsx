@@ -236,14 +236,16 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
           />
         </div>
       ) : (
-        <div className="mt-40 flex items-start gap-10 px-14">
+        <div className="mt-8 flex items-start gap-10 px-14">
           <div className="flex min-w-0 flex-1 flex-col">
-            <PromptInput
-              onSend={handleSend}
-              heading={`Ready to work on ${title}`}
-              compact
-              disabled={sending}
-            />
+            <div className="-mt-16">
+              <PromptInput
+                onSend={handleSend}
+                heading={`Ready to work on ${title}`}
+                compact
+                disabled={sending}
+              />
+            </div>
 
             <div className="mt-8">
               <h3 className="mb-3 text-xs font-medium text-white/40">Recents</h3>
@@ -280,7 +282,7 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
             </div>
           </div>
 
-          <div className="-mt-3 flex w-[320px] flex-col gap-3">
+          <div className="mt-20 flex w-[320px] flex-col gap-3">
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-sm font-medium text-white/90">

@@ -242,9 +242,11 @@ export function AgentDialog({
 
     const preferred = decodeModel(model)
     const fallback = decodeModel(altModel)
+    // Single prompt field becomes the system prompt (replaces global)
     const input: AgentInput = {
       name: name.trim(),
       prompt: prompt.trim(),
+      systemPrompt: prompt.trim(), // Agent prompt IS the system prompt
       mode,
       connectorId,
       provider: preferred.provider,
@@ -312,12 +314,12 @@ export function AgentDialog({
               />
             </Field>
 
-            <Field label="Agent prompt">
+            <Field label="Agent Prompt (replaces global system prompt)">
               <Textarea
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
-                placeholder="You research a question, weigh the sources, and answer with citations."
-                rows={5}
+                placeholder="You research a question, weigh the sources, and answer with citations. This prompt completely replaces the global system prompt when this agent is selected."
+                rows={6}
               />
             </Field>
 

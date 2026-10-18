@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react"
 
-import { api } from "@/lib/api"
+import { api, ApiError } from "@/lib/api"
 import type { ModelSelection, ProviderInfo } from "@/types/chat"
 
 const STORAGE_KEY = "calabrass-model"
@@ -104,6 +104,12 @@ export async function loadModels() {
     if (selected) persistSelection(selected)
     setState({ providers, selected, loading: false })
   } catch (err) {
+    // Don't store 401 errors — the global API handler clears the session
+    // and redirects to login. Storing the error here races with the redirect
+    // and shows "session expired" in the dropdown before navigation.
+    if (err instanceof ApiError && err.status === 401) {
+      throw err
+    }
     setState({
       loading: false,
       error: err instanceof Error ? err.message : "Could not load models.",

@@ -32,6 +32,8 @@ type Chat struct {
 	// WorkspaceDir is the workspace folder this chat works in. Empty means the
 	// default workspace.
 	WorkspaceDir string `json:"workspaceDir"`
+	// AgentID is the agent this chat is associated with. Empty means no agent.
+	AgentID string `json:"agentId"`
 	// Pinned chats are listed above the rest, in the order they were last used.
 	Pinned    bool  `json:"pinned"`
 	CreatedAt int64 `json:"createdAt"`
@@ -115,6 +117,7 @@ CREATE TABLE IF NOT EXISTS chats (
 	provider   TEXT NOT NULL DEFAULT '',
 	model      TEXT NOT NULL DEFAULT '',
 	workspace_dir TEXT NOT NULL DEFAULT '',
+	agent_id   TEXT NOT NULL DEFAULT '',
 	pinned     INTEGER NOT NULL DEFAULT 0,
 	created_at INTEGER NOT NULL,
 	updated_at INTEGER NOT NULL
@@ -198,19 +201,21 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_tasks(enabled, last_ru
 
 -- One row per sub-agent: a named instruction, the mode it runs in, the MCP
 -- connector it may use, and the model it prefers with a fallback beside it.
+-- system_prompt is the explicit system prompt replacement; when empty, prompt is used.
 CREATE TABLE IF NOT EXISTS agents (
-	id           TEXT PRIMARY KEY,
-	user_id      TEXT NOT NULL DEFAULT '',
-	name         TEXT NOT NULL,
-	prompt       TEXT NOT NULL DEFAULT '',
-	mode         TEXT NOT NULL DEFAULT 'build',
-	connector_id TEXT NOT NULL DEFAULT '',
-	provider     TEXT NOT NULL DEFAULT '',
-	model        TEXT NOT NULL DEFAULT '',
-	alt_provider TEXT NOT NULL DEFAULT '',
-	alt_model    TEXT NOT NULL DEFAULT '',
-	created_at   INTEGER NOT NULL,
-	updated_at   INTEGER NOT NULL
+	id            TEXT PRIMARY KEY,
+	user_id       TEXT NOT NULL DEFAULT '',
+	name          TEXT NOT NULL,
+	prompt        TEXT NOT NULL DEFAULT '',
+	system_prompt TEXT NOT NULL DEFAULT '',
+	mode          TEXT NOT NULL DEFAULT 'build',
+	connector_id  TEXT NOT NULL DEFAULT '',
+	provider      TEXT NOT NULL DEFAULT '',
+	model         TEXT NOT NULL DEFAULT '',
+	alt_provider  TEXT NOT NULL DEFAULT '',
+	alt_model     TEXT NOT NULL DEFAULT '',
+	created_at    INTEGER NOT NULL,
+	updated_at    INTEGER NOT NULL
 );
 
 -- One row per local account. Passwords are stored as bcrypt hashes; the desktop
@@ -268,6 +273,8 @@ CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_events(provider_id, creat
 		{"providers", "custom", "custom INTEGER NOT NULL DEFAULT 0"},
 		{"chats", "pinned", "pinned INTEGER NOT NULL DEFAULT 0"},
 		{"chats", "workspace_dir", "workspace_dir TEXT NOT NULL DEFAULT ''"},
+		{"chats", "agent_id", "agent_id TEXT NOT NULL DEFAULT ''"},
+		{"agents", "system_prompt", "system_prompt TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, col := range added {
 		if err := s.ensureColumn(ctx, col.table, col.column, col.ddl); err != nil {
@@ -440,7 +447,7 @@ func NewID() string {
 func (s *Store) ListChats(ctx context.Context, userID ...string) ([]Chat, error) {
 	owner := ownerOf(userID)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, title, provider, model, workspace_dir, pinned, created_at, updated_at
+		SELECT id, title, provider, model, workspace_dir, agent_id, pinned, created_at, updated_at
 		FROM chats
 		WHERE user_id = ?
 		ORDER BY pinned DESC, updated_at DESC, rowid DESC`, owner)
@@ -455,7 +462,7 @@ func (s *Store) ListChats(ctx context.Context, userID ...string) ([]Chat, error)
 			c      Chat
 			pinned int
 		)
-		if err := rows.Scan(&c.ID, &c.Title, &c.Provider, &c.Model, &c.WorkspaceDir, &pinned, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Title, &c.Provider, &c.Model, &c.WorkspaceDir, &c.AgentID, &pinned, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("store: scan chat: %w", err)
 		}
 		c.Pinned = pinned != 0
@@ -467,7 +474,7 @@ func (s *Store) ListChats(ctx context.Context, userID ...string) ([]Chat, error)
 // CreateChat inserts a new chat. A workspaceDir binds the chat to one of the
 // library's folders; empty means the default workspace. The trailing account id
 // is the owner; calls without one are for tests and migration only.
-func (s *Store) CreateChat(ctx context.Context, providerID, model, workspaceDir string, userID ...string) (Chat, error) {
+func (s *Store) CreateChat(ctx context.Context, providerID, model, workspaceDir, agentID string, userID ...string) (Chat, error) {
 	now := time.Now().UnixMilli()
 	chat := Chat{
 		ID:           NewID(),
@@ -475,13 +482,14 @@ func (s *Store) CreateChat(ctx context.Context, providerID, model, workspaceDir 
 		Provider:     providerID,
 		Model:        model,
 		WorkspaceDir: workspaceDir,
+		AgentID:      agentID,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO chats (id, user_id, title, provider, model, workspace_dir, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		chat.ID, ownerOf(userID), chat.Title, chat.Provider, chat.Model, chat.WorkspaceDir, chat.CreatedAt, chat.UpdatedAt)
+		INSERT INTO chats (id, user_id, title, provider, model, workspace_dir, agent_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		chat.ID, ownerOf(userID), chat.Title, chat.Provider, chat.Model, chat.WorkspaceDir, chat.AgentID, chat.CreatedAt, chat.UpdatedAt)
 	if err != nil {
 		return Chat{}, fmt.Errorf("store: create chat: %w", err)
 	}
@@ -494,9 +502,9 @@ func (s *Store) getChat(ctx context.Context, id string, userID ...string) (Chat,
 		pinned int
 	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, title, provider, model, workspace_dir, pinned, created_at, updated_at
+		SELECT id, title, provider, model, workspace_dir, agent_id, pinned, created_at, updated_at
 		FROM chats WHERE id = ? AND user_id = ?`, id, ownerOf(userID)).
-		Scan(&c.ID, &c.Title, &c.Provider, &c.Model, &c.WorkspaceDir, &pinned, &c.CreatedAt, &c.UpdatedAt)
+		Scan(&c.ID, &c.Title, &c.Provider, &c.Model, &c.WorkspaceDir, &c.AgentID, &pinned, &c.CreatedAt, &c.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Chat{}, ErrNotFound
 	}
@@ -1037,10 +1045,14 @@ func (s *Store) DeleteConnector(ctx context.Context, id string, userID ...string
 // The model fields name a provider as well as a model, because a bare model id
 // is ambiguous across providers. The alternative pair is a fallback the agent
 // may be given when its default is not available.
+//
+// When used as a primary chat agent, the Prompt field REPLACES the global
+// system prompt entirely, and the agent's connector/model/mode are used.
 type AgentRecord struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Prompt string `json:"prompt"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Prompt       string `json:"prompt"`        // System prompt replacement when used as primary agent
+	SystemPrompt string `json:"systemPrompt"`  // Explicit system prompt (optional, falls back to Prompt)
 	// Mode is "build" or "plan".
 	Mode string `json:"mode"`
 	// ConnectorID is the MCP connector the agent may use; empty for none.
@@ -1053,12 +1065,12 @@ type AgentRecord struct {
 	UpdatedAt   int64  `json:"updatedAt"`
 }
 
-const agentColumns = `id, name, prompt, mode, connector_id, provider, model, alt_provider, alt_model, created_at, updated_at`
+const agentColumns = `id, name, prompt, system_prompt, mode, connector_id, provider, model, alt_provider, alt_model, created_at, updated_at`
 
 func scanAgent(row interface{ Scan(...any) error }) (AgentRecord, error) {
 	var rec AgentRecord
 	if err := row.Scan(
-		&rec.ID, &rec.Name, &rec.Prompt, &rec.Mode, &rec.ConnectorID,
+		&rec.ID, &rec.Name, &rec.Prompt, &rec.SystemPrompt, &rec.Mode, &rec.ConnectorID,
 		&rec.Provider, &rec.Model, &rec.AltProvider, &rec.AltModel,
 		&rec.CreatedAt, &rec.UpdatedAt,
 	); err != nil {
@@ -1112,11 +1124,11 @@ func (s *Store) CreateAgent(ctx context.Context, rec AgentRecord, userID ...stri
 
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO agents (
-			id, user_id, name, prompt, mode, connector_id, provider, model,
+			id, user_id, name, prompt, system_prompt, mode, connector_id, provider, model,
 			alt_provider, alt_model, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		rec.ID, ownerOf(userID), rec.Name, rec.Prompt, rec.Mode, rec.ConnectorID,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		rec.ID, ownerOf(userID), rec.Name, rec.Prompt, rec.SystemPrompt, rec.Mode, rec.ConnectorID,
 		rec.Provider, rec.Model, rec.AltProvider, rec.AltModel,
 		rec.CreatedAt, rec.UpdatedAt,
 	); err != nil {
@@ -1129,11 +1141,11 @@ func (s *Store) CreateAgent(ctx context.Context, rec AgentRecord, userID ...stri
 func (s *Store) UpdateAgent(ctx context.Context, id string, rec AgentRecord, userID ...string) (AgentRecord, error) {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE agents SET
-			name = ?, prompt = ?, mode = ?, connector_id = ?,
+			name = ?, prompt = ?, system_prompt = ?, mode = ?, connector_id = ?,
 			provider = ?, model = ?, alt_provider = ?, alt_model = ?,
 			updated_at = ?
 		WHERE id = ? AND user_id = ?`,
-		rec.Name, rec.Prompt, rec.Mode, rec.ConnectorID,
+		rec.Name, rec.Prompt, rec.SystemPrompt, rec.Mode, rec.ConnectorID,
 		rec.Provider, rec.Model, rec.AltProvider, rec.AltModel,
 		time.Now().UnixMilli(), id, ownerOf(userID))
 	if err != nil {

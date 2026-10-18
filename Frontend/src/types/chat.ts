@@ -63,6 +63,8 @@ export interface Chat {
   model: string
   /** The workspace folder this chat works in. Empty means the default. */
   workspaceDir: string
+  /** The agent this chat is associated with. Empty means no agent. */
+  agentId: string
   /** Pinned chats lead the sidebar list. */
   pinned: boolean
   createdAt: number
@@ -86,9 +88,11 @@ export interface ProviderInfo {
   models: ModelInfo[]
 }
 
+/** Which provider and model to use, and optionally which agent. */
 export interface ModelSelection {
   provider: string
   model: string
+  agentId?: string
 }
 
 /** A provider row on the Providers page. */
@@ -174,11 +178,16 @@ export type AgentMode = "build" | "plan"
  * The model fields name a provider as well as a model, because a model id alone
  * is ambiguous across providers. The alternative pair is a fallback for when
  * the default model is not available.
+ *
+ * When used as a primary chat agent, the prompt/systemPrompt REPLACES the global
+ * system prompt entirely, and the agent's connector/model/mode are used.
  */
 export interface AgentRow {
   id: string
   name: string
   prompt: string
+  /** Explicit system prompt replacement (optional, falls back to prompt) */
+  systemPrompt: string
   mode: AgentMode
   /** The MCP connector it may use; empty for none. */
   connectorId: string
@@ -194,6 +203,8 @@ export interface AgentRow {
 export interface AgentInput {
   name: string
   prompt: string
+  /** Explicit system prompt replacement (optional, falls back to prompt) */
+  systemPrompt: string
   mode: AgentMode
   connectorId: string
   provider: string
