@@ -23,4 +23,7 @@ export default defineConfig({
       },
     },
   },
+  // The Wails CLI builds the frontend into the standard dist/ folder and then
+  // syncs it to Backend/desktop/dist for //go:embed. Writing the desktop build
+  // somewhere else makes Wails embed the stale web dist instead.
 })

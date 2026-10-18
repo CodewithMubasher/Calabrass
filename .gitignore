@@ -43,3 +43,19 @@ MCP/*/*.test
 
 # The agent's workspaces: the files it creates while working
 /workspace/
+
+# Wails desktop app. The icon and manifest are source; the executable and
+# generated frontend/wails bindings are not.
+!Backend/desktop/build/
+!Backend/desktop/build/**
+Backend/desktop/build/bin/
+!Backend/desktop/dist/
+Backend/desktop/dist/*
+!Backend/desktop/dist/.gitkeep
+Backend/desktop/wailsjs/
+
+# Wails' frontend dependency-install fingerprint.
+Frontend/package.json.md5
+
+# The desktop build's loopback API address is not a secret.
+!Frontend/.env.desktop

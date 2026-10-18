@@ -7,18 +7,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
-	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
-	"github.com/CodewithMubasher/Calabrass/backend/internal/ai"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/app"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/config"
-	"github.com/CodewithMubasher/Calabrass/backend/internal/connectors"
-	"github.com/CodewithMubasher/Calabrass/backend/internal/httpapi"
-	"github.com/CodewithMubasher/Calabrass/backend/internal/quota"
-	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
 )
 
 func main() {
@@ -27,118 +20,22 @@ func main() {
 
 	cfg := config.Load()
 
-	st, err := store.Open(cfg.DatabasePath)
+	application, err := app.New(context.Background(), cfg, log)
 	if err != nil {
-		log.Error("could not open database", "error", err)
+		log.Error("could not start the backend", "error", err)
 		os.Exit(1)
 	}
-	defer func() { _ = st.Close() }()
-
-	// Providers are stored in the database, so the registry reads them on
-	// demand: built-in providers (Google, Groq) keep their credential in the
-	// environment unless a stored override exists, and custom providers carry
-	// their own endpoint and key.
-	registry := ai.NewRegistry(cfg.GeminiKey, cfg.GroqKey, cfg.ProviderPriority,
-		func(ctx context.Context) ([]ai.ProviderRecord, error) {
-			rows, sourceErr := st.ListProviders(ctx)
-			if sourceErr != nil {
-				return nil, sourceErr
-			}
-			records := make([]ai.ProviderRecord, 0, len(rows))
-			for _, row := range rows {
-				records = append(records, ai.ProviderRecord{
-					ID:      row.ID,
-					Name:    row.Name,
-					BaseURL: row.BaseURL,
-					APIKey:  row.APIKey,
-					Enabled: row.Enabled,
-					Custom:  row.Custom,
-				})
-			}
-			return records, nil
-		})
-
-	if len(registry.ProviderOrder(context.Background())) == 0 {
-		log.Warn("no usable AI provider; set GROQ_API_KEY or GOOGLE_GENERATIVE_AI_API_KEY in Backend/.env, or add a provider on the Providers page")
-	}
-
-	// The harness works inside one workspace folder at a time, and every
-	// workspace lives inside a single library directory: <project>/workspace
-	// unless it is configured elsewhere. A missing library is not fatal: chat
-	// still works, it just has no tools.
-	libraryDir := cfg.WorkspacesDir
-	if strings.TrimSpace(libraryDir) == "" {
-		libraryDir = filepath.Join(agent.DiscoverRoot(""), "workspace")
-	}
-
-	var (
-		library   *agent.Library
-		workspace *agent.Workspace
-	)
-	library, err = agent.NewLibrary(libraryDir)
-	if err != nil {
-		log.Warn("agent tools are off: no usable workspaces folder", "dir", libraryDir, "error", err)
-		library = nil
-	} else {
-		// The default workspace is the one a chat works in until it picks its
-		// own, so it exists from the first boot.
-		workspace, err = library.Ensure(agent.DefaultWorkspaceName)
-		if err != nil {
-			log.Warn("agent tools are off: the default workspace is unusable", "error", err)
-			workspace = nil
-		} else {
-			log.Info("agent workspace", "root", workspace.Root(), "library", library.Root())
-		}
-		if _, err := st.EnsureWorkspace(context.Background(), store.WorkspaceRecord{
-			Name:        "Default",
-			Description: "Where chats work until they pick a workspace of their own.",
-			Dir:         agent.DefaultWorkspaceName,
-			Builtin:     true,
-		}); err != nil {
-			log.Warn("could not record the default workspace", "error", err)
-		}
-	}
-
-	// The MCP servers the agent may start. They are started when a turn first
-	// needs them and stopped when they have been idle, or when this process
-	// ends — the connector's own process lives inside this one.
-	pool := connectors.New(st, agent.DiscoverRoot(""), log)
-	defer pool.Close()
-
-	// The free-tier limits live in the project root, beside the code. A missing
-	// or unreadable file is not fatal: usage still works, it just has no
-	// allowances to measure against.
-	quotas, quotaErr := quota.Load(filepath.Join(agent.DiscoverRoot(""), "model_free_tier_quotas.md"))
-	if quotaErr != nil {
-		log.Warn("usage limits are off: could not read model_free_tier_quotas.md", "error", quotaErr)
-		quotas = nil
-	} else {
-		log.Info("usage limits loaded", "file", filepath.Join(agent.DiscoverRoot(""), "model_free_tier_quotas.md"))
-	}
-
-	handler := httpapi.NewServer(httpapi.Deps{
-		Store:         st,
-		Registry:      registry,
-		SystemPrompt:  cfg.SystemPrompt,
-		Library:       library,
-		Workspace:     workspace,
-		MistralKey:    cfg.MistralKey,
-		VoiceProvider: cfg.VoiceProvider,
-		VoiceModel:    cfg.VoiceModel,
-		Connectors:    pool,
-		Quotas:        quotas,
-		Logger:        log,
-	})
+	defer application.Close()
 
 	// The scheduled tasks run here: the loop looks for what has come due, runs
 	// it as a turn of its own, and stops with the process.
 	schedulerCtx, stopScheduler := context.WithCancel(context.Background())
 	defer stopScheduler()
-	go handler.RunScheduler(schedulerCtx)
+	go application.Handler.RunScheduler(schedulerCtx)
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           handler,
+		Handler:           application.Handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		// No WriteTimeout: responses are long-lived SSE streams.
 		IdleTimeout: 120 * time.Second,

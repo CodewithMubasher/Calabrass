@@ -217,6 +217,8 @@ func isLocalOrigin(origin string) bool {
 	}
 	for _, prefix := range []string{
 		"http://localhost:", "http://127.0.0.1:", "http://[::1]:",
+		// The Wails desktop shell serves the UI from its own local origin.
+		"http://wails.localhost", "https://wails.localhost", "wails://",
 	} {
 		if strings.HasPrefix(origin, prefix) {
 			return true

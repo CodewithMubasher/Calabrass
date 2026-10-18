@@ -57,6 +57,39 @@ there is no CORS setup to worry about.
 
 3. Run `.\dev.ps1`.
 
+## Desktop app (Wails)
+
+The desktop shell is in `Backend/desktop`. It runs the same Go backend on
+`127.0.0.1:8787` and embeds the same React frontend, so the whole app — chat,
+Cal Live, workspaces, agents, connectors, schedules, providers, usage and
+settings — is available in a native window.
+
+Inside the repository it deliberately uses `Backend/.env` and
+`Backend/data/calabrass.db`, so the desktop and browser builds share chats and
+providers. The built `.exe` finds the repository when it is launched from
+anywhere inside it; copied elsewhere, it falls back to
+`%APPDATA%\Calabrass` for its database and workspaces.
+
+```powershell
+# once
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
+
+# live development, with Vite hot reload
+cd Backend\desktop
+wails dev
+
+# production build
+wails build
+# -> Backend\desktop\build\bin\Calabrass.exe
+```
+
+The window icon comes from `Frontend/public/vite.svg`, rendered into
+`Backend/desktop/build/appicon.png` and `build/windows/icon.ico`.
+
+If the browser dev server (`dev.ps1`) is already running, the desktop app
+reuses its backend instead of starting a second one, so only one process owns
+the database and the port.
+
 ## API
 
 | Method | Path                          | Purpose                             |

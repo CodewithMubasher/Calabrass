@@ -29,12 +29,21 @@ type Config struct {
 	// ProviderPriority is the order in which providers are offered and picked
 	// as a fallback, e.g. ["groq", "google"].
 	ProviderPriority []string
+	// QuotasPath points at the free-tier limits file. Empty means "use the one
+	// in the project root". The desktop shell sets it to the copy it carries.
+	QuotasPath string
 }
 
 // Load reads configuration from the environment, after hydrating it from a
 // local .env file when present. Real environment variables always win.
 func Load() Config {
-	loadDotEnv(".env")
+	return LoadFrom(".env")
+}
+
+// LoadFrom is Load with an explicit .env path, which the desktop shell uses to
+// read Backend/.env without changing the process working directory.
+func LoadFrom(envPath string) Config {
+	loadDotEnv(envPath)
 
 	return Config{
 		Addr:          envOr("CALABRASS_ADDR", "127.0.0.1:8787"),
@@ -50,6 +59,7 @@ func Load() Config {
 		WorkspacesDir: firstNonEmpty(os.Getenv("CALABRASS_WORKSPACES_DIR"), os.Getenv("CALABRASS_WORKSPACE")),
 		// Groq first: it is the provider that is verified working by default.
 		ProviderPriority: splitList(envOr("CALABRASS_PROVIDER_PRIORITY", "groq,google")),
+		QuotasPath:       strings.TrimSpace(os.Getenv("CALABRASS_QUOTAS")),
 	}
 }
 

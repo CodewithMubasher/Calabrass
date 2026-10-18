@@ -23,9 +23,7 @@ function LoginPage() {
       <WaveBackground fixed />
 
       <div className="absolute top-6 left-6 z-10 flex items-center gap-2 font-medium md:top-10 md:left-10">
-        <span className="flex size-6 items-center justify-center rounded-md border border-white/10 bg-white/5">
-          <img src="/vite.svg" alt="" className="size-3.5" />
-        </span>
+        <img src="/vite.svg" alt="" className="size-5" />
         Calabrass
       </div>
 

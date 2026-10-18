@@ -1,0 +1,21 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "version": "2",
+  "name": "Calabrass",
+  "outputfilename": "Calabrass",
+  "build:dir": "build",
+  "assetdir": "dist",
+  "frontend:dir": "../../Frontend",
+  "frontend:install": "pnpm install",
+  "frontend:build": "pnpm build:desktop",
+  "frontend:dev:watcher": "pnpm dev",
+  "frontend:dev:serverUrl": "auto",
+  "wailsjsdir": "wailsjs",
+  "info": {
+    "companyName": "Calabrass",
+    "productName": "Calabrass",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright 2026 Calabrass",
+    "comments": "Local-first AI chat, agents and workspaces."
+  }
+}
