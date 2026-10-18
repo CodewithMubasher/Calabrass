@@ -101,6 +101,22 @@ function UsageCard({
   )
 }
 
+/** The token allowance left for the cycle, at a glance. */
+function TokensCard() {
+  return (
+    <UsageCard className="min-h-28 flex-row items-center justify-between gap-4">
+      <div className="min-w-0">
+        <h2 className="text-sm font-medium text-white/80">Total tokens</h2>
+        <p className="mt-1 text-xs text-white/40">Tokens left</p>
+      </div>
+      {/* Placeholder figure until a usage endpoint exists. */}
+      <span className="shrink-0 text-4xl font-semibold tracking-tight text-white/90 tabular-nums">
+        500k
+      </span>
+    </UsageCard>
+  )
+}
+
 /** One provider's request row: a gauge, its name, and where it stands. */
 function RequestRow({
   provider,
@@ -222,7 +238,7 @@ function UsagePage() {
       }
     >
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <UsageCard className="min-h-28" />
+        <TokensCard />
         <UsageCard className="min-h-28" />
         <TotalRequestsCard
           providers={visibleProviders}
