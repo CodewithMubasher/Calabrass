@@ -1,9 +1,12 @@
+import type { ReactNode } from "react"
 import { useEffect, useMemo, useState } from "react"
+import { cn } from "cn"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { ArrowDown01Icon, PieChartIcon } from "@hugeicons/core-free-icons"
+import { ArrowDown01Icon } from "@hugeicons/core-free-icons"
 import { createRoute } from "@tanstack/react-router"
 
-import { PageEmpty, PageShell } from "@/components/page-shell"
+import { PageShell } from "@/components/page-shell"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Select,
   SelectContent,
@@ -13,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { loadProviders, useProvidersState } from "@/lib/provider-store"
+import type { ProviderRow } from "@/types/chat"
 import { Route as rootRoute } from "@/routes/__root"
 
 export const Route = createRoute({
@@ -23,12 +27,125 @@ export const Route = createRoute({
 
 type Option = { value: string; label: string }
 
+/** The day's allowance each provider's row is measured against. */
+const REQUESTS_PER_DAY = 20
+
+/**
+ * Placeholder request counts until a usage endpoint exists. They are spread
+ * across the providers so the card reads like a real day; a provider beyond
+ * the end of the list starts at zero rather than inventing a number.
+ */
+const SAMPLE_REQUESTS = [12, 9, 7, 5, 4, 3]
+
+/**
+ * A ring that fills clockwise to the given percentage. It is the progress mark
+ * beside each usage row, drawn small enough to sit inline with the text.
+ */
+function CircularGauge({ percentage }: { percentage: number }) {
+  const normalized = Math.min(Math.max(percentage, 0), 100)
+  const circumference = 2 * Math.PI * 42.5
+  const strokePercent = (normalized / 100) * circumference
+
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height="16"
+      width="16"
+      strokeWidth="2"
+      viewBox="0 0 100 100"
+      className="size-4 -rotate-90"
+    >
+      <circle
+        cx="50"
+        cy="50"
+        r="42.5"
+        strokeWidth="12"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="opacity-20"
+        stroke="currentColor"
+        style={{ strokeDasharray: `${circumference} ${circumference}` }}
+      />
+      <circle
+        cx="50"
+        cy="50"
+        r="42.5"
+        strokeWidth="12"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        stroke="currentColor"
+        className="transition-all duration-300"
+        style={{ strokeDasharray: `${strokePercent} ${circumference}` }}
+      />
+    </svg>
+  )
+}
+
+/** One panel in the usage grid; its content is still to come. */
+function UsageCard({
+  className,
+  children,
+}: {
+  className?: string
+  children?: ReactNode
+}) {
+  return (
+    <Card size="sm" className={cn("min-h-40", className)}>
+      {children}
+    </Card>
+  )
+}
+
+/** One provider's request row: a gauge, its name, and where it stands. */
+function RequestRow({
+  provider,
+  index,
+}: {
+  provider: ProviderRow
+  index: number
+}) {
+  const used = SAMPLE_REQUESTS[index] ?? 0
+  const percentage = (used / REQUESTS_PER_DAY) * 100
+
+  return (
+    <li className="flex items-center gap-3 px-1 py-1">
+      <span className="shrink-0 text-primary">
+        <CircularGauge percentage={percentage} />
+      </span>
+      <span className="min-w-0 truncate text-sm text-white/80">
+        {provider.name}
+      </span>
+      <span className="ml-auto shrink-0 font-mono text-xs font-medium text-white/40 tabular-nums">
+        {used}/{REQUESTS_PER_DAY} RPD
+      </span>
+    </li>
+  )
+}
+
+function TotalRequestsCard({ providers }: { providers: ProviderRow[] }) {
+  return (
+    <UsageCard>
+      <CardHeader>
+        <CardTitle className="px-1 text-sm">Total request</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ul className="flex flex-col gap-1">
+          {providers.map((provider, index) => (
+            <RequestRow key={provider.id} provider={provider} index={index} />
+          ))}
+        </ul>
+      </CardContent>
+    </UsageCard>
+  )
+}
+
 /**
  * What the models have been used for, once there is something to show.
  *
- * For now the page is the same frame as the rest with a placeholder in the
- * middle; the provider picker in the corner is where the figures will be
- * scoped from.
+ * Three panels across the top and one wide panel under them; only the request
+ * total has content so far. The provider picker in the corner narrows both the
+ * cards and the rows inside them.
  */
 function UsagePage() {
   const { providers } = useProvidersState()
@@ -38,18 +155,25 @@ function UsagePage() {
     void loadProviders()
   }, [])
 
+  const sorted = useMemo(
+    () => [...providers].sort((a, b) => a.name.localeCompare(b.name)),
+    [providers]
+  )
+
   const options = useMemo<Option[]>(
     () => [
       { value: "", label: "All providers" },
-      ...providers.map((provider) => ({
+      ...sorted.map((provider) => ({
         value: provider.id,
         label: provider.name,
       })),
     ],
-    [providers]
+    [sorted]
   )
 
-  const selected = options.find((option) => option.value === providerId)
+  const visibleProviders = providerId
+    ? sorted.filter((provider) => provider.id === providerId)
+    : sorted
 
   return (
     <PageShell
@@ -84,15 +208,12 @@ function UsagePage() {
         </Select>
       }
     >
-      <PageEmpty
-        icon={PieChartIcon}
-        title={
-          providerId
-            ? `No usage for ${selected?.label ?? "this provider"} yet`
-            : "No usage to show yet"
-        }
-        hint="Token and model usage will appear here once you start chatting"
-      />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <UsageCard />
+        <UsageCard />
+        <TotalRequestsCard providers={visibleProviders} />
+        <UsageCard className="min-h-64 sm:col-span-3" />
+      </div>
     </PageShell>
   )
 }
