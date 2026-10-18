@@ -17,6 +17,7 @@ export type NavTo =
   | "/agents"
   | "/schedules"
   | "/providers"
+  | "/usage"
   | "/settings"
 
 export interface NavItem {

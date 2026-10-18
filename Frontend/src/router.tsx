@@ -10,6 +10,7 @@ import { Route as agentsRoute } from "@/routes/agents"
 import { Route as schedulesRoute } from "@/routes/schedules"
 import { Route as settingsRoute } from "@/routes/settings"
 import { Route as providersRoute } from "@/routes/providers"
+import { Route as usageRoute } from "@/routes/usage"
 import { Route as calLiveRoute } from "@/routes/cal-live"
 import { Route as chatRoute } from "@/routes/chat"
 
@@ -24,6 +25,7 @@ const routeTree = rootRoute.addChildren([
   agentsRoute,
   schedulesRoute,
   providersRoute,
+  usageRoute,
   settingsRoute,
 ])
 

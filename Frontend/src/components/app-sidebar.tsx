@@ -6,6 +6,7 @@ import {
   BotIcon,
   ChartRelationshipIcon,
   Folder01Icon,
+  PieChartIcon,
   Settings02Icon,
   ThreeDScaleIcon,
   TimeScheduleIcon,
@@ -61,6 +62,11 @@ const data = {
       title: "Providers",
       to: "/providers",
       icon: ThreeDScaleIcon,
+    },
+    {
+      title: "Usage",
+      to: "/usage",
+      icon: PieChartIcon,
     },
     {
       title: "Settings",
