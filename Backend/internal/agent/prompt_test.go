@@ -61,3 +61,20 @@ func TestThePromptStillDescribesTheProject(t *testing.T) {
 		}
 	}
 }
+
+// TestThePromptPutsParallelCallsFirst: the model should reach for parallel tool
+// calls before anything else, so the instruction is stated and leads the tool
+// rules.
+func TestThePromptPutsParallelCallsFirst(t *testing.T) {
+	prompt := SystemPrompt(nil, "You are a test.", nil)
+
+	parallel := strings.Index(prompt, "Prefer parallel tool calls")
+	if parallel < 0 {
+		t.Fatalf("the prompt does not ask for parallel tool calls:\n%s", prompt)
+	}
+	for _, later := range []string{"Use tools when the answer depends", "Locate things with glob and grep"} {
+		if at := strings.Index(prompt, later); at >= 0 && at < parallel {
+			t.Errorf("the parallel instruction should come before %q:\n%s", later, prompt)
+		}
+	}
+}

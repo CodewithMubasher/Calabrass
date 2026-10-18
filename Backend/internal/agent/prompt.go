@@ -57,6 +57,7 @@ func SystemPrompt(ws *Workspace, base string, connectors []Connector) string {
 
 	b.WriteString(strings.Join([]string{
 		"Tool use:",
+		"- Prefer parallel tool calls: when several calls do not depend on each other — reading multiple files, several searches, independent edits or commands — make them all in the same step so they run together. Only run one call at a time when a later call needs what an earlier one returns. This is the first choice, not the fallback.",
 		"- Use tools when the answer depends on the project: read before you claim, and check before you change.",
 		"- Pass paths relative to the project root, e.g. \"src/app.tsx\". Never invent file contents.",
 		"- Locate things with glob and grep instead of reading whole directories, and read a file before you change it.",

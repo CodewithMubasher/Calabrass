@@ -19,6 +19,12 @@ import (
 // ErrUnsupportedProvider is returned for a provider the backend does not serve.
 var ErrUnsupportedProvider = errors.New("ai: unsupported provider")
 
+// maxParallelTools is how many of one step's tool calls may run at once. The
+// model is asked to batch independent calls into a single step; this bounds how
+// many of those actually overlap — enough to be quick, few enough that a batch
+// of file writes does not all contend at once.
+const maxParallelTools = 5
+
 // Message is a provider-agnostic conversation turn.
 type Message struct {
 	Role    string
@@ -419,11 +425,12 @@ func (r *Registry) Stream(ctx context.Context, req StreamRequest, handlers Handl
 			steps = 1
 		}
 		opts = append(opts,
-			goai.WithTools(req.Tools...),
+			// Tool calls run in parallel, capped at maxParallelTools at once.
+			// The trace still lands in the order the model asked for, because
+			// results are matched by call ID rather than by finish order (see
+			// traceBuilder.toolResults).
+			goai.WithTools(limitedTools(req.Tools, maxParallelTools)...),
 			goai.WithMaxSteps(steps),
-			// One tool at a time keeps the trace in the order the model asked
-			// for, and keeps the tools off each other's toes.
-			goai.WithSequentialToolExecution(),
 			goai.WithOnToolCall(func(info goai.ToolCallInfo) {
 				resultsMu.Lock()
 				results = append(results, info)
@@ -613,6 +620,35 @@ func (r *Registry) Stream(ctx context.Context, req StreamRequest, handlers Handl
 		}
 	}
 	return reply, nil
+}
+
+// limitedTools wraps each tool so that no more than max of them run at once.
+// goai fires a step's tool calls in parallel with no bound of its own, so the
+// cap lives here, in one semaphore shared by every tool in the turn.
+//
+// The tools are copied before wrapping: their definitions are shared between
+// turns, and a wrapped Execute must not leak into the next one.
+func limitedTools(tools []goai.Tool, max int) []goai.Tool {
+	if max < 1 || len(tools) == 0 {
+		return tools
+	}
+
+	slots := make(chan struct{}, max)
+	limited := make([]goai.Tool, len(tools))
+	for i, tool := range tools {
+		execute := tool.Execute
+		if execute == nil {
+			limited[i] = tool
+			continue
+		}
+		tool.Execute = func(ctx context.Context, input json.RawMessage) (string, error) {
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			return execute(ctx, input)
+		}
+		limited[i] = tool
+	}
+	return limited
 }
 
 func toGoAIMessages(messages []Message) []provider.Message {
