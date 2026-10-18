@@ -32,7 +32,9 @@ export function PageShell({
           <h1 className="text-xl font-semibold text-white/90">{title}</h1>
           <p className="mt-0.5 text-sm text-white/50">{subtitle}</p>
         </div>
-        {actions ? <div className="flex items-center gap-3">{actions}</div> : null}
+        {actions ? (
+          <div className="flex items-center gap-3">{actions}</div>
+        ) : null}
       </div>
 
       {error ? (
@@ -46,7 +48,9 @@ export function PageShell({
         </Alert>
       ) : null}
 
-      <div className="flex-1 overflow-auto pb-6">{children}</div>
+      {/* min-h-0 lets the body shrink to the frame so it scrolls instead of
+          growing past it, where the shell would clip it. */}
+      <div className="min-h-0 flex-1 overflow-auto pb-6">{children}</div>
     </div>
   )
 }
@@ -103,7 +107,11 @@ export function PageEmpty({
     <div className="flex h-full items-center justify-center">
       <div className="text-center">
         <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-xl bg-white/5">
-          <HugeiconsIcon icon={icon} strokeWidth={1.8} className="size-5 text-white/30" />
+          <HugeiconsIcon
+            icon={icon}
+            strokeWidth={1.8}
+            className="size-5 text-white/30"
+          />
         </div>
         <p className="text-sm text-white/40">{title}</p>
         {hint ? <p className="mt-1 text-xs text-white/25">{hint}</p> : null}
