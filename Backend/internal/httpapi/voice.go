@@ -20,15 +20,15 @@ import (
 
 // voiceChat finds the chat this conversation belongs to, or opens a new one. A
 // chat that has gone missing is replaced rather than failing the turn.
-func (s *Server) voiceChat(ctx context.Context, chatID string) (store.ChatDetail, error) {
+func (s *Server) voiceChat(ctx context.Context, userID, chatID string) (store.ChatDetail, error) {
 	if chatID != "" {
-		if chat, err := s.store.GetChat(ctx, chatID); err == nil {
+		if chat, err := s.store.GetChat(ctx, chatID, userID); err == nil {
 			return chat, nil
 		}
 	}
 
-	providerID, modelID := s.resolveModel(ctx, "", "")
-	chat, err := s.store.CreateChat(ctx, providerID, modelID, "")
+	providerID, modelID := s.resolveModelFor(ctx, userID, "", "")
+	chat, err := s.store.CreateChat(ctx, providerID, modelID, "", userID)
 	if err != nil {
 		return store.ChatDetail{}, err
 	}
@@ -39,14 +39,14 @@ func (s *Server) voiceChat(ctx context.Context, chatID string) (store.ChatDetail
 // the single delegate tool, so it decides quickly and the coding agent does the
 // work. The reply's tokens are handed to onText as they arrive, so the answer
 // can be read aloud while it is still being written.
-func (s *Server) voiceTurn(ctx context.Context, chat store.ChatDetail, transcript string, onText func(string)) (string, ai.Trace, error) {
-	providerID, modelID := s.voiceModel(ctx, chat)
+func (s *Server) voiceTurn(ctx context.Context, userID string, chat store.ChatDetail, transcript string, onText func(string)) (string, ai.Trace, error) {
+	providerID, modelID := s.voiceModel(ctx, userID, chat)
 	if providerID == "" || modelID == "" {
 		return "", ai.Trace{}, errors.New("no model is available; add a provider key or turn a provider on under Providers")
 	}
 
 	if len(chat.Messages) == 0 {
-		if updated, err := s.store.UpdateChat(ctx, chat.ID, titleFrom(transcript), "", ""); err == nil {
+		if updated, err := s.store.UpdateChat(ctx, chat.ID, titleFrom(transcript), "", "", userID); err == nil {
 			chat.Chat = updated
 		}
 	}
@@ -54,7 +54,7 @@ func (s *Server) voiceTurn(ctx context.Context, chat store.ChatDetail, transcrip
 	// One tool, and a prompt small enough to keep a spoken answer quick: the
 	// voice agent decides, and the coding agent does.
 	tools := []goai.Tool{agent.DelegateTool(func(ctx context.Context, args agent.DelegateArgs) (string, error) {
-		return s.delegateWork(ctx, chat, args)
+		return s.delegateWork(ctx, userID, chat, args)
 	})}
 
 	turns := make([]ai.Message, 0, len(chat.Messages)+1)
@@ -65,7 +65,7 @@ func (s *Server) voiceTurn(ctx context.Context, chat store.ChatDetail, transcrip
 
 	started := time.Now()
 	var lastTrace ai.Trace
-	reply, genErr := s.registry.Stream(ctx, ai.StreamRequest{
+	reply, genErr := s.registryFor(userID).Stream(ctx, ai.StreamRequest{
 		ProviderID: providerID,
 		Model:      modelID,
 		System:     agent.VoiceSystemPrompt,
@@ -79,7 +79,7 @@ func (s *Server) voiceTurn(ctx context.Context, chat store.ChatDetail, transcrip
 	})
 	elapsed := time.Since(started)
 	if genErr == nil || reply.Usage.InputTokens+reply.Usage.OutputTokens > 0 {
-		s.recordUsage(ctx, providerID, modelID, reply.Usage)
+		s.recordUsageFor(ctx, userID, providerID, modelID, reply.Usage)
 	}
 	if genErr != nil {
 		return "", ai.Trace{}, fmt.Errorf("the reply failed: %w", genErr)
@@ -106,7 +106,7 @@ func (s *Server) voiceTurn(ctx context.Context, chat store.ChatDetail, transcrip
 		ChatID:  chat.ID,
 		Role:    ai.RoleUser,
 		Content: transcript,
-	}); err != nil {
+	}, userID); err != nil {
 		s.log.Error("could not persist the spoken turn", "chat", chat.ID, "error", err)
 	}
 	if _, err := s.store.AddMessage(saveCtx, store.Message{
@@ -119,7 +119,7 @@ func (s *Server) voiceTurn(ctx context.Context, chat store.ChatDetail, transcrip
 		DurationMs:   elapsed.Milliseconds(),
 		Trace:        savedTrace,
 		Replay:       reply.Replay,
-	}); err != nil {
+	}, userID); err != nil {
 		s.log.Error("could not persist the spoken reply", "chat", chat.ID, "error", err)
 	}
 
@@ -129,14 +129,14 @@ func (s *Server) voiceTurn(ctx context.Context, chat store.ChatDetail, transcrip
 // delegateWork is what the delegate tool hands over: the full coding agent —
 // every tool, the big model, the whole project prompt — run on the task in the
 // same workspace, reporting what it did.
-func (s *Server) delegateWork(ctx context.Context, chat store.ChatDetail, args agent.DelegateArgs) (string, error) {
-	providerID, modelID := s.resolveModel(ctx, "", "")
+func (s *Server) delegateWork(ctx context.Context, userID string, chat store.ChatDetail, args agent.DelegateArgs) (string, error) {
+	providerID, modelID := s.resolveModelFor(ctx, userID, "", "")
 	if providerID == "" || modelID == "" {
 		return "", errors.New("no model is available to do that work")
 	}
 
-	workspace := s.workspaceFor(chat.Chat)
-	setup := s.setupTurn(ctx, workspace, chat.ID)
+	workspace := s.workspaceForUser(userID, chat.Chat)
+	setup := s.setupTurnFor(ctx, userID, workspace, chat.ID)
 
 	// The worker continues the conversation, so it knows what has been said
 	// already, and the task is its instruction.
@@ -150,7 +150,7 @@ func (s *Server) delegateWork(ctx context.Context, chat store.ChatDetail, args a
 	}
 	turns = append(turns, ai.Message{Role: ai.RoleUser, Content: task})
 
-	reply, err := s.registry.Stream(ctx, ai.StreamRequest{
+	reply, err := s.registryFor(userID).Stream(ctx, ai.StreamRequest{
 		ProviderID:  providerID,
 		Model:       modelID,
 		System:      setup.system,
@@ -165,7 +165,7 @@ func (s *Server) delegateWork(ctx context.Context, chat store.ChatDetail, args a
 	if err != nil {
 		return "", fmt.Errorf("the work failed: %w", err)
 	}
-	s.recordUsage(ctx, providerID, modelID, reply.Usage)
+	s.recordUsageFor(ctx, userID, providerID, modelID, reply.Usage)
 
 	answer := reply.Text
 	if final := reply.Trace.AnswerText(); strings.TrimSpace(final) != "" {
@@ -180,20 +180,23 @@ func (s *Server) delegateWork(ctx context.Context, chat store.ChatDetail, args a
 // voiceModel is what the voice agent itself thinks with. The work it hands over
 // runs on the chat model, so this one only has to decide what to say. Set
 // CALABRASS_VOICE_PROVIDER and CALABRASS_VOICE_MODEL to give it a faster model.
-func (s *Server) voiceModel(ctx context.Context, chat store.ChatDetail) (string, string) {
+func (s *Server) voiceModel(ctx context.Context, userID string, chat store.ChatDetail) (string, string) {
 	if strings.TrimSpace(s.voiceProvider) != "" || strings.TrimSpace(s.voiceModelID) != "" {
-		if providerID, modelID := s.resolveModel(ctx, s.voiceProvider, s.voiceModelID); providerID != "" {
+		if providerID, modelID := s.resolveModelFor(ctx, userID, s.voiceProvider, s.voiceModelID); providerID != "" {
 			return providerID, modelID
 		}
 	}
-	return s.resolveModel(ctx, chat.Provider, chat.Model)
+	return s.resolveModelFor(ctx, userID, chat.Provider, chat.Model)
 }
 
-// groqKey is the key the audio endpoints use: the one stored for Groq if there
-// is one, otherwise the key from the environment.
-func (s *Server) groqKey(ctx context.Context) string {
-	if record, err := s.store.GetProvider(ctx, "groq"); err == nil && record.APIKey != "" {
+// groqKey is the key the audio endpoints use: the one stored for the account's
+// Groq provider if there is one, otherwise the key from the environment.
+func (s *Server) groqKey(ctx context.Context, userID string) string {
+	if record, err := s.store.GetProvider(ctx, "groq", userID); err == nil && record.APIKey != "" {
 		return record.APIKey
 	}
-	return s.registry.GroqKey()
+	if reg := s.registryFor(userID); reg != nil {
+		return reg.GroqKey()
+	}
+	return ""
 }

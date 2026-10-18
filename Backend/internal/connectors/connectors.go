@@ -127,14 +127,14 @@ func New(st *store.Store, root string, log *slog.Logger) *Pool {
 //
 // A connector that will not start is logged and left out: one broken server must
 // not take the whole turn down with it.
-func (p *Pool) Turn(ctx context.Context) ([]Brief, []goai.Tool) {
+func (p *Pool) Turn(ctx context.Context, userID string) ([]Brief, []goai.Tool) {
 	if p.store == nil {
 		return nil, nil
 	}
 
 	p.prune()
 
-	records, err := p.store.ListConnectors(ctx)
+	records, err := p.store.ListConnectors(ctx, userID)
 	if err != nil {
 		p.log.Error("could not read the connectors", "error", err)
 		return nil, nil

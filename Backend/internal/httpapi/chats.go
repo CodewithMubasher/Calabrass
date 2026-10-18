@@ -15,16 +15,11 @@ import (
 
 // --- health -----------------------------------------------------------------
 
-// handleHealth reports which providers are usable, so the UI can warn early.
+// handleHealth reports that the API is up. It is deliberately public: the
+// desktop shell probes it before a person has signed in, and it says nothing
+// about any account's providers.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	providers := map[string]bool{}
-	for _, p := range s.registry.Providers(r.Context()) {
-		providers[p.ID] = p.Connected && p.Enabled
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":    "ok",
-		"providers": providers,
-	})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
 // --- models -----------------------------------------------------------------
@@ -33,15 +28,17 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // turned off, or have no credentials, are left out by the registry itself.
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	force := r.URL.Query().Get("refresh") != ""
+	reg := s.registryFor(currentUser(r.Context()).ID)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"providers": s.registry.Models(r.Context(), force),
+		"providers": reg.Models(r.Context(), force),
 	})
 }
 
 // --- chats ------------------------------------------------------------------
 
 func (s *Server) handleListChats(w http.ResponseWriter, r *http.Request) {
-	chats, err := s.store.ListChats(r.Context())
+	user := currentUser(r.Context())
+	chats, err := s.store.ListChats(r.Context(), user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -50,6 +47,7 @@ func (s *Server) handleListChats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r.Context())
 	var req struct {
 		Provider string `json:"provider"`
 		Model    string `json:"model"`
@@ -64,7 +62,7 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 
 	workspaceDir := ""
 	if strings.TrimSpace(req.WorkspaceID) != "" {
-		record, err := s.store.GetWorkspace(r.Context(), req.WorkspaceID)
+		record, err := s.store.GetWorkspace(r.Context(), req.WorkspaceID, user.ID)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusBadRequest, errors.New("unknown workspace"))
 			return
@@ -76,9 +74,9 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 		workspaceDir = record.Dir
 	}
 
-	providerID, modelID := s.resolveModel(r.Context(), req.Provider, req.Model)
+	providerID, modelID := s.resolveModelFor(r.Context(), user.ID, req.Provider, req.Model)
 
-	chat, err := s.store.CreateChat(r.Context(), providerID, modelID, workspaceDir)
+	chat, err := s.store.CreateChat(r.Context(), providerID, modelID, workspaceDir, user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -87,7 +85,8 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetChat(w http.ResponseWriter, r *http.Request) {
-	chat, err := s.store.GetChat(r.Context(), r.PathValue("chatID"))
+	user := currentUser(r.Context())
+	chat, err := s.store.GetChat(r.Context(), r.PathValue("chatID"), user.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -100,6 +99,7 @@ func (s *Server) handleGetChat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateChat(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r.Context())
 	var req struct {
 		Title    string `json:"title"`
 		Provider string `json:"provider"`
@@ -113,9 +113,9 @@ func (s *Server) handleUpdateChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	chatID := r.PathValue("chatID")
-	chat, err := s.store.UpdateChat(r.Context(), chatID, req.Title, req.Provider, req.Model)
+	chat, err := s.store.UpdateChat(r.Context(), chatID, req.Title, req.Provider, req.Model, user.ID)
 	if err == nil && req.Pinned != nil {
-		chat, err = s.store.SetChatPinned(r.Context(), chatID, *req.Pinned)
+		chat, err = s.store.SetChatPinned(r.Context(), chatID, *req.Pinned, user.ID)
 	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, err)
@@ -129,7 +129,8 @@ func (s *Server) handleUpdateChat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteChat(w http.ResponseWriter, r *http.Request) {
-	err := s.store.DeleteChat(r.Context(), r.PathValue("chatID"))
+	user := currentUser(r.Context())
+	err := s.store.DeleteChat(r.Context(), r.PathValue("chatID"), user.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -144,7 +145,8 @@ func (s *Server) handleDeleteChat(w http.ResponseWriter, r *http.Request) {
 // handleDeleteMessage removes a single turn, which is how the UI drops a reply
 // it no longer wants.
 func (s *Server) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
-	err := s.store.DeleteMessage(r.Context(), r.PathValue("chatID"), r.PathValue("messageID"))
+	user := currentUser(r.Context())
+	err := s.store.DeleteMessage(r.Context(), r.PathValue("chatID"), r.PathValue("messageID"), user.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -159,7 +161,7 @@ func (s *Server) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 // dropLastReply deletes a trailing assistant message so a regeneration replaces
 // it rather than adding a second answer. A chat ending in a user turn is left
 // alone, so "retry" still works before anything was answered.
-func (s *Server) dropLastReply(ctx context.Context, chatID string, messages []store.Message) ([]store.Message, error) {
+func (s *Server) dropLastReply(ctx context.Context, userID, chatID string, messages []store.Message) ([]store.Message, error) {
 	if len(messages) == 0 {
 		return messages, nil
 	}
@@ -167,7 +169,7 @@ func (s *Server) dropLastReply(ctx context.Context, chatID string, messages []st
 	if last.Role != ai.RoleAssistant {
 		return messages, nil
 	}
-	if err := s.store.DeleteMessage(ctx, chatID, last.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
+	if err := s.store.DeleteMessage(ctx, chatID, last.ID, userID); err != nil && !errors.Is(err, store.ErrNotFound) {
 		return messages, err
 	}
 	return messages[:len(messages)-1], nil
@@ -211,21 +213,42 @@ type errorPayload struct {
 	Message string `json:"message"`
 }
 
-// workspaceFor picks the folder a chat works in: the workspace it was bound to,
-// or the server's default. The folder is opened on demand, so a chat keeps
+// workspaceFor picks the folder a chat works in for the shipped admin account.
+// Handlers use workspaceForUser with the signed-in account.
+func (s *Server) workspaceFor(chat store.Chat) *agent.Workspace {
+	return s.workspaceForUser("", chat)
+}
+
+// workspaceForUser picks the folder a chat works in: the workspace it was bound
+// to, or the account's default. The folder is opened on demand, so a chat keeps
 // working in the directory it remembers even after the workspace row is gone.
 // A binding that cannot be opened falls back to the default rather than running
 // the turn without tools.
-func (s *Server) workspaceFor(chat store.Chat) *agent.Workspace {
-	dir := strings.TrimSpace(chat.WorkspaceDir)
-	if dir == "" || dir == agent.DefaultWorkspaceName || s.library == nil {
-		return s.workspace
+func (s *Server) workspaceForUser(userID string, chat store.Chat) *agent.Workspace {
+	lib := s.libraryFor(userID)
+	if lib == nil {
+		return nil
 	}
-	opened, err := s.library.Ensure(dir)
+
+	dir := strings.TrimSpace(chat.WorkspaceDir)
+	if dir == "" || dir == agent.DefaultWorkspaceName {
+		if userID == "" || userID == s.adminID {
+			if s.workspace != nil {
+				return s.workspace
+			}
+		}
+		opened, err := lib.Ensure(agent.DefaultWorkspaceName)
+		if err != nil {
+			s.log.Warn("could not open the default workspace", "account", userID, "error", err)
+			return nil
+		}
+		return opened
+	}
+	opened, err := lib.Ensure(dir)
 	if err != nil {
 		s.log.Warn("could not open the chat's workspace",
 			"chat", chat.ID, "workspace", dir, "error", err)
-		return s.workspace
+		return s.workspaceForUser(userID, store.Chat{ID: chat.ID})
 	}
 	return opened
 }
@@ -234,6 +257,7 @@ func (s *Server) workspaceFor(chat store.Chat) *agent.Workspace {
 // Server-Sent Events: chat, message, reasoning*, token*, done|error.
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	user := currentUser(ctx)
 	chatID := r.PathValue("chatID")
 
 	var req sendRequest
@@ -247,7 +271,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chat, err := s.store.GetChat(ctx, chatID)
+	chat, err := s.store.GetChat(ctx, chatID, user.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -257,7 +281,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	providerID, modelID := s.resolveModel(ctx, firstNonEmpty(req.Provider, chat.Provider), firstNonEmpty(req.Model, chat.Model))
+	providerID, modelID := s.resolveModelFor(ctx, user.ID, firstNonEmpty(req.Provider, chat.Provider), firstNonEmpty(req.Model, chat.Model))
 	if providerID == "" || modelID == "" {
 		writeError(w, http.StatusBadRequest, errors.New("no model is available; add a provider key or turn a provider on under Providers"))
 		return
@@ -268,7 +292,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	if req.Regenerate {
 		// Replace the previous answer rather than stacking a second one on
 		// top: the user turn is already stored, so nothing is added for it.
-		history, err = s.dropLastReply(ctx, chatID, history)
+		history, err = s.dropLastReply(ctx, user.ID, chatID, history)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -283,7 +307,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 			ChatID:  chatID,
 			Role:    ai.RoleUser,
 			Content: req.Content,
-		})
+		}, user.ID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -295,7 +319,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	if !req.Regenerate && len(chat.Messages) == 0 {
 		title = titleFrom(req.Content)
 	}
-	updated, err := s.store.UpdateChat(ctx, chatID, title, providerID, modelID)
+	updated, err := s.store.UpdateChat(ctx, chatID, title, providerID, modelID, user.ID)
 	if err != nil {
 		s.log.Warn("could not update chat", "chat", chatID, "error", err)
 		updated = chat.Chat
@@ -326,11 +350,11 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	// The harness: the prompt that explains what the model is working with — the
 	// project, and the machine the connectors reach — and the tools it may call.
-	setup := s.setupTurn(ctx, s.workspaceFor(chat.Chat), chatID)
+	setup := s.setupTurnFor(ctx, user.ID, s.workspaceForUser(user.ID, chat.Chat), chatID)
 
 	started := time.Now()
 	var lastTrace ai.Trace
-	reply, genErr := s.registry.Stream(ctx, ai.StreamRequest{
+	reply, genErr := s.registryFor(user.ID).Stream(ctx, ai.StreamRequest{
 		ProviderID:  providerID,
 		Model:       modelID,
 		System:      setup.system,
@@ -355,7 +379,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	// The call counts against the provider's allowance once it reached the
 	// model: a failure before that leaves no usage behind.
 	if genErr == nil || reply.Usage.InputTokens+reply.Usage.OutputTokens > 0 {
-		s.recordUsage(ctx, providerID, modelID, reply.Usage)
+		s.recordUsageFor(ctx, user.ID, providerID, modelID, reply.Usage)
 	}
 
 	// The visible answer is the model's closing text; narration from earlier
@@ -387,7 +411,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 			DurationMs:   elapsed.Milliseconds(),
 			Trace:        savedTrace,
 			Replay:       reply.Replay,
-		})
+		}, user.ID)
 		if saveErr != nil {
 			s.log.Error("could not persist assistant reply", "chat", chatID, "error", saveErr)
 		} else {
@@ -407,15 +431,25 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// resolveModel picks the provider/model for a turn, falling back to the first
-// provider that has credentials and is turned on.
+// resolveModel picks the provider/model for the shipped admin account. Handlers
+// use resolveModelFor with the signed-in account.
 func (s *Server) resolveModel(ctx context.Context, providerID, modelID string) (string, string) {
+	return s.resolveModelFor(ctx, "", providerID, modelID)
+}
+
+// resolveModelFor picks the provider/model for a turn within one account,
+// falling back to the first provider that has credentials and is turned on.
+func (s *Server) resolveModelFor(ctx context.Context, userID, providerID, modelID string) (string, string) {
 	providerID = strings.TrimSpace(providerID)
 	modelID = strings.TrimSpace(modelID)
+	reg := s.registryFor(userID)
+	if reg == nil {
+		return "", ""
+	}
 
-	if !s.registry.Usable(ctx, providerID) {
+	if !reg.Usable(ctx, providerID) {
 		providerID = ""
-		for _, id := range s.registry.ProviderOrder(ctx) {
+		for _, id := range reg.ProviderOrder(ctx) {
 			providerID = id
 			break
 		}
@@ -424,8 +458,8 @@ func (s *Server) resolveModel(ctx context.Context, providerID, modelID string) (
 		return "", ""
 	}
 
-	if modelID == "" || !s.registry.ValidModel(ctx, providerID, modelID) {
-		modelID = s.registry.DefaultModel(ctx, providerID)
+	if modelID == "" || !reg.ValidModel(ctx, providerID, modelID) {
+		modelID = reg.DefaultModel(ctx, providerID)
 	}
 	return providerID, modelID
 }

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,11 +10,14 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/ai"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/auth"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/connectors"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/quota"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
@@ -25,6 +29,11 @@ type Deps struct {
 	Store        *store.Store
 	Registry     *ai.Registry
 	SystemPrompt string
+	// Auth holds the local accounts. When it is nil one is built from Store.
+	Auth *auth.Service
+	// AdminID is the shipped account that inherits pre-account data and keeps
+	// the original workspace library. Empty gives every account its own library.
+	AdminID string
 	// Library holds the workspace folders. When it is nil the workspace
 	// endpoints report unavailable.
 	Library *agent.Library
@@ -52,6 +61,8 @@ type Deps struct {
 type Server struct {
 	store         *store.Store
 	registry      *ai.Registry
+	auth          *auth.Service
+	adminID       string
 	system        string
 	library       *agent.Library
 	workspace     *agent.Workspace
@@ -62,6 +73,12 @@ type Server struct {
 	connectors    *connectors.Pool
 	quotas        *quota.Catalog
 	log           *slog.Logger
+	// registries and libraries cache the per-account views, so each account
+	// keeps its own model catalog and workspace folders.
+	registryMu sync.Mutex
+	registries map[string]*ai.Registry
+	libraryMu  sync.Mutex
+	libraries  map[string]*agent.Library
 	// handler is the routed and wrapped mux, kept so the server itself can be
 	// handed to http.Server.
 	handler http.Handler
@@ -86,9 +103,16 @@ func NewServer(deps Deps) *Server {
 		pool = connectors.New(deps.Store, "", log)
 	}
 
+	accounts := deps.Auth
+	if accounts == nil {
+		accounts = auth.New(deps.Store)
+	}
+
 	s := &Server{
 		store:         deps.Store,
 		registry:      deps.Registry,
+		auth:          accounts,
+		adminID:       strings.TrimSpace(deps.AdminID),
 		system:        deps.SystemPrompt,
 		library:       deps.Library,
 		workspace:     deps.Workspace,
@@ -99,10 +123,16 @@ func NewServer(deps Deps) *Server {
 		connectors:    pool,
 		quotas:        deps.Quotas,
 		log:           log,
+		registries:    map[string]*ai.Registry{},
+		libraries:     map[string]*agent.Library{},
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.handleHealth)
+	mux.HandleFunc("POST /api/auth/signup", s.handleSignUp)
+	mux.HandleFunc("POST /api/auth/login", s.handleSignIn)
+	mux.HandleFunc("GET /api/auth/me", s.handleMe)
+	mux.HandleFunc("POST /api/auth/logout", s.handleSignOut)
 	mux.HandleFunc("GET /api/models", s.handleModels)
 	mux.HandleFunc("GET /api/usage", s.handleUsage)
 	mux.HandleFunc("GET /api/providers", s.handleListProviders)
@@ -139,7 +169,7 @@ func NewServer(deps Deps) *Server {
 	mux.HandleFunc("PATCH /api/schedules/{taskID}", s.handleUpdateSchedule)
 	mux.HandleFunc("DELETE /api/schedules/{taskID}", s.handleDeleteSchedule)
 
-	s.handler = s.withCORS(s.withLogging(mux))
+	s.handler = s.withCORS(s.withLogging(s.withAuth(mux)))
 	return s
 }
 
@@ -200,7 +230,7 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			w.Header().Set("Access-Control-Max-Age", "600")
 		}
 		if r.Method == http.MethodOptions {
@@ -225,6 +255,96 @@ func isLocalOrigin(origin string) bool {
 		}
 	}
 	return false
+}
+
+// --- accounts ---------------------------------------------------------------
+
+type userContextKey struct{}
+
+// withAuth resolves the bearer token on every API request and puts the account
+// in the context. The health probe and the two ways of getting a session are
+// the only public endpoints; everything else belongs to somebody.
+func (s *Server) withAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/api/") || isPublicPath(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		token := requestToken(r)
+		user, err := s.auth.UserForToken(r.Context(), token)
+		if err != nil {
+			s.writeAuthError(w, err)
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userContextKey{}, user)))
+	})
+}
+
+func isPublicPath(path string) bool {
+	switch path {
+	case "/api/health", "/api/auth/signup", "/api/auth/login":
+		return true
+	default:
+		return false
+	}
+}
+
+// currentUser is the account the request was authenticated as.
+func currentUser(ctx context.Context) auth.User {
+	user, _ := ctx.Value(userContextKey{}).(auth.User)
+	return user
+}
+
+// registryFor returns the account's provider registry. The first call builds it
+// from the shared credentials; later calls reuse its model catalog.
+func (s *Server) registryFor(userID string) *ai.Registry {
+	if s.registry == nil {
+		return nil
+	}
+	if strings.TrimSpace(userID) == "" {
+		return s.registry
+	}
+	s.registryMu.Lock()
+	defer s.registryMu.Unlock()
+	if s.registries == nil {
+		s.registries = map[string]*ai.Registry{}
+	}
+	if reg, ok := s.registries[userID]; ok {
+		return reg
+	}
+	reg := s.registry.ForUser(userID)
+	s.registries[userID] = reg
+	return reg
+}
+
+// libraryFor returns the workspace library an account may use. The shipped
+// admin keeps the original library, so chats that predate accounts still find
+// their files; every other account gets a private folder beneath it.
+func (s *Server) libraryFor(userID string) *agent.Library {
+	if s.library == nil {
+		return nil
+	}
+	if s.adminID == "" || strings.TrimSpace(userID) == "" || userID == s.adminID {
+		return s.library
+	}
+
+	s.libraryMu.Lock()
+	defer s.libraryMu.Unlock()
+	if s.libraries == nil {
+		s.libraries = map[string]*agent.Library{}
+	}
+	if lib, ok := s.libraries[userID]; ok {
+		return lib
+	}
+	root := filepath.Join(s.library.Root(), "users", userID)
+	lib, err := agent.NewLibrary(root)
+	if err != nil {
+		s.log.Warn("could not open an account's workspace library", "account", userID, "error", err)
+		return nil
+	}
+	s.libraries[userID] = lib
+	return lib
 }
 
 // --- helpers ----------------------------------------------------------------

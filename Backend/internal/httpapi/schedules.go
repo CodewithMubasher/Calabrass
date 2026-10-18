@@ -27,6 +27,7 @@ func (s *Server) handleListSchedules(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r.Context())
 	var req struct {
 		Prompt string `json:"prompt"`
 		RunAt  int64  `json:"runAt"`
@@ -47,6 +48,7 @@ func (s *Server) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := s.store.CreateScheduledTask(r.Context(), store.ScheduledTask{
+		UserID:  user.ID,
 		Prompt:  prompt,
 		RunAt:   req.RunAt,
 		Enabled: true,
@@ -58,6 +60,7 @@ func (s *Server) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateSchedule(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r.Context())
 	var req struct {
 		Prompt  *string `json:"prompt"`
 		RunAt   *int64  `json:"runAt"`
@@ -69,7 +72,7 @@ func (s *Server) handleUpdateSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	task, err := s.store.GetScheduledTask(ctx, r.PathValue("taskID"))
+	task, err := s.store.GetScheduledTask(ctx, r.PathValue("taskID"), user.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -78,6 +81,7 @@ func (s *Server) handleUpdateSchedule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	task.UserID = user.ID
 
 	if req.Prompt != nil {
 		prompt := strings.TrimSpace(*req.Prompt)
@@ -105,7 +109,8 @@ func (s *Server) handleUpdateSchedule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
-	err := s.store.DeleteScheduledTask(r.Context(), r.PathValue("taskID"))
+	user := currentUser(r.Context())
+	err := s.store.DeleteScheduledTask(r.Context(), r.PathValue("taskID"), user.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -122,6 +127,7 @@ func (s *Server) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
 // booked by the model — while the user is looking at it.
 func (s *Server) handleScheduleStream(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	user := currentUser(ctx)
 
 	stream, err := newSSEWriter(w)
 	if err != nil {
@@ -134,7 +140,7 @@ func (s *Server) handleScheduleStream(w http.ResponseWriter, r *http.Request) {
 
 	sent := ""
 	for {
-		tasks, err := s.store.ListScheduledTasks(ctx)
+		tasks, err := s.store.ListScheduledTasks(ctx, user.ID)
 		if err != nil {
 			_ = stream.event("error", errorPayload{Message: err.Error()})
 			return
@@ -164,7 +170,8 @@ func (s *Server) handleScheduleStream(w http.ResponseWriter, r *http.Request) {
 // its store. A mutation answers the same way as a read, so the store has one
 // shape to hold.
 func (s *Server) writeSchedules(w http.ResponseWriter, r *http.Request) {
-	tasks, err := s.store.ListScheduledTasks(r.Context())
+	user := currentUser(r.Context())
+	tasks, err := s.store.ListScheduledTasks(r.Context(), user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -190,7 +197,7 @@ type scheduleTaskArgs struct {
 // scheduleTool lets a chat book work for later. It is added to a turn rather
 // than to the file tools in the agent package: a task is a row in the database
 // and a turn of its own, not something done to the project.
-func (s *Server) scheduleTool(chatID string) goai.Tool {
+func (s *Server) scheduleTool(chatID, userID string) goai.Tool {
 	return goai.NewTool("schedule_task",
 		"Set a timer that runs one instruction later — in a few minutes, or at a clock time. "+
 			"Use it whenever the user asks for something to happen after a delay or at a given time, "+
@@ -198,13 +205,13 @@ func (s *Server) scheduleTool(chatID string) goai.Tool {
 			"The instruction runs in this conversation with every tool available to you. "+
 			"Tell the user the time it is set for, in their own clock.",
 		func(ctx context.Context, args scheduleTaskArgs) (string, error) {
-			return s.scheduleFromTool(ctx, chatID, args)
+			return s.scheduleFromTool(ctx, chatID, userID, args)
 		})
 }
 
 // scheduleFromTool books one task and reports it back to the model, which is
 // what it tells the user.
-func (s *Server) scheduleFromTool(ctx context.Context, chatID string, args scheduleTaskArgs) (string, error) {
+func (s *Server) scheduleFromTool(ctx context.Context, chatID, userID string, args scheduleTaskArgs) (string, error) {
 	prompt := strings.TrimSpace(args.Prompt)
 	if prompt == "" {
 		return "", errors.New("no instruction was given to run later")
@@ -221,6 +228,7 @@ func (s *Server) scheduleFromTool(ctx context.Context, chatID string, args sched
 	}
 
 	if _, err := s.store.CreateScheduledTask(ctx, store.ScheduledTask{
+		UserID:  userID,
 		Prompt:  prompt,
 		ChatID:  chatID,
 		RunAt:   runAt.UnixMilli(),

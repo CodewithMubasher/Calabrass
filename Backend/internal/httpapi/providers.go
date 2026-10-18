@@ -42,14 +42,16 @@ type providerRequest struct {
 	Enabled *bool   `json:"enabled"`
 }
 
-// providerRows joins the registry's providers with the live model catalog.
-func (s *Server) providerRows(ctx context.Context) ([]providerPayload, error) {
+// providerRows joins the account's registry providers with the live model
+// catalog.
+func (s *Server) providerRows(ctx context.Context, userID string) ([]providerPayload, error) {
+	reg := s.registryFor(userID)
 	catalog := map[string]ai.ProviderInfo{}
-	for _, p := range s.registry.Models(ctx, false) {
+	for _, p := range reg.Models(ctx, false) {
 		catalog[p.ID] = p
 	}
 
-	summaries := s.registry.Providers(ctx)
+	summaries := reg.Providers(ctx)
 	rows := make([]providerPayload, 0, len(summaries))
 	for _, p := range summaries {
 		row := providerPayload{
@@ -73,7 +75,7 @@ func (s *Server) providerRows(ctx context.Context) ([]providerPayload, error) {
 // respondWithProviders writes the whole list, so the client stays in step with
 // the server after a change.
 func (s *Server) respondWithProviders(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.providerRows(r.Context())
+	rows, err := s.providerRows(r.Context(), currentUser(r.Context()).ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -87,6 +89,7 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 
 // handleCreateProvider adds a custom, OpenAI-compatible provider.
 func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r.Context())
 	var req providerRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -104,7 +107,7 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, err := s.newProviderID(r.Context(), name)
+	id, err := s.newProviderID(r.Context(), user.ID, name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -123,11 +126,11 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		Enabled: enabled,
 		Custom:  true,
 	}
-	if err := s.store.UpsertProvider(r.Context(), rec); err != nil {
+	if err := s.store.UpsertProvider(r.Context(), rec, user.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.registry.InvalidateCatalog()
+	s.registryFor(user.ID).InvalidateCatalog()
 
 	s.respondWithProviders(w, r)
 }
@@ -136,8 +139,10 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 // providers only accept a key and the toggle: their endpoint and name are part
 // of the backend.
 func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r.Context())
+	reg := s.registryFor(user.ID)
 	providerID := r.PathValue("providerID")
-	if !s.registry.Known(r.Context(), providerID) {
+	if !reg.Known(r.Context(), providerID) {
 		writeError(w, http.StatusNotFound, ErrUnknownProvider)
 		return
 	}
@@ -148,7 +153,7 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rec, err := s.store.GetProvider(r.Context(), providerID)
+	rec, err := s.store.GetProvider(r.Context(), providerID, user.ID)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		// A built-in with nothing stored yet: start from its defaults and let
@@ -187,11 +192,11 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		rec.Enabled = *req.Enabled
 	}
 
-	if err := s.store.UpsertProvider(r.Context(), rec); err != nil {
+	if err := s.store.UpsertProvider(r.Context(), rec, user.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.registry.InvalidateCatalog()
+	reg.InvalidateCatalog()
 
 	s.respondWithProviders(w, r)
 }
@@ -199,13 +204,15 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 // handleDeleteProvider removes a custom provider. Built-ins cannot be removed,
 // only turned off.
 func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r.Context())
+	reg := s.registryFor(user.ID)
 	providerID := r.PathValue("providerID")
-	if !s.registry.Known(r.Context(), providerID) {
+	if !reg.Known(r.Context(), providerID) {
 		writeError(w, http.StatusNotFound, ErrUnknownProvider)
 		return
 	}
 
-	rec, err := s.store.GetProvider(r.Context(), providerID)
+	rec, err := s.store.GetProvider(r.Context(), providerID, user.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		// A built-in that has never been edited has no row, and cannot go.
 		writeError(w, http.StatusBadRequest,
@@ -222,20 +229,20 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.store.DeleteProvider(r.Context(), providerID); err != nil {
+	if err := s.store.DeleteProvider(r.Context(), providerID, user.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.registry.InvalidateCatalog()
+	reg.InvalidateCatalog()
 
 	s.respondWithProviders(w, r)
 }
 
 // newProviderID builds a readable id from the provider name, with a numeric
-// suffix when the slug is already taken.
-func (s *Server) newProviderID(ctx context.Context, name string) (string, error) {
+// suffix when the slug is already taken on that account.
+func (s *Server) newProviderID(ctx context.Context, userID, name string) (string, error) {
 	used := map[string]bool{}
-	for _, p := range s.registry.Providers(ctx) {
+	for _, p := range s.registryFor(userID).Providers(ctx) {
 		used[p.ID] = true
 	}
 

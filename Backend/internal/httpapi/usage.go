@@ -44,38 +44,39 @@ type usageProviderPayload struct {
 // of activity. It is a plain snapshot; the page asks for a new one on a timer.
 func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	user := currentUser(ctx)
 	now := time.Now()
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	sinceDay := startOfDay.UnixMilli()
 	sinceWeek := startOfDay.AddDate(0, 0, -(usageDayCount - 1)).UnixMilli()
 	sinceMinute := now.Add(-time.Minute).UnixMilli()
 
-	today, err := s.store.UsageTotalsSince(ctx, sinceDay)
+	today, err := s.store.UsageTotalsSince(ctx, sinceDay, user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	minute, err := s.store.UsageTotalsSince(ctx, sinceMinute)
+	minute, err := s.store.UsageTotalsSince(ctx, sinceMinute, user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	byProvider, err := s.store.UsageByProviderSince(ctx, sinceDay)
+	byProvider, err := s.store.UsageByProviderSince(ctx, sinceDay, user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	minuteByProvider, err := s.store.UsageByProviderSince(ctx, sinceMinute)
+	minuteByProvider, err := s.store.UsageByProviderSince(ctx, sinceMinute, user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	daily, err := s.store.UsageDailySince(ctx, sinceWeek)
+	daily, err := s.store.UsageDailySince(ctx, sinceWeek, user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	dailyByProvider, err := s.store.UsageDailyByProviderSince(ctx, sinceWeek)
+	dailyByProvider, err := s.store.UsageDailyByProviderSince(ctx, sinceWeek, user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -83,8 +84,8 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 
 	providers := []usageProviderPayload{}
 	totalRPD, totalTPM := 0, 0
-	if s.registry != nil {
-		for _, provider := range s.registry.Providers(ctx) {
+	if reg := s.registryFor(user.ID); reg != nil {
+		for _, provider := range reg.Providers(ctx) {
 			rpd, tpm := s.quotas.Limits(provider.ID)
 			if provider.Enabled {
 				totalRPD += rpd
@@ -129,14 +130,21 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// recordUsage writes one completed model call down for the Usage page. It runs
-// detached from the request so a client that disconnected mid-answer still
-// leaves its tokens behind.
+// recordUsage writes one completed model call down for the shipped admin
+// account. Handlers use recordUsageFor with the signed-in account.
 func (s *Server) recordUsage(ctx context.Context, providerID, modelID string, usage ai.Usage) {
+	s.recordUsageFor(ctx, "", providerID, modelID, usage)
+}
+
+// recordUsageFor writes one completed model call down for the Usage page. It
+// runs detached from the request so a client that disconnected mid-answer still
+// leaves its tokens behind.
+func (s *Server) recordUsageFor(ctx context.Context, userID, providerID, modelID string, usage ai.Usage) {
 	if s.store == nil {
 		return
 	}
 	event := store.UsageEvent{
+		UserID:       userID,
 		ProviderID:   providerID,
 		ModelID:      modelID,
 		InputTokens:  usage.InputTokens,

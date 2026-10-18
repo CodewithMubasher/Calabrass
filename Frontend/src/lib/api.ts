@@ -19,6 +19,7 @@ import type {
   WorkspaceInput,
   WorkspaceRow,
 } from "@/types/chat"
+import { getToken, type AuthSession, type AuthUser } from "@/lib/session"
 
 const BASE = import.meta.env.VITE_API_BASE || "/api"
 
@@ -43,9 +44,14 @@ async function readError(res: Response): Promise<string> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getToken()
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...init?.headers,
+    },
   })
   if (!res.ok) {
     throw new ApiError(await readError(res), res.status)
@@ -55,15 +61,38 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 /** Query for the artifact endpoints: a chat scopes them to its workspace, and
- *  no chat means the project's default one. */
+ *  no chat means the account's default one. The bearer token is a query
+ *  parameter because EventSource and download links cannot set headers. */
 function artifactQuery(chatId: string, extra: Record<string, string> = {}) {
   const params = new URLSearchParams(extra)
   if (chatId) params.set("chatId", chatId)
+  const token = getToken()
+  if (token) params.set("access_token", token)
   return params.toString()
 }
 
 export const api = {
   health: () => request<{ status: string; providers: Record<string, boolean> }>("/health"),
+
+  signUp: (input: { name: string; email: string; password: string }) =>
+    request<AuthSession>("/auth/signup", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  signIn: (input: { email: string; password: string }) =>
+    request<AuthSession>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  me: () => request<{ user: AuthUser }>("/auth/me"),
+
+  signOut: (token: string) =>
+    request<void>("/auth/logout", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    }),
 
   /** A fresh usage snapshot: totals, allowances and the last seven days. */
   getUsage: () => request<UsageSnapshot>("/usage"),
@@ -196,8 +225,16 @@ export const api = {
       method: "DELETE",
     }).then((r) => r.tasks ?? []),
 
-  /** The task list as a stream: it arrives complete, and again on every change. */
-  scheduleStreamUrl: () => `${BASE}/schedules/stream`,
+  /** The task list as a stream: it arrives complete, and again on every change.
+   *  EventSource cannot send an Authorization header, so the token rides in the
+   *  URL. */
+  scheduleStreamUrl: () => {
+    const params = new URLSearchParams()
+    const token = getToken()
+    if (token) params.set("access_token", token)
+    const query = params.toString()
+    return `${BASE}/schedules/stream${query ? `?${query}` : ""}`
+  },
 
   deleteChat: (chatId: string) =>
     request<{ deleted: boolean }>(`/chats/${chatId}`, { method: "DELETE" }),
@@ -273,9 +310,14 @@ export async function streamMessage(
   handlers: StreamHandlers,
   signal?: AbortSignal
 ): Promise<void> {
+  const token = getToken()
   const res = await fetch(`${BASE}/chats/${chatId}/messages`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify(body),
     signal,
   })

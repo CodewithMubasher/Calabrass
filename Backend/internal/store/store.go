@@ -110,6 +110,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS chats (
 	id         TEXT PRIMARY KEY,
+	user_id    TEXT NOT NULL DEFAULT '',
 	title      TEXT NOT NULL,
 	provider   TEXT NOT NULL DEFAULT '',
 	model      TEXT NOT NULL DEFAULT '',
@@ -137,13 +138,15 @@ CREATE TABLE IF NOT EXISTS messages (
 -- row uses its built-in defaults (credentials from .env, on). Custom providers
 -- always have a row and carry their own endpoint and key.
 CREATE TABLE IF NOT EXISTS providers (
-	id         TEXT PRIMARY KEY,
+	user_id    TEXT NOT NULL DEFAULT '',
+	id         TEXT NOT NULL,
 	name       TEXT NOT NULL DEFAULT '',
 	base_url   TEXT NOT NULL DEFAULT '',
 	api_key    TEXT NOT NULL DEFAULT '',
 	enabled    INTEGER NOT NULL DEFAULT 1,
 	custom     INTEGER NOT NULL DEFAULT 0,
-	updated_at INTEGER NOT NULL
+	updated_at INTEGER NOT NULL,
+	PRIMARY KEY (user_id, id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at);
@@ -153,6 +156,7 @@ CREATE INDEX IF NOT EXISTS idx_chats_updated ON chats(updated_at DESC);
 -- UI shows for it. The folder itself lives inside the workspaces library.
 CREATE TABLE IF NOT EXISTS workspaces (
 	id          TEXT PRIMARY KEY,
+	user_id     TEXT NOT NULL DEFAULT '',
 	name        TEXT NOT NULL,
 	description TEXT NOT NULL DEFAULT '',
 	dir         TEXT NOT NULL,
@@ -161,12 +165,11 @@ CREATE TABLE IF NOT EXISTS workspaces (
 	updated_at  INTEGER NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_dir ON workspaces(dir);
-
 -- One row per MCP connector: the server the agent may start, and whether it is
 -- allowed to.
 CREATE TABLE IF NOT EXISTS connectors (
 	id         TEXT PRIMARY KEY,
+	user_id    TEXT NOT NULL DEFAULT '',
 	name       TEXT NOT NULL,
 	command    TEXT NOT NULL,
 	enabled    INTEGER NOT NULL DEFAULT 1,
@@ -179,6 +182,7 @@ CREATE TABLE IF NOT EXISTS connectors (
 -- task from coming due twice.
 CREATE TABLE IF NOT EXISTS scheduled_tasks (
 	id           TEXT PRIMARY KEY,
+	user_id      TEXT NOT NULL DEFAULT '',
 	prompt       TEXT NOT NULL,
 	chat_id      TEXT NOT NULL DEFAULT '',
 	run_at       INTEGER NOT NULL,
@@ -196,6 +200,7 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_tasks(enabled, last_ru
 -- connector it may use, and the model it prefers with a fallback beside it.
 CREATE TABLE IF NOT EXISTS agents (
 	id           TEXT PRIMARY KEY,
+	user_id      TEXT NOT NULL DEFAULT '',
 	name         TEXT NOT NULL,
 	prompt       TEXT NOT NULL DEFAULT '',
 	mode         TEXT NOT NULL DEFAULT 'build',
@@ -208,10 +213,33 @@ CREATE TABLE IF NOT EXISTS agents (
 	updated_at   INTEGER NOT NULL
 );
 
+-- One row per local account. Passwords are stored as bcrypt hashes; the desktop
+-- app is single-machine, so there is no email verification or reset flow.
+CREATE TABLE IF NOT EXISTS users (
+	id           TEXT PRIMARY KEY,
+	name         TEXT NOT NULL,
+	email        TEXT NOT NULL COLLATE NOCASE UNIQUE,
+	password_hash TEXT NOT NULL,
+	created_at   INTEGER NOT NULL
+);
+
+-- One row per signed-in browser. Only the SHA-256 of the token is stored, so a
+-- copy of the database cannot be used to sign in as anyone.
+CREATE TABLE IF NOT EXISTS sessions (
+	token_hash TEXT PRIMARY KEY,
+	user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	created_at INTEGER NOT NULL,
+	expires_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
+
 -- One row per model call: where it went and how many tokens it reported. The
 -- usage page reads this; nothing else does.
 CREATE TABLE IF NOT EXISTS usage_events (
 	id            INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id       TEXT NOT NULL DEFAULT '',
 	provider_id   TEXT NOT NULL,
 	model_id      TEXT NOT NULL DEFAULT '',
 	input_tokens  INTEGER NOT NULL DEFAULT 0,
@@ -244,6 +272,111 @@ CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_events(provider_id, creat
 	for _, col := range added {
 		if err := s.ensureColumn(ctx, col.table, col.column, col.ddl); err != nil {
 			return err
+		}
+	}
+
+	// Provider rows became per-account. An older providers table keys only on
+	// id, so it cannot hold one account's Groq override beside another's; move
+	// its rows into a table keyed by (user_id, id). The rows stay unowned until
+	// the admin account exists, and are assigned to it at startup.
+	if ok, err := s.hasColumn(ctx, "providers", "user_id"); err != nil {
+		return err
+	} else if !ok {
+		if err := s.rebuildProviders(ctx); err != nil {
+			return err
+		}
+	}
+
+	// Every user-facing record belongs to the account that made it. The empty
+	// default is a migration placeholder: existing rows have no owner yet and
+	// are assigned to the shipped admin account once it has been seeded.
+	owned := []struct{ table, column, ddl string }{
+		{"chats", "user_id", "user_id TEXT NOT NULL DEFAULT ''"},
+		{"workspaces", "user_id", "user_id TEXT NOT NULL DEFAULT ''"},
+		{"connectors", "user_id", "user_id TEXT NOT NULL DEFAULT ''"},
+		{"scheduled_tasks", "user_id", "user_id TEXT NOT NULL DEFAULT ''"},
+		{"agents", "user_id", "user_id TEXT NOT NULL DEFAULT ''"},
+		{"usage_events", "user_id", "user_id TEXT NOT NULL DEFAULT ''"},
+	}
+	for _, col := range owned {
+		if err := s.ensureColumn(ctx, col.table, col.column, col.ddl); err != nil {
+			return err
+		}
+	}
+
+	// The indexes use the columns above, so they are created only after the
+	// migration has added them to older databases.
+	const indexes = `
+CREATE INDEX IF NOT EXISTS idx_chats_user_updated ON chats(user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_user_created ON usage_events(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_user_provider ON usage_events(user_id, provider_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_scheduled_user ON scheduled_tasks(user_id, run_at);
+CREATE INDEX IF NOT EXISTS idx_connectors_user ON connectors(user_id, name);
+CREATE INDEX IF NOT EXISTS idx_agents_user ON agents(user_id, name);
+DROP INDEX IF EXISTS idx_workspaces_dir;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_user_dir ON workspaces(user_id, dir);
+`
+	if _, err := s.db.ExecContext(ctx, indexes); err != nil {
+		return fmt.Errorf("store: migrate indexes: %w", err)
+	}
+	return nil
+}
+
+// hasColumn reports whether a table already has a column.
+func (s *Store) hasColumn(ctx context.Context, table, column string) (bool, error) {
+	var count int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, table, column,
+	).Scan(&count); err != nil {
+		return false, fmt.Errorf("store: inspect %s.%s: %w", table, column, err)
+	}
+	return count > 0, nil
+}
+
+// rebuildProviders moves an older single-key providers table onto the
+// per-account (user_id, id) key without losing any configured provider.
+func (s *Store) rebuildProviders(ctx context.Context) error {
+	const rebuild = `
+DROP TABLE IF EXISTS providers_user_keyed;
+CREATE TABLE providers_user_keyed (
+	user_id    TEXT NOT NULL DEFAULT '',
+	id         TEXT NOT NULL,
+	name       TEXT NOT NULL DEFAULT '',
+	base_url   TEXT NOT NULL DEFAULT '',
+	api_key    TEXT NOT NULL DEFAULT '',
+	enabled    INTEGER NOT NULL DEFAULT 1,
+	custom     INTEGER NOT NULL DEFAULT 0,
+	updated_at INTEGER NOT NULL,
+	PRIMARY KEY (user_id, id)
+);
+INSERT INTO providers_user_keyed (user_id, id, name, base_url, api_key, enabled, custom, updated_at)
+SELECT '', id, name, base_url, api_key, enabled, custom, updated_at FROM providers;
+DROP TABLE providers;
+ALTER TABLE providers_user_keyed RENAME TO providers;
+`
+	if _, err := s.db.ExecContext(ctx, rebuild); err != nil {
+		return fmt.Errorf("store: rebuild providers: %w", err)
+	}
+	return nil
+}
+
+// AssignOrphanData gives rows that predate accounts to one account. It is how
+// the chats, providers and settings an installation already had stay with the
+// shipped admin account after accounts arrive.
+func (s *Store) AssignOrphanData(ctx context.Context, userID string) error {
+	if strings.TrimSpace(userID) == "" {
+		return nil
+	}
+	tables := []string{
+		"chats", "providers", "workspaces", "connectors",
+		"scheduled_tasks", "agents", "usage_events",
+	}
+	for _, table := range tables {
+		if _, err := s.db.ExecContext(ctx,
+			fmt.Sprintf(`UPDATE %s SET user_id = ? WHERE user_id = '' OR user_id IS NULL`, table),
+			userID,
+		); err != nil {
+			return fmt.Errorf("store: assign %s to account: %w", table, err)
 		}
 	}
 	return nil
@@ -304,11 +437,13 @@ func NewID() string {
 }
 
 // ListChats returns chats ordered by pinned first, then most recently updated.
-func (s *Store) ListChats(ctx context.Context) ([]Chat, error) {
+func (s *Store) ListChats(ctx context.Context, userID ...string) ([]Chat, error) {
+	owner := ownerOf(userID)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, title, provider, model, workspace_dir, pinned, created_at, updated_at
 		FROM chats
-		ORDER BY pinned DESC, updated_at DESC, rowid DESC`)
+		WHERE user_id = ?
+		ORDER BY pinned DESC, updated_at DESC, rowid DESC`, owner)
 	if err != nil {
 		return nil, fmt.Errorf("store: list chats: %w", err)
 	}
@@ -330,8 +465,9 @@ func (s *Store) ListChats(ctx context.Context) ([]Chat, error) {
 }
 
 // CreateChat inserts a new chat. A workspaceDir binds the chat to one of the
-// library's folders; empty means the default workspace.
-func (s *Store) CreateChat(ctx context.Context, providerID, model, workspaceDir string) (Chat, error) {
+// library's folders; empty means the default workspace. The trailing account id
+// is the owner; calls without one are for tests and migration only.
+func (s *Store) CreateChat(ctx context.Context, providerID, model, workspaceDir string, userID ...string) (Chat, error) {
 	now := time.Now().UnixMilli()
 	chat := Chat{
 		ID:           NewID(),
@@ -343,23 +479,23 @@ func (s *Store) CreateChat(ctx context.Context, providerID, model, workspaceDir 
 		UpdatedAt:    now,
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO chats (id, title, provider, model, workspace_dir, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		chat.ID, chat.Title, chat.Provider, chat.Model, chat.WorkspaceDir, chat.CreatedAt, chat.UpdatedAt)
+		INSERT INTO chats (id, user_id, title, provider, model, workspace_dir, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		chat.ID, ownerOf(userID), chat.Title, chat.Provider, chat.Model, chat.WorkspaceDir, chat.CreatedAt, chat.UpdatedAt)
 	if err != nil {
 		return Chat{}, fmt.Errorf("store: create chat: %w", err)
 	}
 	return chat, nil
 }
 
-func (s *Store) getChat(ctx context.Context, id string) (Chat, error) {
+func (s *Store) getChat(ctx context.Context, id string, userID ...string) (Chat, error) {
 	var (
 		c      Chat
 		pinned int
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, title, provider, model, workspace_dir, pinned, created_at, updated_at
-		FROM chats WHERE id = ?`, id).
+		FROM chats WHERE id = ? AND user_id = ?`, id, ownerOf(userID)).
 		Scan(&c.ID, &c.Title, &c.Provider, &c.Model, &c.WorkspaceDir, &pinned, &c.CreatedAt, &c.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Chat{}, ErrNotFound
@@ -372,8 +508,8 @@ func (s *Store) getChat(ctx context.Context, id string) (Chat, error) {
 }
 
 // GetChat returns a chat with all of its messages.
-func (s *Store) GetChat(ctx context.Context, id string) (ChatDetail, error) {
-	chat, err := s.getChat(ctx, id)
+func (s *Store) GetChat(ctx context.Context, id string, userID ...string) (ChatDetail, error) {
+	chat, err := s.getChat(ctx, id, userID...)
 	if err != nil {
 		return ChatDetail{}, err
 	}
@@ -419,17 +555,29 @@ func (s *Store) ListMessages(ctx context.Context, chatID string) ([]Message, err
 }
 
 // AddMessage appends a message and bumps the chat's updated_at. The ID and
-// creation time are assigned here.
-func (s *Store) AddMessage(ctx context.Context, msg Message) (Message, error) {
+// creation time are assigned here. The trailing account id checks that the chat
+// belongs to the caller before anything is written.
+func (s *Store) AddMessage(ctx context.Context, msg Message, userID ...string) (Message, error) {
 	msg.ID = NewID()
 	msg.CreatedAt = time.Now().UnixMilli()
 	now := msg.CreatedAt
+	owner := ownerOf(userID)
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Message{}, fmt.Errorf("store: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	var exists int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM chats WHERE id = ? AND user_id = ?`, msg.ChatID, owner,
+	).Scan(&exists); err != nil {
+		return Message{}, fmt.Errorf("store: check chat: %w", err)
+	}
+	if exists == 0 {
+		return Message{}, ErrNotFound
+	}
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO messages (
@@ -443,7 +591,7 @@ func (s *Store) AddMessage(ctx context.Context, msg Message) (Message, error) {
 		return Message{}, fmt.Errorf("store: insert message: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE chats SET updated_at = ? WHERE id = ?`, now, msg.ChatID); err != nil {
+		`UPDATE chats SET updated_at = ? WHERE id = ? AND user_id = ?`, now, msg.ChatID, owner); err != nil {
 		return Message{}, fmt.Errorf("store: touch chat: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -452,10 +600,13 @@ func (s *Store) AddMessage(ctx context.Context, msg Message) (Message, error) {
 	return msg, nil
 }
 
-// DeleteMessage removes one message from a chat.
-func (s *Store) DeleteMessage(ctx context.Context, chatID, messageID string) error {
-	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM messages WHERE id = ? AND chat_id = ?`, messageID, chatID)
+// DeleteMessage removes one message from a chat the account owns.
+func (s *Store) DeleteMessage(ctx context.Context, chatID, messageID string, userID ...string) error {
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM messages
+		WHERE id = ? AND chat_id = ?
+		  AND EXISTS (SELECT 1 FROM chats WHERE chats.id = messages.chat_id AND chats.user_id = ?)`,
+		messageID, chatID, ownerOf(userID))
 	if err != nil {
 		return fmt.Errorf("store: delete message: %w", err)
 	}
@@ -471,8 +622,8 @@ func (s *Store) DeleteMessage(ctx context.Context, chatID, messageID string) err
 
 // UpdateChat changes the title and/or the selected model of a chat. Empty
 // values are left untouched.
-func (s *Store) UpdateChat(ctx context.Context, id, title, providerID, model string) (Chat, error) {
-	if _, err := s.getChat(ctx, id); err != nil {
+func (s *Store) UpdateChat(ctx context.Context, id, title, providerID, model string, userID ...string) (Chat, error) {
+	if _, err := s.getChat(ctx, id, userID...); err != nil {
 		return Chat{}, err
 	}
 
@@ -487,38 +638,38 @@ func (s *Store) UpdateChat(ctx context.Context, id, title, providerID, model str
 		args = append(args, model, providerID)
 	}
 	if len(set) == 0 {
-		return s.getChat(ctx, id)
+		return s.getChat(ctx, id, userID...)
 	}
 
-	args = append(args, id)
-	query := "UPDATE chats SET " + join(set, ", ") + " WHERE id = ?"
+	args = append(args, id, ownerOf(userID))
+	query := "UPDATE chats SET " + join(set, ", ") + " WHERE id = ? AND user_id = ?"
 	if _, err := s.db.ExecContext(ctx, query, args...); err != nil {
 		return Chat{}, fmt.Errorf("store: update chat: %w", err)
 	}
-	return s.getChat(ctx, id)
+	return s.getChat(ctx, id, userID...)
 }
 
 // RenameChat sets a chat's title.
-func (s *Store) RenameChat(ctx context.Context, id, title string) (Chat, error) {
-	return s.UpdateChat(ctx, id, title, "", "")
+func (s *Store) RenameChat(ctx context.Context, id, title string, userID ...string) (Chat, error) {
+	return s.UpdateChat(ctx, id, title, "", "", userID...)
 }
 
 // SetChatPinned pins or unpins a chat. Pinned chats are listed above the rest.
-func (s *Store) SetChatPinned(ctx context.Context, id string, pinned bool) (Chat, error) {
+func (s *Store) SetChatPinned(ctx context.Context, id string, pinned bool, userID ...string) (Chat, error) {
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE chats SET pinned = ? WHERE id = ?`, boolToInt(pinned), id)
+		`UPDATE chats SET pinned = ? WHERE id = ? AND user_id = ?`, boolToInt(pinned), id, ownerOf(userID))
 	if err != nil {
 		return Chat{}, fmt.Errorf("store: pin chat: %w", err)
 	}
 	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
 		return Chat{}, ErrNotFound
 	}
-	return s.getChat(ctx, id)
+	return s.getChat(ctx, id, userID...)
 }
 
 // DeleteChat removes a chat and its messages.
-func (s *Store) DeleteChat(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM chats WHERE id = ?`, id)
+func (s *Store) DeleteChat(ctx context.Context, id string, userID ...string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM chats WHERE id = ? AND user_id = ?`, id, ownerOf(userID))
 	if err != nil {
 		return fmt.Errorf("store: delete chat: %w", err)
 	}
@@ -546,12 +697,13 @@ type ProviderRecord struct {
 	UpdatedAt int64  `json:"updatedAt"`
 }
 
-// ListProviders returns every stored provider row.
-func (s *Store) ListProviders(ctx context.Context) ([]ProviderRecord, error) {
+// ListProviders returns every stored provider row for one account.
+func (s *Store) ListProviders(ctx context.Context, userID ...string) ([]ProviderRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, base_url, api_key, enabled, custom, updated_at
 		FROM providers
-		ORDER BY custom ASC, updated_at ASC`)
+		WHERE user_id = ?
+		ORDER BY custom ASC, updated_at ASC`, ownerOf(userID))
 	if err != nil {
 		return nil, fmt.Errorf("store: list providers: %w", err)
 	}
@@ -576,15 +728,15 @@ func (s *Store) ListProviders(ctx context.Context) ([]ProviderRecord, error) {
 	return records, rows.Err()
 }
 
-// GetProvider returns one stored provider row.
-func (s *Store) GetProvider(ctx context.Context, id string) (ProviderRecord, error) {
+// GetProvider returns one stored provider row for an account.
+func (s *Store) GetProvider(ctx context.Context, id string, userID ...string) (ProviderRecord, error) {
 	var (
 		rec             ProviderRecord
 		enabled, custom int
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, name, base_url, api_key, enabled, custom, updated_at
-		FROM providers WHERE id = ?`, id).
+		FROM providers WHERE id = ? AND user_id = ?`, id, ownerOf(userID)).
 		Scan(&rec.ID, &rec.Name, &rec.BaseURL, &rec.APIKey, &enabled, &custom, &rec.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ProviderRecord{}, ErrNotFound
@@ -597,19 +749,20 @@ func (s *Store) GetProvider(ctx context.Context, id string) (ProviderRecord, err
 	return rec, nil
 }
 
-// UpsertProvider writes a provider row in full.
-func (s *Store) UpsertProvider(ctx context.Context, rec ProviderRecord) error {
+// UpsertProvider writes a provider row in full for an account.
+func (s *Store) UpsertProvider(ctx context.Context, rec ProviderRecord, userID ...string) error {
+	owner := ownerOf(userID)
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO providers (id, name, base_url, api_key, enabled, custom, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
+		INSERT INTO providers (user_id, id, name, base_url, api_key, enabled, custom, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(user_id, id) DO UPDATE SET
 			name = excluded.name,
 			base_url = excluded.base_url,
 			api_key = excluded.api_key,
 			enabled = excluded.enabled,
 			custom = excluded.custom,
 			updated_at = excluded.updated_at`,
-		rec.ID, rec.Name, rec.BaseURL, rec.APIKey,
+		owner, rec.ID, rec.Name, rec.BaseURL, rec.APIKey,
 		boolToInt(rec.Enabled), boolToInt(rec.Custom), time.Now().UnixMilli())
 	if err != nil {
 		return fmt.Errorf("store: save provider %s: %w", rec.ID, err)
@@ -617,9 +770,10 @@ func (s *Store) UpsertProvider(ctx context.Context, rec ProviderRecord) error {
 	return nil
 }
 
-// DeleteProvider removes a stored provider row.
-func (s *Store) DeleteProvider(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM providers WHERE id = ?`, id)
+// DeleteProvider removes a stored provider row for an account.
+func (s *Store) DeleteProvider(ctx context.Context, id string, userID ...string) error {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM providers WHERE id = ? AND user_id = ?`, id, ownerOf(userID))
 	if err != nil {
 		return fmt.Errorf("store: delete provider: %w", err)
 	}
@@ -663,12 +817,14 @@ func scanWorkspace(row interface{ Scan(...any) error }) (WorkspaceRecord, error)
 	return rec, nil
 }
 
-// ListWorkspaces returns every workspace, the built-in one first.
-func (s *Store) ListWorkspaces(ctx context.Context) ([]WorkspaceRecord, error) {
+// ListWorkspaces returns every workspace for an account, the built-in one
+// first.
+func (s *Store) ListWorkspaces(ctx context.Context, userID ...string) ([]WorkspaceRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+workspaceColumns+`
 		FROM workspaces
-		ORDER BY builtin DESC, created_at ASC, rowid ASC`)
+		WHERE user_id = ?
+		ORDER BY builtin DESC, created_at ASC, rowid ASC`, ownerOf(userID))
 	if err != nil {
 		return nil, fmt.Errorf("store: list workspaces: %w", err)
 	}
@@ -685,10 +841,10 @@ func (s *Store) ListWorkspaces(ctx context.Context) ([]WorkspaceRecord, error) {
 	return records, rows.Err()
 }
 
-// GetWorkspace returns one workspace by id.
-func (s *Store) GetWorkspace(ctx context.Context, id string) (WorkspaceRecord, error) {
+// GetWorkspace returns one workspace by id for an account.
+func (s *Store) GetWorkspace(ctx context.Context, id string, userID ...string) (WorkspaceRecord, error) {
 	rec, err := scanWorkspace(s.db.QueryRowContext(ctx,
-		`SELECT `+workspaceColumns+` FROM workspaces WHERE id = ?`, id))
+		`SELECT `+workspaceColumns+` FROM workspaces WHERE id = ? AND user_id = ?`, id, ownerOf(userID)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return WorkspaceRecord{}, ErrNotFound
 	}
@@ -698,41 +854,44 @@ func (s *Store) GetWorkspace(ctx context.Context, id string) (WorkspaceRecord, e
 	return rec, nil
 }
 
-// CreateWorkspace stores a new workspace. The ID and timestamps are assigned
-// here; the folder itself is the caller's job.
-func (s *Store) CreateWorkspace(ctx context.Context, rec WorkspaceRecord) (WorkspaceRecord, error) {
+// CreateWorkspace stores a new workspace for an account. The ID and timestamps
+// are assigned here; the folder itself is the caller's job.
+func (s *Store) CreateWorkspace(ctx context.Context, rec WorkspaceRecord, userID ...string) (WorkspaceRecord, error) {
 	now := time.Now().UnixMilli()
 	rec.ID = NewID()
 	rec.CreatedAt, rec.UpdatedAt = now, now
 
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO workspaces (id, name, description, dir, builtin, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		rec.ID, rec.Name, rec.Description, rec.Dir, boolToInt(rec.Builtin), rec.CreatedAt, rec.UpdatedAt,
+		INSERT INTO workspaces (id, user_id, name, description, dir, builtin, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		rec.ID, ownerOf(userID), rec.Name, rec.Description, rec.Dir, boolToInt(rec.Builtin), rec.CreatedAt, rec.UpdatedAt,
 	); err != nil {
 		return WorkspaceRecord{}, fmt.Errorf("store: create workspace: %w", err)
 	}
 	return rec, nil
 }
 
-// EnsureWorkspace returns the workspace that uses a folder, creating its row
-// when there is none. It is how the default workspace is seeded on boot.
-func (s *Store) EnsureWorkspace(ctx context.Context, rec WorkspaceRecord) (WorkspaceRecord, error) {
+// EnsureWorkspace returns the workspace that uses a folder for an account,
+// creating its row when there is none. It is how the default workspace is
+// seeded on boot and on first use.
+func (s *Store) EnsureWorkspace(ctx context.Context, rec WorkspaceRecord, userID ...string) (WorkspaceRecord, error) {
+	owner := ownerOf(userID)
 	existing, err := scanWorkspace(s.db.QueryRowContext(ctx,
-		`SELECT `+workspaceColumns+` FROM workspaces WHERE dir = ?`, rec.Dir))
+		`SELECT `+workspaceColumns+` FROM workspaces WHERE user_id = ? AND dir = ?`, owner, rec.Dir))
 	if err == nil {
 		return existing, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return WorkspaceRecord{}, fmt.Errorf("store: find workspace %s: %w", rec.Dir, err)
 	}
-	return s.CreateWorkspace(ctx, rec)
+	return s.CreateWorkspace(ctx, rec, owner)
 }
 
-// DeleteWorkspace removes a workspace row. The built-in one is refused. The
-// folder is never touched: a workspace's files are the user's, not ours.
-func (s *Store) DeleteWorkspace(ctx context.Context, id string) error {
-	rec, err := s.GetWorkspace(ctx, id)
+// DeleteWorkspace removes a workspace row owned by an account. The built-in one
+// is refused. The folder is never touched: a workspace's files are the user's,
+// not ours.
+func (s *Store) DeleteWorkspace(ctx context.Context, id string, userID ...string) error {
+	rec, err := s.GetWorkspace(ctx, id, userID...)
 	if err != nil {
 		return err
 	}
@@ -740,7 +899,8 @@ func (s *Store) DeleteWorkspace(ctx context.Context, id string) error {
 		return ErrProtected
 	}
 
-	res, err := s.db.ExecContext(ctx, `DELETE FROM workspaces WHERE id = ?`, id)
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM workspaces WHERE id = ? AND user_id = ?`, id, ownerOf(userID))
 	if err != nil {
 		return fmt.Errorf("store: delete workspace: %w", err)
 	}
@@ -782,12 +942,13 @@ func scanConnector(row interface{ Scan(...any) error }) (ConnectorRecord, error)
 	return rec, nil
 }
 
-// ListConnectors returns every connector, alphabetically.
-func (s *Store) ListConnectors(ctx context.Context) ([]ConnectorRecord, error) {
+// ListConnectors returns every connector for an account, alphabetically.
+func (s *Store) ListConnectors(ctx context.Context, userID ...string) ([]ConnectorRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+connectorColumns+`
 		FROM connectors
-		ORDER BY name COLLATE NOCASE ASC, rowid ASC`)
+		WHERE user_id = ?
+		ORDER BY name COLLATE NOCASE ASC, rowid ASC`, ownerOf(userID))
 	if err != nil {
 		return nil, fmt.Errorf("store: list connectors: %w", err)
 	}
@@ -804,8 +965,8 @@ func (s *Store) ListConnectors(ctx context.Context) ([]ConnectorRecord, error) {
 	return records, rows.Err()
 }
 
-// CreateConnector stores a new connector, ready to be turned on.
-func (s *Store) CreateConnector(ctx context.Context, name, command string) (ConnectorRecord, error) {
+// CreateConnector stores a new connector for an account, ready to be turned on.
+func (s *Store) CreateConnector(ctx context.Context, name, command string, userID ...string) (ConnectorRecord, error) {
 	now := time.Now().UnixMilli()
 	rec := ConnectorRecord{
 		ID:        NewID(),
@@ -816,9 +977,9 @@ func (s *Store) CreateConnector(ctx context.Context, name, command string) (Conn
 		UpdatedAt: now,
 	}
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO connectors (id, name, command, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		rec.ID, rec.Name, rec.Command, boolToInt(rec.Enabled), rec.CreatedAt, rec.UpdatedAt,
+		INSERT INTO connectors (id, user_id, name, command, enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		rec.ID, ownerOf(userID), rec.Name, rec.Command, boolToInt(rec.Enabled), rec.CreatedAt, rec.UpdatedAt,
 	); err != nil {
 		return ConnectorRecord{}, fmt.Errorf("store: create connector: %w", err)
 	}
@@ -826,22 +987,22 @@ func (s *Store) CreateConnector(ctx context.Context, name, command string) (Conn
 }
 
 // SetConnectorEnabled turns a connector on or off.
-func (s *Store) SetConnectorEnabled(ctx context.Context, id string, enabled bool) (ConnectorRecord, error) {
+func (s *Store) SetConnectorEnabled(ctx context.Context, id string, enabled bool, userID ...string) (ConnectorRecord, error) {
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE connectors SET enabled = ?, updated_at = ? WHERE id = ?`,
-		boolToInt(enabled), time.Now().UnixMilli(), id)
+		`UPDATE connectors SET enabled = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+		boolToInt(enabled), time.Now().UnixMilli(), id, ownerOf(userID))
 	if err != nil {
 		return ConnectorRecord{}, fmt.Errorf("store: update connector: %w", err)
 	}
 	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
 		return ConnectorRecord{}, ErrNotFound
 	}
-	return s.getConnector(ctx, id)
+	return s.getConnector(ctx, id, userID...)
 }
 
-func (s *Store) getConnector(ctx context.Context, id string) (ConnectorRecord, error) {
+func (s *Store) getConnector(ctx context.Context, id string, userID ...string) (ConnectorRecord, error) {
 	rec, err := scanConnector(s.db.QueryRowContext(ctx,
-		`SELECT `+connectorColumns+` FROM connectors WHERE id = ?`, id))
+		`SELECT `+connectorColumns+` FROM connectors WHERE id = ? AND user_id = ?`, id, ownerOf(userID)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return ConnectorRecord{}, ErrNotFound
 	}
@@ -851,9 +1012,10 @@ func (s *Store) getConnector(ctx context.Context, id string) (ConnectorRecord, e
 	return rec, nil
 }
 
-// DeleteConnector removes a connector.
-func (s *Store) DeleteConnector(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM connectors WHERE id = ?`, id)
+// DeleteConnector removes a connector owned by an account.
+func (s *Store) DeleteConnector(ctx context.Context, id string, userID ...string) error {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM connectors WHERE id = ? AND user_id = ?`, id, ownerOf(userID))
 	if err != nil {
 		return fmt.Errorf("store: delete connector: %w", err)
 	}
@@ -905,12 +1067,13 @@ func scanAgent(row interface{ Scan(...any) error }) (AgentRecord, error) {
 	return rec, nil
 }
 
-// ListAgents returns every agent, alphabetically by name.
-func (s *Store) ListAgents(ctx context.Context) ([]AgentRecord, error) {
+// ListAgents returns every agent for an account, alphabetically by name.
+func (s *Store) ListAgents(ctx context.Context, userID ...string) ([]AgentRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+agentColumns+`
 		FROM agents
-		ORDER BY name COLLATE NOCASE ASC, rowid ASC`)
+		WHERE user_id = ?
+		ORDER BY name COLLATE NOCASE ASC, rowid ASC`, ownerOf(userID))
 	if err != nil {
 		return nil, fmt.Errorf("store: list agents: %w", err)
 	}
@@ -927,10 +1090,10 @@ func (s *Store) ListAgents(ctx context.Context) ([]AgentRecord, error) {
 	return records, rows.Err()
 }
 
-// GetAgent returns one agent by id.
-func (s *Store) GetAgent(ctx context.Context, id string) (AgentRecord, error) {
+// GetAgent returns one agent by id for an account.
+func (s *Store) GetAgent(ctx context.Context, id string, userID ...string) (AgentRecord, error) {
 	rec, err := scanAgent(s.db.QueryRowContext(ctx,
-		`SELECT `+agentColumns+` FROM agents WHERE id = ?`, id))
+		`SELECT `+agentColumns+` FROM agents WHERE id = ? AND user_id = ?`, id, ownerOf(userID)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return AgentRecord{}, ErrNotFound
 	}
@@ -940,19 +1103,20 @@ func (s *Store) GetAgent(ctx context.Context, id string) (AgentRecord, error) {
 	return rec, nil
 }
 
-// CreateAgent stores a new agent. The ID and timestamps are assigned here.
-func (s *Store) CreateAgent(ctx context.Context, rec AgentRecord) (AgentRecord, error) {
+// CreateAgent stores a new agent for an account. The ID and timestamps are
+// assigned here.
+func (s *Store) CreateAgent(ctx context.Context, rec AgentRecord, userID ...string) (AgentRecord, error) {
 	now := time.Now().UnixMilli()
 	rec.ID = NewID()
 	rec.CreatedAt, rec.UpdatedAt = now, now
 
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO agents (
-			id, name, prompt, mode, connector_id, provider, model,
+			id, user_id, name, prompt, mode, connector_id, provider, model,
 			alt_provider, alt_model, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		rec.ID, rec.Name, rec.Prompt, rec.Mode, rec.ConnectorID,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		rec.ID, ownerOf(userID), rec.Name, rec.Prompt, rec.Mode, rec.ConnectorID,
 		rec.Provider, rec.Model, rec.AltProvider, rec.AltModel,
 		rec.CreatedAt, rec.UpdatedAt,
 	); err != nil {
@@ -962,28 +1126,29 @@ func (s *Store) CreateAgent(ctx context.Context, rec AgentRecord) (AgentRecord, 
 }
 
 // UpdateAgent writes an agent's fields in full, keeping its id and creation time.
-func (s *Store) UpdateAgent(ctx context.Context, id string, rec AgentRecord) (AgentRecord, error) {
+func (s *Store) UpdateAgent(ctx context.Context, id string, rec AgentRecord, userID ...string) (AgentRecord, error) {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE agents SET
 			name = ?, prompt = ?, mode = ?, connector_id = ?,
 			provider = ?, model = ?, alt_provider = ?, alt_model = ?,
 			updated_at = ?
-		WHERE id = ?`,
+		WHERE id = ? AND user_id = ?`,
 		rec.Name, rec.Prompt, rec.Mode, rec.ConnectorID,
 		rec.Provider, rec.Model, rec.AltProvider, rec.AltModel,
-		time.Now().UnixMilli(), id)
+		time.Now().UnixMilli(), id, ownerOf(userID))
 	if err != nil {
 		return AgentRecord{}, fmt.Errorf("store: update agent: %w", err)
 	}
 	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
 		return AgentRecord{}, ErrNotFound
 	}
-	return s.GetAgent(ctx, id)
+	return s.GetAgent(ctx, id, userID...)
 }
 
-// DeleteAgent removes an agent.
-func (s *Store) DeleteAgent(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM agents WHERE id = ?`, id)
+// DeleteAgent removes an agent owned by an account.
+func (s *Store) DeleteAgent(ctx context.Context, id string, userID ...string) error {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM agents WHERE id = ? AND user_id = ?`, id, ownerOf(userID))
 	if err != nil {
 		return fmt.Errorf("store: delete agent: %w", err)
 	}
@@ -995,6 +1160,15 @@ func (s *Store) DeleteAgent(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// ownerOf reads the optional account id at the end of a store method. It is
+// empty only for migrations and low-level tests; every request passes one.
+func ownerOf(userID []string) string {
+	if len(userID) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(userID[0])
 }
 
 func boolToInt(v bool) int {

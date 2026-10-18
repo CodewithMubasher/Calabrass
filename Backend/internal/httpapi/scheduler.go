@@ -81,27 +81,27 @@ func (s *Server) runScheduledTask(ctx context.Context, task store.ScheduledTask)
 		// A task booked from the Schedules page has no conversation yet. It
 		// gets one, named after what it was asked to do, so the answer has
 		// somewhere to land and the user can read what it did.
-		created, err := s.store.CreateChat(ctx, "", "", "")
+		created, err := s.store.CreateChat(ctx, "", "", "", task.UserID)
 		if err != nil {
 			s.recordRun(ctx, task, "error", "could not open a conversation: "+err.Error())
 			return err
 		}
 		chatID = created.ID
-		if _, err := s.store.UpdateChat(ctx, chatID, titleFrom(task.Prompt), "", ""); err != nil {
+		if _, err := s.store.UpdateChat(ctx, chatID, titleFrom(task.Prompt), "", "", task.UserID); err != nil {
 			s.log.Warn("could not title the task's conversation", "chat", chatID, "error", err)
 		}
-		if err := s.store.BindScheduledTaskChat(ctx, task.ID, chatID); err != nil {
+		if err := s.store.BindScheduledTaskChat(ctx, task.ID, chatID, task.UserID); err != nil {
 			s.log.Warn("could not remember the task's conversation", "task", task.ID, "error", err)
 		}
 	}
 
-	chat, err := s.store.GetChat(ctx, chatID)
+	chat, err := s.store.GetChat(ctx, chatID, task.UserID)
 	if err != nil {
 		s.recordRun(ctx, task, "error", "the conversation is gone: "+err.Error())
 		return err
 	}
 
-	providerID, modelID := s.resolveModel(ctx, chat.Provider, chat.Model)
+	providerID, modelID := s.resolveModelFor(ctx, task.UserID, chat.Provider, chat.Model)
 	if providerID == "" || modelID == "" {
 		err := errors.New("no model is available")
 		s.recordRun(ctx, task, "error", err.Error())
@@ -114,11 +114,11 @@ func (s *Server) runScheduledTask(ctx context.Context, task store.ScheduledTask)
 		ChatID:  chatID,
 		Role:    ai.RoleUser,
 		Content: task.Prompt,
-	}); err != nil {
+	}, task.UserID); err != nil {
 		s.recordRun(ctx, task, "error", "could not write the instruction: "+err.Error())
 		return err
 	}
-	if _, err := s.store.UpdateChat(ctx, chatID, "", providerID, modelID); err != nil {
+	if _, err := s.store.UpdateChat(ctx, chatID, "", providerID, modelID, task.UserID); err != nil {
 		s.log.Warn("could not remember the task's model", "chat", chatID, "error", err)
 	}
 
@@ -128,10 +128,10 @@ func (s *Server) runScheduledTask(ctx context.Context, task store.ScheduledTask)
 	}
 	turns = append(turns, ai.Message{Role: ai.RoleUser, Content: task.Prompt})
 
-	setup := s.setupTurn(ctx, s.workspaceFor(chat.Chat), chatID)
+	setup := s.setupTurnFor(ctx, task.UserID, s.workspaceForUser(task.UserID, chat.Chat), chatID)
 
 	started := time.Now()
-	reply, genErr := s.registry.Stream(ctx, ai.StreamRequest{
+	reply, genErr := s.registryFor(task.UserID).Stream(ctx, ai.StreamRequest{
 		ProviderID:  providerID,
 		Model:       modelID,
 		System:      setup.system,
@@ -143,7 +143,7 @@ func (s *Server) runScheduledTask(ctx context.Context, task store.ScheduledTask)
 	elapsed := time.Since(started)
 
 	if genErr == nil || reply.Usage.InputTokens+reply.Usage.OutputTokens > 0 {
-		s.recordUsage(ctx, providerID, modelID, reply.Usage)
+		s.recordUsageFor(ctx, task.UserID, providerID, modelID, reply.Usage)
 	}
 
 	content := reply.Text
@@ -178,7 +178,7 @@ func (s *Server) runScheduledTask(ctx context.Context, task store.ScheduledTask)
 			DurationMs:   elapsed.Milliseconds(),
 			Trace:        savedTrace,
 			Replay:       reply.Replay,
-		}); err != nil {
+		}, task.UserID); err != nil {
 			s.log.Error("could not persist a scheduled reply", "task", task.ID, "error", err)
 		}
 	}

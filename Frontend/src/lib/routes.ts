@@ -10,11 +10,11 @@ export function hasTopbar(pathname: string) {
 
 /**
  * Screens that stand on their own: no sidebar, no bar, no rail, no surface of
- * their own to sit in. The login page is the only one — it is reached before
- * there is an app to sit inside.
+ * their own to sit in. The login and sign-up pages are the two — they are
+ * reached before there is an app to sit inside.
  */
 export function isStandalone(pathname: string) {
-  return pathname === "/login"
+  return pathname === "/login" || pathname === "/signup"
 }
 
 /**

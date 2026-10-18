@@ -1,4 +1,5 @@
 import type { Chat } from "@/types/chat"
+import { getToken } from "@/lib/session"
 
 /** The live voice socket: PCM in, transcript, tokens and audio out. */
 
@@ -29,8 +30,10 @@ export function connectVoice(
   onEvent: (event: VoiceEvent) => void,
   onState?: (open: boolean) => void
 ): VoiceSocket {
+  const token = getToken()
+  const query = token ? `?access_token=${encodeURIComponent(token)}` : ""
   const socket = new WebSocket(
-    `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/voice`
+    `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/voice${query}`
   )
 
   // Control sent while the socket is still opening is held, not dropped, so the

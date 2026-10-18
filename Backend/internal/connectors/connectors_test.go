@@ -42,7 +42,7 @@ func TestTheAgentCanCallAConnectorTool(t *testing.T) {
 	pool := New(st, repoRoot(t), testLogger())
 	defer pool.Close()
 
-	briefs, tools := pool.Turn(context.Background())
+	briefs, tools := pool.Turn(context.Background(), "")
 	byName := make(map[string]goai.Tool, len(tools))
 	for _, tool := range tools {
 		byName[tool.Name] = tool
@@ -83,7 +83,7 @@ func TestTheAgentCanCallAConnectorTool(t *testing.T) {
 
 	// A second turn is served by the same process, not a new one: the tools of
 	// the first turn call back into the server they came from.
-	pool.Turn(context.Background())
+	pool.Turn(context.Background(), "")
 	if running := pool.started(); running != 1 {
 		t.Errorf("%d connectors are running, want the one that was already started", running)
 	}
@@ -105,7 +105,7 @@ func TestADisabledConnectorIsNotStarted(t *testing.T) {
 	pool := New(st, repoRoot(t), testLogger())
 	defer pool.Close()
 
-	if _, tools := pool.Turn(context.Background()); len(tools) != 0 {
+	if _, tools := pool.Turn(context.Background(), ""); len(tools) != 0 {
 		t.Errorf("got %v from a connector that is turned off, want nothing", names(tools))
 	}
 	if running := pool.started(); running != 0 {
@@ -124,7 +124,7 @@ func TestAConnectorThatWillNotStartIsLeftOut(t *testing.T) {
 	pool := New(st, t.TempDir(), testLogger())
 	defer pool.Close()
 
-	if _, tools := pool.Turn(context.Background()); len(tools) != 0 {
+	if _, tools := pool.Turn(context.Background(), ""); len(tools) != 0 {
 		t.Errorf("got %v from a connector that cannot start, want nothing", names(tools))
 	}
 }
@@ -147,7 +147,7 @@ func TestTwoConnectorsOfferingTheSameNamesAreDeduped(t *testing.T) {
 	defer pool.Close()
 
 	seen := map[string]bool{}
-	_, tools := pool.Turn(context.Background())
+	_, tools := pool.Turn(context.Background(), "")
 	for _, tool := range tools {
 		if seen[tool.Name] {
 			t.Errorf("%s is offered twice", tool.Name)

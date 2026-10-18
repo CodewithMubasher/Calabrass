@@ -10,6 +10,7 @@ import (
 // that failed before the model answered is recorded with zero tokens only when
 // it still reached the provider.
 type UsageEvent struct {
+	UserID       string
 	ProviderID   string
 	ModelID      string
 	InputTokens  int
@@ -31,9 +32,9 @@ func (s *Store) RecordUsage(ctx context.Context, event UsageEvent) error {
 		event.CreatedAt = time.Now().UnixMilli()
 	}
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO usage_events (provider_id, model_id, input_tokens, output_tokens, created_at)
-		VALUES (?, ?, ?, ?, ?)`,
-		event.ProviderID, event.ModelID, event.InputTokens, event.OutputTokens, event.CreatedAt,
+		INSERT INTO usage_events (user_id, provider_id, model_id, input_tokens, output_tokens, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		event.UserID, event.ProviderID, event.ModelID, event.InputTokens, event.OutputTokens, event.CreatedAt,
 	); err != nil {
 		return fmt.Errorf("store: record usage: %w", err)
 	}
@@ -41,24 +42,24 @@ func (s *Store) RecordUsage(ctx context.Context, event UsageEvent) error {
 }
 
 // UsageTotalsSince sums every call at or after since (Unix milliseconds).
-func (s *Store) UsageTotalsSince(ctx context.Context, since int64) (UsageTotals, error) {
+func (s *Store) UsageTotalsSince(ctx context.Context, since int64, userID ...string) (UsageTotals, error) {
 	return queryUsageTotals(s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*),
 		       COALESCE(SUM(input_tokens), 0),
 		       COALESCE(SUM(output_tokens), 0)
 		FROM usage_events
-		WHERE created_at >= ?`, since))
+		WHERE user_id = ? AND created_at >= ?`, ownerOf(userID), since))
 }
 
 // UsageByProviderSince groups the calls since a time by provider.
-func (s *Store) UsageByProviderSince(ctx context.Context, since int64) (map[string]UsageTotals, error) {
+func (s *Store) UsageByProviderSince(ctx context.Context, since int64, userID ...string) (map[string]UsageTotals, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT provider_id, COUNT(*),
 		       COALESCE(SUM(input_tokens), 0),
 		       COALESCE(SUM(output_tokens), 0)
 		FROM usage_events
-		WHERE created_at >= ?
-		GROUP BY provider_id`, since)
+		WHERE user_id = ? AND created_at >= ?
+		GROUP BY provider_id`, ownerOf(userID), since)
 	if err != nil {
 		return nil, fmt.Errorf("store: usage by provider: %w", err)
 	}
@@ -84,15 +85,15 @@ func (s *Store) UsageByProviderSince(ctx context.Context, since int64) (map[stri
 
 // UsageDailySince groups the calls since a time by the local calendar day,
 // keyed as YYYY-MM-DD.
-func (s *Store) UsageDailySince(ctx context.Context, since int64) (map[string]UsageTotals, error) {
+func (s *Store) UsageDailySince(ctx context.Context, since int64, userID ...string) (map[string]UsageTotals, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT date(created_at / 1000, 'unixepoch', 'localtime') AS day,
 		       COUNT(*),
 		       COALESCE(SUM(input_tokens), 0),
 		       COALESCE(SUM(output_tokens), 0)
 		FROM usage_events
-		WHERE created_at >= ?
-		GROUP BY day`, since)
+		WHERE user_id = ? AND created_at >= ?
+		GROUP BY day`, ownerOf(userID), since)
 	if err != nil {
 		return nil, fmt.Errorf("store: daily usage: %w", err)
 	}
@@ -117,7 +118,7 @@ func (s *Store) UsageDailySince(ctx context.Context, since int64) (map[string]Us
 }
 
 // UsageDailyByProviderSince is UsageDailySince split one level further.
-func (s *Store) UsageDailyByProviderSince(ctx context.Context, since int64) (map[string]map[string]UsageTotals, error) {
+func (s *Store) UsageDailyByProviderSince(ctx context.Context, since int64, userID ...string) (map[string]map[string]UsageTotals, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT provider_id,
 		       date(created_at / 1000, 'unixepoch', 'localtime') AS day,
@@ -125,8 +126,8 @@ func (s *Store) UsageDailyByProviderSince(ctx context.Context, since int64) (map
 		       COALESCE(SUM(input_tokens), 0),
 		       COALESCE(SUM(output_tokens), 0)
 		FROM usage_events
-		WHERE created_at >= ?
-		GROUP BY provider_id, day`, since)
+		WHERE user_id = ? AND created_at >= ?
+		GROUP BY provider_id, day`, ownerOf(userID), since)
 	if err != nil {
 		return nil, fmt.Errorf("store: daily usage by provider: %w", err)
 	}

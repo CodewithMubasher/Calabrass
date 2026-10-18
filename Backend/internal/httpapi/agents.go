@@ -11,7 +11,7 @@ import (
 // listAgents answers with the full list, in the shape the other admin pages
 // use, so one call refreshes the page after any change.
 func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.store.ListAgents(r.Context())
+	rows, err := s.store.ListAgents(r.Context(), currentUser(r.Context()).ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -68,6 +68,7 @@ func (a agentRequest) record() (store.AgentRecord, error) {
 
 // handleCreateAgent stores a new sub-agent.
 func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r.Context())
 	var req agentRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -79,7 +80,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := s.store.CreateAgent(r.Context(), record); err != nil {
+	if _, err := s.store.CreateAgent(r.Context(), record, user.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -89,6 +90,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 // handleUpdateAgent saves an agent in full: the dialog is one form, so it writes
 // every field it shows.
 func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r.Context())
 	var req agentRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -100,7 +102,7 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = s.store.UpdateAgent(r.Context(), r.PathValue("agentID"), record)
+	_, err = s.store.UpdateAgent(r.Context(), r.PathValue("agentID"), record, user.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -113,7 +115,7 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
-	err := s.store.DeleteAgent(r.Context(), r.PathValue("agentID"))
+	err := s.store.DeleteAgent(r.Context(), r.PathValue("agentID"), currentUser(r.Context()).ID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, err)
 		return

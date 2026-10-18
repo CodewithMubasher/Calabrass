@@ -48,8 +48,7 @@ type catalog struct {
 }
 
 var (
-	modelCatalog = catalog{}
-	httpClient   = &http.Client{Timeout: modelsTimeout}
+	httpClient = &http.Client{Timeout: modelsTimeout}
 )
 
 // Models returns the live model catalog, using a short-lived cache unless
@@ -57,11 +56,11 @@ var (
 // skipped; if every live lookup fails the static fallback list is returned so
 // the UI is never empty.
 func (r *Registry) Models(ctx context.Context, force bool) []ProviderInfo {
-	modelCatalog.mu.Lock()
-	defer modelCatalog.mu.Unlock()
+	r.catalog.mu.Lock()
+	defer r.catalog.mu.Unlock()
 
-	if !force && len(modelCatalog.providers) > 0 && time.Since(modelCatalog.fetchedAt) < modelsCacheTTL {
-		return modelCatalog.providers
+	if !force && len(r.catalog.providers) > 0 && time.Since(r.catalog.fetchedAt) < modelsCacheTTL {
+		return r.catalog.providers
 	}
 
 	providers := []ProviderInfo{}
@@ -86,8 +85,8 @@ func (r *Registry) Models(ctx context.Context, force bool) []ProviderInfo {
 		providers = fallbackCatalog(r, ctx)
 	}
 
-	modelCatalog.providers = providers
-	modelCatalog.fetchedAt = time.Now()
+	r.catalog.providers = providers
+	r.catalog.fetchedAt = time.Now()
 	return providers
 }
 

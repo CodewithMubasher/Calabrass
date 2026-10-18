@@ -74,7 +74,7 @@ func TestScheduleToolBooksATask(t *testing.T) {
 
 	s := &Server{store: st}
 
-	answer, err := s.scheduleFromTool(ctx, "chat-1", scheduleTaskArgs{
+	answer, err := s.scheduleFromTool(ctx, "", "chat-1", scheduleTaskArgs{
 		Prompt:       "Shut the laptop down",
 		AfterMinutes: 10,
 	})
@@ -112,7 +112,7 @@ func TestScheduleToolRefusesThePast(t *testing.T) {
 
 	s := &Server{store: st}
 
-	if _, err := s.scheduleFromTool(ctx, "", scheduleTaskArgs{
+	if _, err := s.scheduleFromTool(ctx, "", "", scheduleTaskArgs{
 		Prompt: "Too late",
 		RunAt:  time.Now().Add(-time.Hour).Format("2006-01-02T15:04"),
 	}); err == nil {

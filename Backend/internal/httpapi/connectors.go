@@ -11,7 +11,7 @@ import (
 // listConnectors answers with the full list, in the same shape the providers and
 // workspaces endpoints use, so one call refreshes the page after any change.
 func (s *Server) listConnectors(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.store.ListConnectors(r.Context())
+	rows, err := s.store.ListConnectors(r.Context(), currentUser(r.Context()).ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -42,7 +42,7 @@ func (s *Server) handleCreateConnector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := s.store.CreateConnector(r.Context(), name, command); err != nil {
+	if _, err := s.store.CreateConnector(r.Context(), name, command, currentUser(r.Context()).ID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -51,6 +51,7 @@ func (s *Server) handleCreateConnector(w http.ResponseWriter, r *http.Request) {
 
 // handleUpdateConnector turns a connector on or off.
 func (s *Server) handleUpdateConnector(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r.Context())
 	var req struct {
 		Enabled *bool `json:"enabled"`
 	}
@@ -64,7 +65,7 @@ func (s *Server) handleUpdateConnector(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := r.PathValue("connectorID")
-	_, err := s.store.SetConnectorEnabled(r.Context(), id, *req.Enabled)
+	_, err := s.store.SetConnectorEnabled(r.Context(), id, *req.Enabled, user.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -82,7 +83,7 @@ func (s *Server) handleUpdateConnector(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteConnector(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("connectorID")
-	err := s.store.DeleteConnector(r.Context(), id)
+	err := s.store.DeleteConnector(r.Context(), id, currentUser(r.Context()).ID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -105,7 +106,7 @@ func (s *Server) handleDeleteConnector(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleConnectorTools(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("connectorID")
 
-	rows, err := s.store.ListConnectors(r.Context())
+	rows, err := s.store.ListConnectors(r.Context(), currentUser(r.Context()).ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

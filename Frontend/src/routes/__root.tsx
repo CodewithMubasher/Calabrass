@@ -3,6 +3,7 @@ import {
   Outlet,
   redirect,
   useLocation,
+  useNavigate,
 } from "@tanstack/react-router"
 import { useEffect } from "react"
 import { HugeiconsIcon } from "@hugeicons/react"
@@ -24,17 +25,19 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import { hydrate } from "@/lib/chat-store"
-import { session } from "@/lib/auth"
+import { refreshSession, session } from "@/lib/auth"
 import { loadModels } from "@/lib/model-store"
 import { toggleArtifacts, usePanelState } from "@/lib/panel-store"
 import { isStandalone, hasTopbar, chatIdFrom } from "@/lib/routes"
 
 export const Route = createRootRoute({
   /**
-   * The door, checked on every navigation: nothing but the login page is served
-   * without a session, and the login page is not served with one. This is a
-   * screen's worth of guarding, not security — the API is still open to anyone
-   * who can reach it — and it goes away when the server holds the session.
+   * The door, checked on every navigation: nothing but the login and sign-up
+   * pages is served without a session, and those two are not served with one.
+   * The session is a stored token; the layout below checks it against the
+   * server once on load and sends an expired one back here. The local API is
+   * still open on loopback, so this decides what the app shows rather than what
+   * the machine allows.
    */
   beforeLoad: ({ location }) => {
     const signedIn = session() !== null
@@ -49,6 +52,7 @@ export const Route = createRootRoute({
 
 function RootLayout() {
   const { pathname } = useLocation()
+  const navigate = useNavigate()
   // The home screen and a chat carry the bar across the top: every other page is
   // its own full-height surface, the way the reference project lays them out.
   // The artifacts rail rides with that bar, which is where its icon is.
@@ -59,6 +63,16 @@ function RootLayout() {
     void hydrate()
     void loadModels()
   }, [])
+
+  // The stored token may have been revoked or expired since the last visit.
+  // Check it once; the gate above already let this page render from storage.
+  useEffect(() => {
+    void refreshSession().then((current) => {
+      if (!current && !isStandalone(window.location.pathname)) {
+        void navigate({ to: "/login", replace: true })
+      }
+    })
+  }, [navigate])
 
   // The login page stands on its own: nothing from the shell is around it, not
   // even the surface the rest of the app sits in. Its page brings its own.

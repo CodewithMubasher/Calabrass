@@ -14,7 +14,10 @@ import (
 // It is a timer rather than a cron: it runs once, and the row remembers that it
 // has. Editing the time arms it again (see UpdateScheduledTask).
 type ScheduledTask struct {
-	ID     string `json:"id"`
+	ID string `json:"id"`
+	// UserID is the account whose conversation the task speaks in. It is not
+	// sent to the client: the session already says who is asking.
+	UserID string `json:"-"`
 	Prompt string `json:"prompt"`
 	// ChatID is the conversation the task speaks in. Empty means it has not run
 	// yet, and will be given one of its own when it does.
@@ -34,7 +37,7 @@ type ScheduledTask struct {
 // HasRun reports whether this task has already had its turn.
 func (t ScheduledTask) HasRun() bool { return t.LastRunAt > 0 }
 
-const scheduledTaskColumns = `id, prompt, chat_id, run_at, enabled,
+const scheduledTaskColumns = `id, user_id, prompt, chat_id, run_at, enabled,
 	last_run_at, last_status, last_error, created_at, updated_at`
 
 func scanScheduledTask(row interface{ Scan(...any) error }) (ScheduledTask, error) {
@@ -43,7 +46,7 @@ func scanScheduledTask(row interface{ Scan(...any) error }) (ScheduledTask, erro
 		enabled int
 	)
 	if err := row.Scan(
-		&task.ID, &task.Prompt, &task.ChatID, &task.RunAt, &enabled,
+		&task.ID, &task.UserID, &task.Prompt, &task.ChatID, &task.RunAt, &enabled,
 		&task.LastRunAt, &task.LastStatus, &task.LastError,
 		&task.CreatedAt, &task.UpdatedAt,
 	); err != nil {
@@ -53,13 +56,14 @@ func scanScheduledTask(row interface{ Scan(...any) error }) (ScheduledTask, erro
 	return task, nil
 }
 
-// ListScheduledTasks returns every task, the next one due first and the ones
-// that have already run at the end.
-func (s *Store) ListScheduledTasks(ctx context.Context) ([]ScheduledTask, error) {
+// ListScheduledTasks returns every task for an account, the next one due first
+// and the ones that have already run at the end.
+func (s *Store) ListScheduledTasks(ctx context.Context, userID ...string) ([]ScheduledTask, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+scheduledTaskColumns+`
 		FROM scheduled_tasks
-		ORDER BY last_run_at > 0 ASC, run_at ASC, rowid ASC`)
+		WHERE user_id = ?
+		ORDER BY last_run_at > 0 ASC, run_at ASC, rowid ASC`, ownerOf(userID))
 	if err != nil {
 		return nil, fmt.Errorf("store: list scheduled tasks: %w", err)
 	}
@@ -76,10 +80,10 @@ func (s *Store) ListScheduledTasks(ctx context.Context) ([]ScheduledTask, error)
 	return tasks, rows.Err()
 }
 
-// GetScheduledTask returns one task by id.
-func (s *Store) GetScheduledTask(ctx context.Context, id string) (ScheduledTask, error) {
+// GetScheduledTask returns one task by id for an account.
+func (s *Store) GetScheduledTask(ctx context.Context, id string, userID ...string) (ScheduledTask, error) {
 	task, err := scanScheduledTask(s.db.QueryRowContext(ctx,
-		`SELECT `+scheduledTaskColumns+` FROM scheduled_tasks WHERE id = ?`, id))
+		`SELECT `+scheduledTaskColumns+` FROM scheduled_tasks WHERE id = ? AND user_id = ?`, id, ownerOf(userID)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return ScheduledTask{}, ErrNotFound
 	}
@@ -97,11 +101,11 @@ func (s *Store) CreateScheduledTask(ctx context.Context, task ScheduledTask) (Sc
 
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO scheduled_tasks (
-			id, prompt, chat_id, run_at, enabled,
+			id, user_id, prompt, chat_id, run_at, enabled,
 			last_run_at, last_status, last_error, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		task.ID, task.Prompt, task.ChatID, task.RunAt, boolToInt(task.Enabled),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		task.ID, task.UserID, task.Prompt, task.ChatID, task.RunAt, boolToInt(task.Enabled),
 		task.LastRunAt, task.LastStatus, task.LastError, task.CreatedAt, task.UpdatedAt,
 	); err != nil {
 		return ScheduledTask{}, fmt.Errorf("store: create scheduled task: %w", err)
@@ -120,9 +124,9 @@ func (s *Store) UpdateScheduledTask(ctx context.Context, task ScheduledTask) (Sc
 		UPDATE scheduled_tasks SET
 			prompt = ?, chat_id = ?, run_at = ?, enabled = ?,
 			last_run_at = ?, last_status = ?, last_error = ?, updated_at = ?
-		WHERE id = ?`,
+		WHERE id = ? AND user_id = ?`,
 		task.Prompt, task.ChatID, task.RunAt, boolToInt(task.Enabled),
-		task.LastRunAt, task.LastStatus, task.LastError, task.UpdatedAt, task.ID)
+		task.LastRunAt, task.LastStatus, task.LastError, task.UpdatedAt, task.ID, task.UserID)
 	if err != nil {
 		return ScheduledTask{}, fmt.Errorf("store: update scheduled task: %w", err)
 	}
@@ -134,9 +138,10 @@ func (s *Store) UpdateScheduledTask(ctx context.Context, task ScheduledTask) (Sc
 
 // BindScheduledTaskChat remembers the conversation a task ran in, so the task
 // keeps reporting into it rather than opening a new one each time.
-func (s *Store) BindScheduledTaskChat(ctx context.Context, id, chatID string) error {
+func (s *Store) BindScheduledTaskChat(ctx context.Context, id, chatID string, userID ...string) error {
 	if _, err := s.db.ExecContext(ctx,
-		`UPDATE scheduled_tasks SET chat_id = ? WHERE id = ?`, chatID, id); err != nil {
+		`UPDATE scheduled_tasks SET chat_id = ? WHERE id = ? AND user_id = ?`,
+		chatID, id, ownerOf(userID)); err != nil {
 		return fmt.Errorf("store: bind scheduled task chat: %w", err)
 	}
 	return nil
@@ -180,9 +185,10 @@ func (s *Store) MarkScheduledTask(ctx context.Context, id string, at int64, stat
 	return nil
 }
 
-// DeleteScheduledTask removes a task.
-func (s *Store) DeleteScheduledTask(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM scheduled_tasks WHERE id = ?`, id)
+// DeleteScheduledTask removes a task owned by an account.
+func (s *Store) DeleteScheduledTask(ctx context.Context, id string, userID ...string) error {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM scheduled_tasks WHERE id = ? AND user_id = ?`, id, ownerOf(userID))
 	if err != nil {
 		return fmt.Errorf("store: delete scheduled task: %w", err)
 	}

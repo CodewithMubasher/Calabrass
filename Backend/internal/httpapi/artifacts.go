@@ -155,24 +155,21 @@ func scanArtifacts(root string) ([]artifactPayload, string) {
 // artifactsWorkspace resolves the workspace a rail is showing: the chat's own
 // when it has one, the project's default otherwise. The second result names it,
 // which is what download-all puts on the archive.
-func (s *Server) artifactsWorkspace(ctx context.Context, chatID string) (*agent.Workspace, string, error) {
-	if s.library == nil {
-		return nil, "", errArtifactsUnavailable
-	}
-
+func (s *Server) artifactsWorkspace(ctx context.Context, userID, chatID string) (*agent.Workspace, string, error) {
 	chatID = strings.TrimSpace(chatID)
 	if chatID == "" {
-		if s.workspace == nil {
+		ws := s.workspaceForUser(userID, store.Chat{})
+		if ws == nil {
 			return nil, "", errArtifactsUnavailable
 		}
-		return s.workspace, agent.DefaultWorkspaceName, nil
+		return ws, agent.DefaultWorkspaceName, nil
 	}
 
-	chat, err := s.store.GetChat(ctx, chatID)
+	chat, err := s.store.GetChat(ctx, chatID, userID)
 	if err != nil {
 		return nil, "", err
 	}
-	ws := s.workspaceFor(chat.Chat)
+	ws := s.workspaceForUser(userID, chat.Chat)
 	if ws == nil {
 		return nil, "", errArtifactsUnavailable
 	}
@@ -182,8 +179,8 @@ func (s *Server) artifactsWorkspace(ctx context.Context, chatID string) (*agent.
 // artifactFile resolves the ?path= argument of a file request. Every path goes
 // through the workspace, so the rail cannot reach outside the folder the agent
 // itself is confined to.
-func (s *Server) artifactFile(r *http.Request) (string, artifactPayload, error) {
-	ws, _, err := s.artifactsWorkspace(r.Context(), r.URL.Query().Get("chatId"))
+func (s *Server) artifactFile(r *http.Request, userID string) (string, artifactPayload, error) {
+	ws, _, err := s.artifactsWorkspace(r.Context(), userID, r.URL.Query().Get("chatId"))
 	if err != nil {
 		return "", artifactPayload{}, err
 	}
@@ -236,7 +233,7 @@ func artifactStatus(err error) int {
 // snapshot goes out with the connection, which is what keeps opening the rail
 // free of a loading state.
 func (s *Server) handleArtifactStream(w http.ResponseWriter, r *http.Request) {
-	ws, _, err := s.artifactsWorkspace(r.Context(), r.URL.Query().Get("chatId"))
+	ws, _, err := s.artifactsWorkspace(r.Context(), currentUser(r.Context()).ID, r.URL.Query().Get("chatId"))
 	if err != nil {
 		writeError(w, artifactStatus(err), err)
 		return
@@ -273,7 +270,7 @@ func (s *Server) handleArtifactStream(w http.ResponseWriter, r *http.Request) {
 // answers with that fact instead of its bytes, and a long file is cut at the
 // preview ceiling with a flag saying so.
 func (s *Server) handleArtifactContent(w http.ResponseWriter, r *http.Request) {
-	abs, payload, err := s.artifactFile(r)
+	abs, payload, err := s.artifactFile(r, currentUser(r.Context()).ID)
 	if err != nil {
 		writeError(w, artifactStatus(err), err)
 		return
@@ -314,7 +311,7 @@ func (s *Server) handleArtifactContent(w http.ResponseWriter, r *http.Request) {
 
 // handleArtifactDownload hands over one file as it is on disk.
 func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request) {
-	abs, payload, err := s.artifactFile(r)
+	abs, payload, err := s.artifactFile(r, currentUser(r.Context()).ID)
 	if err != nil {
 		writeError(w, artifactStatus(err), err)
 		return
@@ -341,7 +338,7 @@ func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request) 
 // rail means downloading every file in it, and a browser will only start one
 // download per click — so it gets one file that holds them all.
 func (s *Server) handleArtifactArchive(w http.ResponseWriter, r *http.Request) {
-	ws, label, err := s.artifactsWorkspace(r.Context(), r.URL.Query().Get("chatId"))
+	ws, label, err := s.artifactsWorkspace(r.Context(), currentUser(r.Context()).ID, r.URL.Query().Get("chatId"))
 	if err != nil {
 		writeError(w, artifactStatus(err), err)
 		return

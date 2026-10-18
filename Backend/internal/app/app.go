@@ -12,6 +12,7 @@ import (
 
 	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/ai"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/auth"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/config"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/connectors"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/httpapi"
@@ -37,13 +38,31 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error)
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
+	// Accounts live in the same database as the chats. The shipped admin
+	// account keeps the old login working; new people can sign up for their
+	// own. Failures are logged rather than fatal, so a database from an older
+	// build can still start and be signed into once the schema catches up.
+	accounts := auth.New(st)
+	admin, err := accounts.EnsureDefaultAccount(ctx)
+	if err != nil {
+		log.Warn("could not create the default account", "error", err)
+	}
+	if admin.ID != "" {
+		// Rows written before accounts existed belong to the shipped admin, so
+		// the chats and settings already on this machine stay where they were.
+		if err := st.AssignOrphanData(ctx, admin.ID); err != nil {
+			log.Warn("could not assign pre-account data to the admin account", "error", err)
+		}
+	}
+
 	// Providers are stored in the database, so the registry reads them on
 	// demand: built-in providers (Google, Groq) keep their credential in the
 	// environment unless a stored override exists, and custom providers carry
-	// their own endpoint and key.
+	// their own endpoint and key. The registry is scoped per account: a row on
+	// one account is invisible to another.
 	registry := ai.NewRegistry(cfg.GeminiKey, cfg.GroqKey, cfg.ProviderPriority,
-		func(ctx context.Context) ([]ai.ProviderRecord, error) {
-			rows, sourceErr := st.ListProviders(ctx)
+		func(ctx context.Context, userID string) ([]ai.ProviderRecord, error) {
+			rows, sourceErr := st.ListProviders(ctx, userID)
 			if sourceErr != nil {
 				return nil, sourceErr
 			}
@@ -61,7 +80,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error)
 			return records, nil
 		})
 
-	if len(registry.ProviderOrder(ctx)) == 0 {
+	if admin.ID != "" && len(registry.ForUser(admin.ID).ProviderOrder(ctx)) == 0 {
 		log.Warn("no usable AI provider; set GROQ_API_KEY or GOOGLE_GENERATIVE_AI_API_KEY in Backend/.env, or add a provider on the Providers page")
 	}
 
@@ -97,7 +116,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error)
 			Description: "Where chats work until they pick a workspace of their own.",
 			Dir:         agent.DefaultWorkspaceName,
 			Builtin:     true,
-		}); err != nil {
+		}, admin.ID); err != nil {
 			log.Warn("could not record the default workspace", "error", err)
 		}
 	}
@@ -126,6 +145,8 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error)
 		Store:         st,
 		Registry:      registry,
 		SystemPrompt:  cfg.SystemPrompt,
+		Auth:          accounts,
+		AdminID:       admin.ID,
 		Library:       library,
 		Workspace:     workspace,
 		MistralKey:    cfg.MistralKey,

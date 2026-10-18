@@ -18,21 +18,28 @@ type turnSetup struct {
 	origins map[string]string
 }
 
-// setupTurn builds both together, because the prompt has to describe the tools
-// the model is about to be given. A model told only about the project, and then
-// handed the tools that reach the desktop, answers "open the settings app" by
-// reading the project.
+// setupTurn builds a turn for the shipped admin account. Handlers use
+// setupTurnFor with the signed-in account.
+func (s *Server) setupTurn(ctx context.Context, workspace *agent.Workspace, chatID string) turnSetup {
+	return s.setupTurnFor(ctx, "", workspace, chatID)
+}
+
+// setupTurnFor builds both together, because the prompt has to describe the
+// tools the model is about to be given. A model told only about the project, and
+// then handed the tools that reach the desktop, answers "open the settings app"
+// by reading the project.
 //
 // chatID is the conversation the turn belongs to, which is what a task booked
 // during it is bound to: the answer then lands where it was asked for. An empty
-// id means there is no conversation to bind to.
-func (s *Server) setupTurn(ctx context.Context, workspace *agent.Workspace, chatID string) turnSetup {
+// id means there is no conversation to bind to. userID scopes the connectors and
+// the tasks the turn may see.
+func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *agent.Workspace, chatID string) turnSetup {
 	tools := agent.Tools(workspace)
 	var described []agent.Connector
 	var origins map[string]string
 
 	if s.connectors != nil {
-		briefs, offered := s.connectors.Turn(ctx)
+		briefs, offered := s.connectors.Turn(ctx, userID)
 		var skipped []string
 		tools, skipped = mergeTools(tools, offered)
 		for _, name := range skipped {
@@ -61,7 +68,7 @@ func (s *Server) setupTurn(ctx context.Context, workspace *agent.Workspace, chat
 	// project. It needs a store to write that row to, which is what keeps it out
 	// of the tests that build a server for its workspace alone.
 	if s.store != nil {
-		tools = append(tools, s.scheduleTool(chatID))
+		tools = append(tools, s.scheduleTool(chatID, userID))
 	}
 
 	// With no project and nothing acting on the machine, there is no harness to

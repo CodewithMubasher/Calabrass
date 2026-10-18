@@ -57,6 +57,21 @@ there is no CORS setup to worry about.
 
 3. Run `.\dev.ps1`.
 
+## Accounts
+
+The backend creates the original `admin@cal.com` / `Zorin1122` account on first
+start, so existing installs keep working. Use **Sign up** on the login page to
+create another account. Every account is fully isolated: each one has its own
+chats, messages, providers, workspaces, connectors, agents, schedules and
+usage. Rows written before accounts existed belong to the admin account.
+
+Passwords are stored as bcrypt hashes in SQLite and a sign-in lasts 30 days via
+a bearer token; the database only stores the token's SHA-256. Every API
+request must present that token, and the backend scopes all reads and writes to
+the account it belongs to. The API is bound to the loopback interface and
+remains reachable by local processes, so the account gate decides what the app
+shows rather than what the machine allows.
+
 ## Desktop app (Wails)
 
 The desktop shell is in `Backend/desktop`. It runs the same Go backend on
@@ -95,6 +110,10 @@ the database and the port.
 | Method | Path                          | Purpose                             |
 | ------ | ----------------------------- | ----------------------------------- |
 | GET    | `/api/health`                 | Liveness + configured providers     |
+| POST   | `/api/auth/signup`            | Create an account, return a session |
+| POST   | `/api/auth/login`             | Check a password, return a session  |
+| GET    | `/api/auth/me`                | Resolve an `Authorization` token    |
+| POST   | `/api/auth/logout`            | Revoke an `Authorization` token     |
 | GET    | `/api/models`                 | Live model catalog (`?refresh=1`)   |
 | GET    | `/api/providers`              | Providers + on/off state            |
 | POST   | `/api/providers`              | Add a custom provider               |

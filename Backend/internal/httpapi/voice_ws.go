@@ -33,7 +33,8 @@ func (s *Server) handleVoiceStream(w http.ResponseWriter, r *http.Request) {
 	session := voice.NewSession()
 	defer session.Close()
 
-	transcriber, err := voice.NewTranscriber(s.mistralKey, s.groqKey(r.Context()), s.log)
+	user := currentUser(ctx)
+	transcriber, err := voice.NewTranscriber(s.mistralKey, s.groqKey(ctx, user.ID), s.log)
 	if err != nil {
 		writeEvent(ctx, conn, voice.Event{Type: "error", Message: err.Error()})
 		return
@@ -67,7 +68,7 @@ func (s *Server) handleVoiceStream(w http.ResponseWriter, r *http.Request) {
 	wait.Add(1)
 	go func() {
 		defer wait.Done()
-		s.readVoice(ctx, conn, session, transcriber)
+		s.readVoice(ctx, user.ID, conn, session, transcriber)
 	}()
 
 	// A turn also ends on its own once the words stop arriving. The page asks
@@ -77,7 +78,7 @@ func (s *Server) handleVoiceStream(w http.ResponseWriter, r *http.Request) {
 	wait.Add(1)
 	go func() {
 		defer wait.Done()
-		s.watchVoice(ctx, conn, session, transcriber)
+		s.watchVoice(ctx, user.ID, conn, session, transcriber)
 	}()
 
 	s.writeVoice(ctx, conn, session)
@@ -85,7 +86,7 @@ func (s *Server) handleVoiceStream(w http.ResponseWriter, r *http.Request) {
 }
 
 // readVoice takes the microphone's frames and the browser's control messages.
-func (s *Server) readVoice(ctx context.Context, conn *websocket.Conn, session *voice.Session, transcriber voice.Transcriber) {
+func (s *Server) readVoice(ctx context.Context, userID string, conn *websocket.Conn, session *voice.Session, transcriber voice.Transcriber) {
 	for {
 		kind, data, err := conn.Read(ctx)
 		if err != nil {
@@ -109,7 +110,7 @@ func (s *Server) readVoice(ctx context.Context, conn *websocket.Conn, session *v
 				// before the turn reads it — a batch listener transcribes now.
 				session.Flushed()
 				transcriber.Finalize()
-				go s.answerVoice(ctx, conn, session)
+				go s.answerVoice(ctx, userID, conn, session)
 			case "cancel":
 				// The user started speaking over Cal. The listener is flushed too,
 				// so the half-heard answer's audio closes its utterance and the
@@ -129,7 +130,7 @@ func (s *Server) readVoice(ctx context.Context, conn *websocket.Conn, session *v
 // answerVoice answers one heard utterance, then reads the answer aloud a
 // sentence at a time so the first words are heard while the rest is still being
 // spoken. Only one turn runs at a time.
-func (s *Server) answerVoice(ctx context.Context, conn *websocket.Conn, session *voice.Session) {
+func (s *Server) answerVoice(ctx context.Context, userID string, conn *websocket.Conn, session *voice.Session) {
 	if !session.BeginTurn() {
 		return
 	}
@@ -143,7 +144,7 @@ func (s *Server) answerVoice(ctx context.Context, conn *websocket.Conn, session 
 	}
 	session.SetAnswered(transcript)
 
-	chat, err := s.voiceChat(ctx, session.Chat())
+	chat, err := s.voiceChat(ctx, userID, session.Chat())
 	if err != nil {
 		writeEvent(ctx, conn, voice.Event{Type: "error", Message: "Could not start a chat for that."})
 		return
@@ -164,7 +165,7 @@ func (s *Server) answerVoice(ctx context.Context, conn *websocket.Conn, session 
 		session.SetTurnCancel(nil)
 	}()
 
-	reply, trace, err := s.voiceTurn(turnCtx, chat, transcript, func(delta string) {
+	reply, trace, err := s.voiceTurn(turnCtx, userID, chat, transcript, func(delta string) {
 		writeEvent(turnCtx, conn, voice.Event{Type: "token", Text: delta})
 	})
 	if err != nil {
@@ -216,7 +217,7 @@ func (s *Server) speakVoice(ctx context.Context, conn *websocket.Conn, text stri
 // Waiting for the page alone would tie every question to an energy detector
 // reading a microphone it has never heard: this way the words themselves are
 // proof that someone spoke, and the answer follows.
-func (s *Server) watchVoice(ctx context.Context, conn *websocket.Conn, session *voice.Session, transcriber voice.Transcriber) {
+func (s *Server) watchVoice(ctx context.Context, userID string, conn *websocket.Conn, session *voice.Session, transcriber voice.Transcriber) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -241,7 +242,7 @@ func (s *Server) watchVoice(ctx context.Context, conn *websocket.Conn, session *
 			// follows reads the whole of it.
 			session.Flushed()
 			transcriber.Finalize()
-			go s.answerVoice(ctx, conn, session)
+			go s.answerVoice(ctx, userID, conn, session)
 		}
 	}
 }

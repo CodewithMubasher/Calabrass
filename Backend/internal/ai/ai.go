@@ -41,6 +41,13 @@ type Registry struct {
 	groqKey   string
 	priority  []string
 	source    ProviderSource
+	// userID scopes the stored provider rows to one account. A registry made
+	// by ForUser carries that account's id; the base registry carries only the
+	// built-in providers.
+	userID string
+	// catalog is this registry's cached model list, so one account's providers
+	// cannot populate or invalidate another's.
+	catalog catalog
 }
 
 // ProviderRecord is what the registry needs to know about a stored provider.
@@ -53,9 +60,9 @@ type ProviderRecord struct {
 	Custom  bool
 }
 
-// ProviderSource returns the stored provider rows. It may be nil, leaving only
-// the built-in providers.
-type ProviderSource func(ctx context.Context) ([]ProviderRecord, error)
+// ProviderSource returns the stored provider rows for one account. It may be
+// nil, leaving only the built-in providers.
+type ProviderSource func(ctx context.Context, userID string) ([]ProviderRecord, error)
 
 // NewRegistry builds a registry from the configured provider credentials.
 // priority controls the order in which available providers are offered, and
@@ -66,6 +73,22 @@ func NewRegistry(geminiKey, groqKey string, priority []string, source ProviderSo
 		groqKey:   groqKey,
 		priority:  priority,
 		source:    source,
+	}
+}
+
+// ForUser returns a registry scoped to one account. The copy shares the
+// credentials and provider source but keeps its own model catalog, so changing
+// one account's providers does not disturb another's.
+func (r *Registry) ForUser(userID string) *Registry {
+	if r == nil {
+		return nil
+	}
+	return &Registry{
+		geminiKey: r.geminiKey,
+		groqKey:   r.groqKey,
+		priority:  r.priority,
+		source:    r.source,
+		userID:    userID,
 	}
 }
 
@@ -121,7 +144,7 @@ func (r *Registry) GroqKey() string { return r.groqKey }
 func (r *Registry) providers(ctx context.Context) []resolvedProvider {
 	records := map[string]ProviderRecord{}
 	if r.source != nil {
-		if rows, err := r.source(ctx); err == nil {
+		if rows, err := r.source(ctx, r.userID); err == nil {
 			for _, row := range rows {
 				records[strings.ToLower(strings.TrimSpace(row.ID))] = row
 			}
@@ -282,13 +305,13 @@ func (r *Registry) builtinOrder(specs map[string]providerSpec) []string {
 	return order
 }
 
-// InvalidateCatalog drops the cached model catalog so the next read reflects a
-// provider change.
+// InvalidateCatalog drops this registry's cached model catalog so the next read
+// reflects a provider change.
 func (r *Registry) InvalidateCatalog() {
-	modelCatalog.mu.Lock()
-	defer modelCatalog.mu.Unlock()
-	modelCatalog.providers = nil
-	modelCatalog.fetchedAt = time.Time{}
+	r.catalog.mu.Lock()
+	defer r.catalog.mu.Unlock()
+	r.catalog.providers = nil
+	r.catalog.fetchedAt = time.Time{}
 }
 
 // resolve builds the GoAI language model for a provider, honouring the
