@@ -33,6 +33,15 @@ const ZERO: UsageTotals = {
   totalTokens: 0,
 }
 
+/**
+ * The top of the weekly chart: the most tokens and requests a full day is
+ * expected to reach. The two series have their own units, so each is measured
+ * against its own fixed ceiling; a single request stays a sliver instead of
+ * filling the plot.
+ */
+const WEEKLY_TOKEN_CEILING = 600_000
+const WEEKLY_REQUEST_CEILING = 5_000
+
 const fullNumber = new Intl.NumberFormat("en-US")
 
 function full(value: number): string {
@@ -234,23 +243,32 @@ function weekday(date: string): string {
   return parsed.toLocaleDateString("en-US", { weekday: "short" })
 }
 
+/** How full a bar is against its ceiling, capped so an unusual day fits too. */
+function barHeight(value: number, ceiling: number): number {
+  return Math.min(100, (value / ceiling) * 100)
+}
+
 /**
  * A week of daily tokens and requests, as paired bars in the logo colours.
  *
- * The two series are scaled against their own busiest day: real token counts
- * are thousands of times the request counts, and sharing one scale would leave
- * the request bars invisible. The absolute numbers sit in each bar's tooltip.
+ * Each series is measured against its fixed daily ceiling rather than the
+ * busiest day, so bar heights mean the same thing every day. Requests and
+ * tokens have different units, hence two ceilings. The absolute numbers sit in
+ * each bar's tooltip.
  */
 function WeeklyUsageCard({ daily }: { daily: UsageDay[] }) {
-  const maxTokens = Math.max(1, ...daily.map((day) => day.totalTokens))
-  const maxRequests = Math.max(1, ...daily.map((day) => day.requests))
   const empty = daily.every(
     (day) => day.totalTokens === 0 && day.requests === 0
   )
 
   return (
     <UsageCard className="min-h-64 sm:col-span-2">
-      <h2 className="text-sm font-medium text-white/80">Weekly usage</h2>
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-sm font-medium text-white/80">Weekly usage</h2>
+        <span className="shrink-0 text-[0.65rem] text-white/25 tabular-nums">
+          Daily ceiling: 600k tokens · 5k requests
+        </span>
+      </div>
 
       <div className="mt-4 flex flex-1 flex-col">
         <div className="relative flex h-44 items-end gap-2 border-b border-white/10 pb-px">
@@ -277,11 +295,17 @@ function WeeklyUsageCard({ daily }: { daily: UsageDay[] }) {
             >
               <div
                 className="w-full max-w-8 rounded-t-md bg-[#5B7FFF] opacity-80 transition-opacity group-hover:opacity-100"
-                style={{ height: `${(day.totalTokens / maxTokens) * 100}%` }}
+                style={{
+                  height: `${barHeight(day.totalTokens, WEEKLY_TOKEN_CEILING)}%`,
+                  minHeight: day.totalTokens > 0 ? 2 : undefined,
+                }}
               />
               <div
                 className="w-full max-w-8 rounded-t-md bg-[#FF8FB8] opacity-80 transition-opacity group-hover:opacity-100"
-                style={{ height: `${(day.requests / maxRequests) * 100}%` }}
+                style={{
+                  height: `${barHeight(day.requests, WEEKLY_REQUEST_CEILING)}%`,
+                  minHeight: day.requests > 0 ? 2 : undefined,
+                }}
               />
             </div>
           ))}
