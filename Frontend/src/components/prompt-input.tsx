@@ -24,6 +24,7 @@ import {
   type AttachmentFile,
 } from "@/lib/attachments"
 import { selectModel, useModelState } from "@/lib/model-store"
+import { useIsMobile } from "@/hooks/use-mobile"
 
 /**
  * How much the assistant is allowed to do on a run. Build is the one you are in
@@ -106,6 +107,16 @@ export function PromptInput({
 
   const { providers, loading: loadingModels, error: modelError, selected: model } =
     useModelState()
+
+  // A phone's composer is a phone's width. The long placeholder — the one with
+  // the slashes in it — is cut off mid-word there, so a phone is asked the one
+  // question it can read. The thread's composer keeps the long one: it is a
+  // different screen, and this pass is the home one.
+  const isMobile = useIsMobile()
+  const placeholder =
+    isMobile && !isInChat
+      ? "Describe what you want to do"
+      : "Describe what you want to build, / Commands @ files or sessions"
 
   // The one the thumb is wearing: its fill, and the colour its label reads in.
   const activeMode = MODES.find((item) => item.value === mode) ?? MODES[0]
@@ -235,7 +246,7 @@ export function PromptInput({
   }
 
   const renderActions = () => (
-    <div className="mt-3 flex items-center justify-between">
+    <div className="mt-3 flex items-center justify-between max-md:gap-2">
       <div className="flex items-center gap-2.5">
         <input
           ref={fileInputRef}
@@ -249,7 +260,7 @@ export function PromptInput({
           aria-label="Attach files"
           disabled={disabled}
           onClick={() => fileInputRef.current?.click()}
-          className="flex size-7 cursor-pointer items-center justify-center rounded-full bg-white/5 text-white transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full bg-white/5 text-white transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} className="size-4" />
         </button>
@@ -263,7 +274,7 @@ export function PromptInput({
           onPointerMove={handleModeMove}
           onPointerUp={handleModeRelease}
           onPointerCancel={handleModeRelease}
-          className="relative flex h-7 touch-none items-center rounded-full bg-black/40 text-xs select-none"
+          className="relative flex h-7 shrink-0 touch-none items-center rounded-full bg-black/40 text-xs select-none"
         >
           {/* The thumb fills its half of the track exactly — full height, full
               width, no gutter. Any inset at all reads as the track peeking out
@@ -313,7 +324,7 @@ export function PromptInput({
         <div ref={modelRef} className="relative">
           <button
             onClick={() => setModelOpen(!modelOpen)}
-            className="flex h-7 max-w-52 cursor-pointer items-center gap-1.5 rounded-full bg-white/0 px-2.5 text-xs text-white/70 hover:bg-white/10"
+            className="flex h-7 max-w-52 cursor-pointer items-center gap-1.5 rounded-full bg-white/0 px-2.5 text-xs text-white/70 hover:bg-white/10 max-md:max-w-28"
           >
             <span className="truncate">{selectedLabel}</span>
             <HugeiconsIcon
@@ -374,7 +385,7 @@ export function PromptInput({
         <button
           onClick={handleSend}
           disabled={!canSend}
-          className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-primary text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
         >
           <HugeiconsIcon icon={ArrowUp01Icon} strokeWidth={2} className="size-5" />
         </button>
@@ -393,6 +404,10 @@ export function PromptInput({
         onDrop={handleDrop}
         className={cn(
           "w-full rounded-2xl border border-white/10 border-l-2 px-4 pt-4 pb-2 shadow-sm transition-colors",
+          // A phone's composer is docked at the foot of the screen, over the
+          // wave band, so it wears the thread composer's darker glass: white
+          // text on a mint glow does not read.
+          "max-md:bg-black/40 max-md:backdrop-blur-xl",
           activeMode.edge,
           isInChat
             ? "bg-black/40 backdrop-blur-xl"
@@ -420,7 +435,7 @@ export function PromptInput({
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           disabled={disabled}
-          placeholder="Describe what you want to build, / Commands @ files or sessions"
+          placeholder={placeholder}
           rows={2}
           className="w-full resize-none bg-transparent px-1 text-sm text-white placeholder:text-white/50 outline-none disabled:opacity-60"
         />
@@ -440,9 +455,13 @@ export function PromptInput({
   return (
     // Anchored from the top rather than centred: attaching a file grows the
     // composer downward, and the heading above it stays where it is.
-    <div className="flex h-full flex-col items-center px-4 pt-[20vh] pb-4">
-      <div className="flex w-full max-w-[780px] flex-col items-center gap-5">
-        <div className="flex items-center gap-2.5">
+    //
+    // A phone is the other way round — the heading takes the middle of the
+    // screen and the composer sits under it, at the foot of the screen, which is
+    // where a thumb already is. The heading row is what grows to push it there.
+    <div className="flex h-full flex-col items-center px-4 pt-[20vh] pb-4 max-md:pt-0">
+      <div className="flex w-full max-w-[780px] flex-col items-center gap-5 max-md:flex-1">
+        <div className="flex items-center gap-2.5 max-md:flex-1">
           <img
             src="/vite.svg"
             alt="Calabrass"

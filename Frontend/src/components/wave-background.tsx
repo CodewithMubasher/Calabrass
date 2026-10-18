@@ -9,6 +9,13 @@ interface WaveBackgroundProps {
   colors?: string[]
   /** Cover the whole viewport instead of the parent */
   fixed?: boolean
+  /**
+   * A low band along the bottom of the screen rather than a field over the
+   * whole of it. What a phone gets: the top of a tall, narrow screen has to
+   * stay black for the heading, and the one place with room to glow is the foot
+   * of it, where the composer is docked.
+   */
+  band?: boolean
   /** Animation speed multiplier (1 = default, 2 = twice as fast) */
   speed?: number
   /** Background base color */
@@ -28,13 +35,14 @@ interface WaveBackgroundProps {
 function WaveBackground({
   colors = DEFAULT_COLORS,
   fixed = false,
+  band = false,
   speed = 1,
   base = "#000",
   className = "",
 }: WaveBackgroundProps) {
   return (
     <div
-      className={`wave-bg ${fixed ? "wave-bg--fixed" : ""} ${className}`}
+      className={`wave-bg ${fixed ? "wave-bg--fixed" : ""} ${band ? "wave-bg--band" : ""} ${className}`}
       style={{ "--wave-base": base, "--wave-speed": speed } as CSSProperties}
       aria-hidden="true"
     >

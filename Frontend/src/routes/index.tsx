@@ -40,7 +40,9 @@ function HomePage() {
     <div className="relative flex h-full flex-col">
       <PromptInput onSend={handleSend} disabled={sending} />
       {error ? (
-        <p className="absolute inset-x-0 bottom-8 px-4 text-center text-sm text-red-400">
+        // On a phone the composer is at the foot of the screen, so the message
+        // goes to the top of it rather than over the input.
+        <p className="absolute inset-x-0 bottom-8 px-4 text-center text-sm text-red-400 max-md:bottom-auto max-md:top-4">
           {error}
         </p>
       ) : null}

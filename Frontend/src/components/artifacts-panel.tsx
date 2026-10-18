@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState, type PointerEvent } from "react"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Download01Icon, Note01Icon } from "@hugeicons/core-free-icons"
 
 import { cn } from "cn"
 import { ArtifactCard } from "@/components/artifact-card"
 import { ArtifactDetail } from "@/components/artifact-detail"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { useArtifactFiles, watchArtifacts } from "@/lib/artifact-store"
+import { setArtifactsOpen } from "@/lib/panel-store"
 import { api, startDownload } from "@/lib/api"
 
 /**
@@ -19,6 +21,12 @@ import { api, startDownload } from "@/lib/api"
  * width, so its contents never squash mid-transition. The same applies to the
  * detail's maximize: the rail grows to fill the row and the app column gives up
  * its width, rather than the panel lifting out and covering it.
+ *
+ * A phone has no width to give away, so there the rail changes form: it comes
+ * in over the app from the right edge, dimming what is behind it, and is swiped
+ * — in from the edge when it is shut, out to the right when it is open. Nothing
+ * of this is desktop's: every rule it rests on is written for widths under the
+ * same 768px the sidebar and `max-md:` already split on.
  *
  * What it lists is real: the files in the workspace this chat works in, read
  * from disk by the backend and pushed here whenever they change, so a file the
@@ -44,6 +52,103 @@ export function ArtifactsPanel({
   const files = useArtifactFiles(chatId)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [maximized, setMaximized] = useState(false)
+  const isMobile = useIsMobile()
+  const sheetRef = useRef<HTMLElement>(null)
+
+  /**
+   * How far the sheet has been dragged, in pixels to the right of open, or null
+   * when it is not being held. The sheet is shut at its own width and open at
+   * zero, so a rightward drag is what puts it away and the same number answers
+   * both directions.
+   */
+  const [slideX, setSlideX] = useState<number | null>(null)
+  const swipe = useRef({
+    x: 0,
+    y: 0,
+    /** Where the drag started: 0 open, the sheet's width shut. */
+    from: 0,
+    width: 0,
+    /** What the first real movement said this drag is. */
+    axis: "" as "" | "x" | "y",
+    startedAt: 0,
+  })
+
+  /**
+   * A swipe on a phone. It begins on the edge strip when the rail is shut and on
+   * the rail itself when it is open; either way the sheet follows the finger,
+   * and the first movement decides what the drag is — sideways is the sheet's,
+   * downward is the list's scroll, which is why a long list can still be
+   * scrolled from the left.
+   *
+   * Desktop never starts one: the rail there is pushed by the layout, not
+   * dragged, and a stray mouse drag must not put it away.
+   */
+  const startSwipe = (event: PointerEvent<HTMLElement>) => {
+    if (!isMobile) return
+    const width = sheetRef.current?.offsetWidth ?? 0
+    if (width === 0) return
+
+    swipe.current = {
+      x: event.clientX,
+      y: event.clientY,
+      from: open ? 0 : width,
+      width,
+      axis: "",
+      startedAt: performance.now(),
+    }
+    setSlideX(swipe.current.from)
+    // No explicit capture: a touch pointer is implicitly captured by the
+    // element it went down on, so the drag keeps arriving here — and taking the
+    // pointer in hand would retarget the tap as well, which is what would stop
+    // the buttons inside the sheet from working on a phone.
+  }
+
+  const moveSwipe = (event: PointerEvent<HTMLElement>) => {
+    const gesture = swipe.current
+    if (gesture.width === 0) return
+
+    const dx = event.clientX - gesture.x
+    const dy = event.clientY - gesture.y
+
+    if (gesture.axis === "") {
+      // A few pixels of slop first, so a tap stays a tap and a scroll starts
+      // where the finger did.
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return
+      if (Math.abs(dx) <= Math.abs(dy)) {
+        // Not ours. Dropping out of the gesture leaves the list its scroll.
+        gesture.axis = "y"
+        gesture.width = 0
+        setSlideX(null)
+        return
+      }
+      gesture.axis = "x"
+    }
+
+    // Neither past the middle nor off the edge: the sheet tracks the finger
+    // within the two states it has.
+    setSlideX(Math.min(gesture.width, Math.max(0, gesture.from + dx)))
+  }
+
+  const endSwipe = () => {
+    const gesture = swipe.current
+    const { width, from, axis, startedAt } = gesture
+    gesture.width = 0
+
+    if (axis !== "x") {
+      setSlideX(null)
+      return
+    }
+
+    const settled = slideX ?? from
+    // Towards shut is a positive drag; towards open, negative.
+    const towards = settled - from
+    const flick = performance.now() - startedAt < 250 && Math.abs(towards) > 24
+
+    // A flick is a decision on its own. Otherwise the sheet has to have been
+    // carried past the middle for the state to change.
+    setArtifactsOpen(flick ? towards < 0 : settled < width / 2)
+    setSlideX(null)
+  }
 
   // A closed rail is a dismissed detail: reopening always lands on the list
   // rather than inside whatever was open — and un-maximized, so the rail can
@@ -80,23 +185,69 @@ export function ArtifactsPanel({
     files.find((file) => file.path === selectedPath) ?? null
 
   return (
-    <aside
-      aria-label="Artifacts"
-      aria-hidden={!open}
-      inert={!open}
-      className={cn(
-        "flex h-full shrink-0 items-center overflow-hidden transition-[width] duration-300 ease-out",
-        open ? (maximized ? "w-full" : "w-[376px]") : "w-0"
-      )}
-    >
+    <>
+      {/* The app behind the sheet, dimmed on a phone only, and tappable: a
+          backdrop is what a drawer is put away with when the swipe is not the
+          way the user reaches for. */}
       <div
+        aria-hidden="true"
+        onClick={() => setArtifactsOpen(false)}
         className={cn(
-          "flex h-[calc(100%-2rem)] shrink-0 flex-col overflow-hidden rounded-2xl border border-white/15 bg-black/40 backdrop-blur-xl transition-[width] duration-300 ease-out",
-          // 360px of panel beside a 16px gutter; maximized, it takes the row
-          // and keeps that gutter on both sides.
-          maximized ? "mx-4 w-[calc(100%-2rem)]" : "mr-4 w-[360px]"
+          "hidden max-md:fixed max-md:inset-0 max-md:z-30 max-md:block max-md:bg-black/60 max-md:transition-opacity max-md:duration-300",
+          open ? "max-md:opacity-100" : "max-md:pointer-events-none max-md:opacity-0"
+        )}
+      />
+
+      {/* Where a swipe in begins: a finger's width of the screen's right edge,
+          which is empty gutter on every screen the rail can be opened from. */}
+      {!open ? (
+        <div
+          aria-hidden="true"
+          onPointerDown={startSwipe}
+          onPointerMove={moveSwipe}
+          onPointerUp={endSwipe}
+          onPointerCancel={endSwipe}
+          className="hidden max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-30 max-md:block max-md:w-4 max-md:touch-none"
+        />
+      ) : null}
+
+      <aside
+        ref={sheetRef}
+        aria-label="Artifacts"
+        aria-hidden={!open}
+        inert={!open}
+        onPointerDown={startSwipe}
+        onPointerMove={moveSwipe}
+        onPointerUp={endSwipe}
+        onPointerCancel={endSwipe}
+        style={
+          slideX === null
+            ? undefined
+            : // `translate`, not `transform`: that is the property Tailwind
+              // v4's translate utilities set, and with no transition the sheet
+              // is under the finger rather than chasing after it.
+              { translate: `${slideX}px`, transition: "none" }
+        }
+        className={cn(
+          "flex h-full shrink-0 items-center overflow-hidden transition-[width] duration-300 ease-out",
+          // A phone gives the rail no width to take, so it stops pushing and
+          // comes in over the app instead, leaving a sliver of it showing so it
+          // is plain the sheet slid over something.
+          "max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-40 max-md:w-[86%] max-md:max-w-[22rem] max-md:touch-pan-y max-md:transition-transform",
+          open ? (maximized ? "w-full" : "w-[376px]") : "w-0 max-md:translate-x-full"
         )}
       >
+        <div
+          className={cn(
+            "flex h-[calc(100%-2rem)] shrink-0 flex-col overflow-hidden rounded-2xl border border-white/15 bg-black/40 backdrop-blur-xl transition-[width] duration-300 ease-out",
+            // 360px of panel beside a 16px gutter; maximized, it takes the row
+            // and keeps that gutter on both sides.
+            maximized ? "mx-4 w-[calc(100%-2rem)]" : "mr-4 w-[360px]",
+            // A phone's sheet is the card itself, right up to the edge it slid
+            // in from, with only the corners it came in on rounded.
+            "max-md:mx-0 max-md:h-full max-md:w-full max-md:rounded-l-2xl max-md:rounded-r-none max-md:border-y-0 max-md:border-r-0"
+          )}
+        >
         {selected ? (
           <ArtifactDetail
             key={selected.path}
@@ -156,6 +307,7 @@ export function ArtifactsPanel({
           </>
         )}
       </div>
-    </aside>
+      </aside>
+    </>
   )
 }

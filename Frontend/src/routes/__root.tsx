@@ -70,7 +70,12 @@ function RootLayout() {
       <KeyboardShortcuts />
       <AppSidebar />
       <SidebarInset className="relative overflow-hidden bg-background">
-        <WaveBackground fixed />
+        {/* A desktop gets the field over the whole surface. A phone gets a low
+            band across the foot of the screen instead: the heading in the
+            middle of it has to read on black, and the one part of a phone that
+            wants something behind it is the composer, docked at the bottom. */}
+        <WaveBackground fixed className="max-md:hidden" />
+        <WaveBackground fixed band speed={0.55} className="hidden max-md:block" />
         <div className="relative z-10 flex min-h-0 flex-1 overflow-hidden">
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
             {showsTopbar ? (

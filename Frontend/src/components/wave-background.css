@@ -11,6 +11,36 @@
 }
 .wave-bg--fixed { position: fixed; }
 
+/* The phone band: the same glow, cut down to a low strip across the foot of the
+   screen. Its height is what makes it small — a fifth of a phone screen rather
+   than the whole of it, tunable from --wave-band-height — and the mask is what
+   stops it ending on an edge: the light climbs out of the black at the bottom
+   and is gone before the top, so there is a glow to dock the composer onto and
+   none where the heading reads. */
+.wave-bg--band {
+  inset: auto 0 0 0;
+  height: var(--wave-band-height, 18vh);
+  /* Not the base colour: the app paints its own black behind this, and two
+     blacks meeting at a hard line is what a seam looks like. */
+  background: transparent;
+  mask-image: linear-gradient(to top, #000 0%, #000 46%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to top, #000 0%, #000 46%, transparent 100%);
+}
+
+/* Flatter and lower than the desktop blobs — wide humps rather than tall ones,
+   so what rises into the band is a shallow smear of colour and not a dome. */
+.wave-bg--band .wave-bg__blob {
+  bottom: -26%;
+  width: 76%;
+  height: 88%;
+  opacity: 0.7;
+}
+
+/* The desktop shade exists to carve the top of a full field into black. The
+   band's mask already does that, and its bowl would darken the very light the
+   band is there for. */
+.wave-bg--band .wave-bg__shade { display: none; }
+
 .wave-bg__blob {
   position: absolute;
   bottom: -38%;

@@ -36,3 +36,9 @@ export function usePanelState() {
 export function toggleArtifacts() {
   setState({ artifactsOpen: !state.artifactsOpen })
 }
+
+/** Put the rail away or bring it back, for callers that know which they mean —
+ *  a swipe lands on one of the two rather than on the other. */
+export function setArtifactsOpen(open: boolean) {
+  setState({ artifactsOpen: open })
+}
