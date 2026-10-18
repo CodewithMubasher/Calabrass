@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router"
 import {
   AddCircleHalfDotIcon,
   AiSpeechIcon,
+  BotIcon,
   ChartRelationshipIcon,
   Folder01Icon,
   Settings02Icon,
@@ -40,6 +41,11 @@ const data = {
       title: "Workspaces",
       to: "/workspaces",
       icon: Folder01Icon,
+    },
+    {
+      title: "Agents",
+      to: "/agents",
+      icon: BotIcon,
     },
     {
       title: "Connectors",

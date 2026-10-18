@@ -164,6 +164,44 @@ export interface ConnectorInput {
   command: string
 }
 
+/** The mode a sub-agent runs in, matching the composer's switch. */
+export type AgentMode = "build" | "plan"
+
+/**
+ * A sub-agent: a named instruction the user can hand work to, with the mode,
+ * MCP connector and models it runs with.
+ *
+ * The model fields name a provider as well as a model, because a model id alone
+ * is ambiguous across providers. The alternative pair is a fallback for when
+ * the default model is not available.
+ */
+export interface AgentRow {
+  id: string
+  name: string
+  prompt: string
+  mode: AgentMode
+  /** The MCP connector it may use; empty for none. */
+  connectorId: string
+  provider: string
+  model: string
+  altProvider: string
+  altModel: string
+  createdAt: number
+  updatedAt: number
+}
+
+/** The fields the Agents page can write. */
+export interface AgentInput {
+  name: string
+  prompt: string
+  mode: AgentMode
+  connectorId: string
+  provider: string
+  model: string
+  altProvider: string
+  altModel: string
+}
+
 /**
  * One instruction the scheduler will run, once, at a time of its own.
  *

@@ -14,6 +14,7 @@ export type NavTo =
   | "/cal-live"
   | "/workspaces"
   | "/connectors"
+  | "/agents"
   | "/schedules"
   | "/providers"
   | "/settings"

@@ -1,4 +1,6 @@
 import type {
+  AgentInput,
+  AgentRow,
   Chat,
   ChatDetail,
   ChatMessage,
@@ -144,6 +146,26 @@ export const api = {
     request<{ connectors: ConnectorRow[] }>(`/connectors/${connectorId}`, {
       method: "DELETE",
     }).then((r) => r.connectors ?? []),
+
+  listAgents: () =>
+    request<{ agents: AgentRow[] }>("/agents").then((r) => r.agents ?? []),
+
+  createAgent: (input: AgentInput) =>
+    request<{ agents: AgentRow[] }>("/agents", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).then((r) => r.agents ?? []),
+
+  saveAgent: (agentId: string, input: AgentInput) =>
+    request<{ agents: AgentRow[] }>(`/agents/${agentId}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }).then((r) => r.agents ?? []),
+
+  deleteAgent: (agentId: string) =>
+    request<{ agents: AgentRow[] }>(`/agents/${agentId}`, {
+      method: "DELETE",
+    }).then((r) => r.agents ?? []),
 
   deleteMessage: (chatId: string, messageId: string) =>
     request<{ deleted: boolean }>(`/chats/${chatId}/messages/${messageId}`, {

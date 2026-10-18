@@ -6,6 +6,7 @@ import { Route as loginRoute } from "@/routes/login"
 import { Route as workspacesRoute } from "@/routes/workspaces"
 import { Route as workspaceViewRoute } from "@/routes/workspace-view"
 import { Route as connectorsRoute } from "@/routes/connectors"
+import { Route as agentsRoute } from "@/routes/agents"
 import { Route as schedulesRoute } from "@/routes/schedules"
 import { Route as settingsRoute } from "@/routes/settings"
 import { Route as providersRoute } from "@/routes/providers"
@@ -20,6 +21,7 @@ const routeTree = rootRoute.addChildren([
   workspacesRoute,
   workspaceViewRoute,
   connectorsRoute,
+  agentsRoute,
   schedulesRoute,
   providersRoute,
   settingsRoute,

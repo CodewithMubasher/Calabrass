@@ -191,6 +191,22 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_tasks(enabled, last_run_at, run_at);
+
+-- One row per sub-agent: a named instruction, the mode it runs in, the MCP
+-- connector it may use, and the model it prefers with a fallback beside it.
+CREATE TABLE IF NOT EXISTS agents (
+	id           TEXT PRIMARY KEY,
+	name         TEXT NOT NULL,
+	prompt       TEXT NOT NULL DEFAULT '',
+	mode         TEXT NOT NULL DEFAULT 'build',
+	connector_id TEXT NOT NULL DEFAULT '',
+	provider     TEXT NOT NULL DEFAULT '',
+	model        TEXT NOT NULL DEFAULT '',
+	alt_provider TEXT NOT NULL DEFAULT '',
+	alt_model    TEXT NOT NULL DEFAULT '',
+	created_at   INTEGER NOT NULL,
+	updated_at   INTEGER NOT NULL
+);
 `
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("store: migrate: %w", err)
@@ -830,6 +846,136 @@ func (s *Store) DeleteConnector(ctx context.Context, id string) error {
 	affected, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("store: delete connector: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// Agent records --------------------------------------------------------------
+
+// AgentRecord is one sub-agent: a named instruction the user can hand work to,
+// together with the mode, connector and models it should run with.
+//
+// The model fields name a provider as well as a model, because a bare model id
+// is ambiguous across providers. The alternative pair is a fallback the agent
+// may be given when its default is not available.
+type AgentRecord struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Prompt string `json:"prompt"`
+	// Mode is "build" or "plan".
+	Mode string `json:"mode"`
+	// ConnectorID is the MCP connector the agent may use; empty for none.
+	ConnectorID string `json:"connectorId"`
+	Provider    string `json:"provider"`
+	Model       string `json:"model"`
+	AltProvider string `json:"altProvider"`
+	AltModel    string `json:"altModel"`
+	CreatedAt   int64  `json:"createdAt"`
+	UpdatedAt   int64  `json:"updatedAt"`
+}
+
+const agentColumns = `id, name, prompt, mode, connector_id, provider, model, alt_provider, alt_model, created_at, updated_at`
+
+func scanAgent(row interface{ Scan(...any) error }) (AgentRecord, error) {
+	var rec AgentRecord
+	if err := row.Scan(
+		&rec.ID, &rec.Name, &rec.Prompt, &rec.Mode, &rec.ConnectorID,
+		&rec.Provider, &rec.Model, &rec.AltProvider, &rec.AltModel,
+		&rec.CreatedAt, &rec.UpdatedAt,
+	); err != nil {
+		return AgentRecord{}, err
+	}
+	return rec, nil
+}
+
+// ListAgents returns every agent, alphabetically by name.
+func (s *Store) ListAgents(ctx context.Context) ([]AgentRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+agentColumns+`
+		FROM agents
+		ORDER BY name COLLATE NOCASE ASC, rowid ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list agents: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	records := []AgentRecord{}
+	for rows.Next() {
+		rec, err := scanAgent(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan agent: %w", err)
+		}
+		records = append(records, rec)
+	}
+	return records, rows.Err()
+}
+
+// GetAgent returns one agent by id.
+func (s *Store) GetAgent(ctx context.Context, id string) (AgentRecord, error) {
+	rec, err := scanAgent(s.db.QueryRowContext(ctx,
+		`SELECT `+agentColumns+` FROM agents WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return AgentRecord{}, ErrNotFound
+	}
+	if err != nil {
+		return AgentRecord{}, fmt.Errorf("store: get agent: %w", err)
+	}
+	return rec, nil
+}
+
+// CreateAgent stores a new agent. The ID and timestamps are assigned here.
+func (s *Store) CreateAgent(ctx context.Context, rec AgentRecord) (AgentRecord, error) {
+	now := time.Now().UnixMilli()
+	rec.ID = NewID()
+	rec.CreatedAt, rec.UpdatedAt = now, now
+
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO agents (
+			id, name, prompt, mode, connector_id, provider, model,
+			alt_provider, alt_model, created_at, updated_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		rec.ID, rec.Name, rec.Prompt, rec.Mode, rec.ConnectorID,
+		rec.Provider, rec.Model, rec.AltProvider, rec.AltModel,
+		rec.CreatedAt, rec.UpdatedAt,
+	); err != nil {
+		return AgentRecord{}, fmt.Errorf("store: create agent: %w", err)
+	}
+	return rec, nil
+}
+
+// UpdateAgent writes an agent's fields in full, keeping its id and creation time.
+func (s *Store) UpdateAgent(ctx context.Context, id string, rec AgentRecord) (AgentRecord, error) {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE agents SET
+			name = ?, prompt = ?, mode = ?, connector_id = ?,
+			provider = ?, model = ?, alt_provider = ?, alt_model = ?,
+			updated_at = ?
+		WHERE id = ?`,
+		rec.Name, rec.Prompt, rec.Mode, rec.ConnectorID,
+		rec.Provider, rec.Model, rec.AltProvider, rec.AltModel,
+		time.Now().UnixMilli(), id)
+	if err != nil {
+		return AgentRecord{}, fmt.Errorf("store: update agent: %w", err)
+	}
+	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+		return AgentRecord{}, ErrNotFound
+	}
+	return s.GetAgent(ctx, id)
+}
+
+// DeleteAgent removes an agent.
+func (s *Store) DeleteAgent(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM agents WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("store: delete agent: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: delete agent: %w", err)
 	}
 	if affected == 0 {
 		return ErrNotFound
