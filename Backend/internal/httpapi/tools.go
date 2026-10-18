@@ -13,6 +13,9 @@ import (
 type turnSetup struct {
 	system string
 	tools  []goai.Tool
+	// origins maps a tool name to the connector that offers it. The trace reads
+	// it to say which MCP server a tool call belongs to.
+	origins map[string]string
 }
 
 // setupTurn builds both together, because the prompt has to describe the tools
@@ -26,6 +29,7 @@ type turnSetup struct {
 func (s *Server) setupTurn(ctx context.Context, workspace *agent.Workspace, chatID string) turnSetup {
 	tools := agent.Tools(workspace)
 	var described []agent.Connector
+	var origins map[string]string
 
 	if s.connectors != nil {
 		briefs, offered := s.connectors.Turn(ctx)
@@ -36,12 +40,18 @@ func (s *Server) setupTurn(ctx context.Context, workspace *agent.Workspace, chat
 		}
 
 		// The prompt describes the tools that are really there, so one that lost
-		// its name to a built-in is dropped from the description as well.
+		// its name to a built-in is dropped from the description as well. The
+		// same kept names are what the trace uses to place a call.
+		origins = make(map[string]string)
 		for _, brief := range briefs {
+			kept := without(brief.Tools, skipped)
+			for _, name := range kept {
+				origins[name] = brief.Name
+			}
 			described = append(described, agent.Connector{
 				Name:         brief.Name,
 				Instructions: brief.Instructions,
-				Tools:        without(brief.Tools, skipped),
+				Tools:        kept,
 			})
 		}
 	}
@@ -58,9 +68,9 @@ func (s *Server) setupTurn(ctx context.Context, workspace *agent.Workspace, chat
 	// explain: the turn is a plain completion, and the application's own prompt
 	// is the whole of it.
 	if workspace == nil && len(described) == 0 {
-		return turnSetup{system: s.system, tools: tools}
+		return turnSetup{system: s.system, tools: tools, origins: origins}
 	}
-	return turnSetup{system: agent.SystemPrompt(workspace, s.system, described), tools: tools}
+	return turnSetup{system: agent.SystemPrompt(workspace, s.system, described), tools: tools, origins: origins}
 }
 
 // mergeTools adds what the connectors offer to a turn's tools, leaving out the

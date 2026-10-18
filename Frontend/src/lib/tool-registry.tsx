@@ -10,6 +10,7 @@ import {
   Wrench01Icon,
 } from "@hugeicons/core-free-icons"
 
+import { connectorIcon } from "@/lib/connector-icons"
 import type { TracePart } from "@/types/chat"
 
 /**
@@ -46,7 +47,11 @@ function args(part: TracePart): Record<string, unknown> {
   if (!part.input || part.input.trim() === "") return {}
   try {
     const parsed: unknown = JSON.parse(part.input)
-    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed)
+    ) {
       return parsed as Record<string, unknown>
     }
   } catch {
@@ -91,7 +96,8 @@ const toolRenderers: Record<string, ToolRenderer> = {
   create_dir: {
     icon: FolderAddIcon,
     label: "Created folder",
-    getLabel: (part) => (isCallLive(part) ? "Creating folder" : "Created folder"),
+    getLabel: (part) =>
+      isCallLive(part) ? "Creating folder" : "Created folder",
     getFileName: (part) => baseName(str(args(part).path)),
   },
   list_dir: {
@@ -136,7 +142,20 @@ const fallbackRenderer: ToolRenderer = {
   },
 }
 
-export function getToolRenderer(name: string): ToolRenderer {
+/**
+ * How a connector's tool reads: the server's name and glyph lead, and the tool
+ * it called is kept dim behind them, so "Excel" still says which call it was.
+ */
+function serverRenderer(server: string): ToolRenderer {
+  return {
+    icon: connectorIcon(server),
+    label: server,
+    getFileName: (part) => part.name,
+  }
+}
+
+export function getToolRenderer(name: string, server?: string): ToolRenderer {
+  if (server) return serverRenderer(server)
   return toolRenderers[name] ?? fallbackRenderer
 }
 
@@ -185,13 +204,27 @@ export function computeToolSummary(calls: TracePart[]): string {
   // things actually happened rather than alphabetically.
   const order: string[] = []
   const counts = new Map<string, number>()
+  const servers = new Map<string, string>()
   for (const part of calls) {
-    const name = part.name ?? "tool"
-    if (!counts.has(name)) order.push(name)
-    counts.set(name, (counts.get(name) ?? 0) + 1)
+    // A connector's calls fold by server, not by tool: "Excel (3)" says more
+    // than the three separate tool names would, and it is the same name the
+    // individual nodes carry.
+    const key = part.server ? `server:${part.server}` : (part.name ?? "tool")
+    if (!counts.has(key)) {
+      order.push(key)
+      if (part.server) servers.set(key, part.server)
+    }
+    counts.set(key, (counts.get(key) ?? 0) + 1)
   }
 
-  const phrases = order.map((name) => summaryPhrase(name, counts.get(name) ?? 1))
+  const phrases = order.map((key) => {
+    const times = counts.get(key) ?? 1
+    const server = servers.get(key)
+    if (server !== undefined) {
+      return times === 1 ? server : `${server} (${times})`
+    }
+    return summaryPhrase(key, times)
+  })
 
   // Cap the folded line so a long mixed run does not become a paragraph.
   const max = 3

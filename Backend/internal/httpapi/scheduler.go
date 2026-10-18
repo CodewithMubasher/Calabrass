@@ -132,12 +132,13 @@ func (s *Server) runScheduledTask(ctx context.Context, task store.ScheduledTask)
 
 	started := time.Now()
 	reply, genErr := s.registry.Stream(ctx, ai.StreamRequest{
-		ProviderID: providerID,
-		Model:      modelID,
-		System:     setup.system,
-		Messages:   turns,
-		Tools:      setup.tools,
-		MaxSteps:   agent.DefaultMaxSteps,
+		ProviderID:  providerID,
+		Model:       modelID,
+		System:      setup.system,
+		Messages:    turns,
+		Tools:       setup.tools,
+		ToolOrigins: setup.origins,
+		MaxSteps:    agent.DefaultMaxSteps,
 	}, ai.Handlers{})
 	elapsed := time.Since(started)
 

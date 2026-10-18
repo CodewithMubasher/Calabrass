@@ -331,12 +331,13 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	var lastTrace ai.Trace
 	reply, genErr := s.registry.Stream(ctx, ai.StreamRequest{
-		ProviderID: providerID,
-		Model:      modelID,
-		System:     setup.system,
-		Messages:   turns,
-		Tools:      setup.tools,
-		MaxSteps:   agent.DefaultMaxSteps,
+		ProviderID:  providerID,
+		Model:       modelID,
+		System:      setup.system,
+		Messages:    turns,
+		Tools:       setup.tools,
+		ToolOrigins: setup.origins,
+		MaxSteps:    agent.DefaultMaxSteps,
 	}, ai.Handlers{
 		OnText: func(delta string) error {
 			return stream.event("token", deltaPayload{Text: delta})

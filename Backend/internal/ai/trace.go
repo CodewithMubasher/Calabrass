@@ -32,6 +32,10 @@ type TracePart struct {
 	// Tool call fields, set when Kind is PartTool.
 	CallID string `json:"callId,omitempty"`
 	Name   string `json:"name,omitempty"`
+	// Server names the connector a tool came from, when it came from one. It
+	// is empty for the harness's own tools. It is what lets a timeline show
+	// "Excel" beside a spreadsheet glyph rather than a bare wrench.
+	Server string `json:"server,omitempty"`
 	// Input is the model's arguments as raw JSON.
 	Input string `json:"input,omitempty"`
 	// Status is StatusPending, StatusRunning, StatusOK, StatusError or
@@ -118,6 +122,10 @@ type traceBuilder struct {
 	// part after a tool round opens the next step instead of extending the
 	// previous one.
 	open bool
+	// origins maps a tool name to the connector that offers it, so a tool part
+	// can say which MCP server a call belongs to. It is nil when the turn had
+	// no connectors.
+	origins map[string]string
 }
 
 // step returns the step being written, opening a new one when the previous
@@ -163,6 +171,9 @@ func (b *traceBuilder) toolPart(callID, name, input string) {
 		if name != "" {
 			step.Parts[i].Name = name
 		}
+		if server := b.serverOf(name); server != "" {
+			step.Parts[i].Server = server
+		}
 		if input != "" {
 			step.Parts[i].Input = input
 		}
@@ -172,9 +183,19 @@ func (b *traceBuilder) toolPart(callID, name, input string) {
 		Kind:   PartTool,
 		CallID: callID,
 		Name:   name,
+		Server: b.serverOf(name),
 		Input:  input,
 		Status: StatusPending,
 	})
+}
+
+// serverOf names the connector a tool came from, when the turn said which. It
+// is how the timeline tells an MCP server's tools apart from the harness's own.
+func (b *traceBuilder) serverOf(name string) string {
+	if b.origins == nil || name == "" {
+		return ""
+	}
+	return b.origins[name]
 }
 
 // stepFinish closes the current step: the model has stopped talking and its

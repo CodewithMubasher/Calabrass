@@ -381,6 +381,9 @@ type StreamRequest struct {
 	System     string
 	Messages   []Message
 	Tools      []goai.Tool
+	// ToolOrigins maps a tool name to the connector that offers it, so the
+	// trace can say which MCP server a call belongs to. Nil without connectors.
+	ToolOrigins map[string]string
 	// MaxSteps bounds the harness loop. Zero or less means a single step.
 	MaxSteps int
 }
@@ -450,7 +453,7 @@ func (r *Registry) Stream(ctx context.Context, req StreamRequest, handlers Handl
 		streamErr   error
 		startedAt   = time.Now()
 		thinkingEnd time.Time
-		builder     traceBuilder
+		builder     = traceBuilder{origins: req.ToolOrigins}
 	)
 
 	// emit publishes the trace so far. It is called on every change the user

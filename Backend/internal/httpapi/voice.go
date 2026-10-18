@@ -148,12 +148,13 @@ func (s *Server) delegateWork(ctx context.Context, chat store.ChatDetail, args a
 	turns = append(turns, ai.Message{Role: ai.RoleUser, Content: task})
 
 	reply, err := s.registry.Stream(ctx, ai.StreamRequest{
-		ProviderID: providerID,
-		Model:      modelID,
-		System:     setup.system,
-		Messages:   turns,
-		Tools:      setup.tools,
-		MaxSteps:   agent.DefaultMaxSteps,
+		ProviderID:  providerID,
+		Model:       modelID,
+		System:      setup.system,
+		Messages:    turns,
+		Tools:       setup.tools,
+		ToolOrigins: setup.origins,
+		MaxSteps:    agent.DefaultMaxSteps,
 	}, ai.Handlers{
 		OnText:      func(string) error { return nil },
 		OnReasoning: func(string) error { return nil },

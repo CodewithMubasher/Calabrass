@@ -11,6 +11,8 @@ export interface TracePart {
   /** Tool call fields, set when kind is "tool". */
   callId?: string
   name?: string
+  /** The MCP connector the tool came from, when it came from one. */
+  server?: string
   /** The model's arguments for the call, as raw JSON. */
   input?: string
   status?: TraceStatus

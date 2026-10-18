@@ -135,7 +135,7 @@ export function ToolTimeline({
               )
             }
 
-            const renderer = getToolRenderer(part.name ?? "")
+            const renderer = getToolRenderer(part.name ?? "", part.server)
             return (
               <TimelineNode
                 key={key}
