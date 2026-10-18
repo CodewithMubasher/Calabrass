@@ -131,9 +131,15 @@ function RequestRow({
  * The request figures for every provider. Every provider is listed in full —
  * the page scrolls as one, so nothing is hidden behind a second scrollbar.
  */
-function TotalRequestsCard({ providers }: { providers: ProviderRow[] }) {
+function TotalRequestsCard({
+  providers,
+  className,
+}: {
+  providers: ProviderRow[]
+  className?: string
+}) {
   return (
-    <UsageCard className="min-h-40">
+    <UsageCard className={cn("min-h-40", className)}>
       <h2 className="shrink-0 text-sm font-medium text-white/80">
         Total request
       </h2>
@@ -149,7 +155,8 @@ function TotalRequestsCard({ providers }: { providers: ProviderRow[] }) {
 /**
  * What the models have been used for, once there is something to show.
  *
- * Three panels across the top and one wide panel under them; only the request
+ * Two short panels top-left, the request total down the right-hand side for
+ * the full height, and one wide panel under the first two. Only the request
  * total has content so far. The provider picker in the corner narrows both the
  * cards and the rows inside them.
  */
@@ -215,10 +222,13 @@ function UsagePage() {
       }
     >
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <UsageCard className="min-h-40" />
-        <UsageCard className="min-h-40" />
-        <TotalRequestsCard providers={visibleProviders} />
-        <UsageCard className="min-h-64 sm:col-span-3" />
+        <UsageCard className="min-h-28" />
+        <UsageCard className="min-h-28" />
+        <TotalRequestsCard
+          providers={visibleProviders}
+          className="sm:col-start-3 sm:row-span-2 sm:row-start-1"
+        />
+        <UsageCard className="min-h-64 sm:col-span-2" />
       </div>
     </PageShell>
   )
