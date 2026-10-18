@@ -128,9 +128,8 @@ function RequestRow({
 }
 
 /**
- * The request figures for every provider. The card grows with its content and
- * only the list is capped, so a long provider list scrolls inside the card
- * instead of stretching the grid or spilling onto the page.
+ * The request figures for every provider. Every provider is listed in full —
+ * the page scrolls as one, so nothing is hidden behind a second scrollbar.
  */
 function TotalRequestsCard({ providers }: { providers: ProviderRow[] }) {
   return (
@@ -138,7 +137,7 @@ function TotalRequestsCard({ providers }: { providers: ProviderRow[] }) {
       <h2 className="shrink-0 text-sm font-medium text-white/80">
         Total request
       </h2>
-      <ul className="mt-3 flex max-h-40 min-h-0 scrollbar-thin flex-col gap-1 overflow-y-auto pr-1">
+      <ul className="mt-3 flex flex-col gap-1">
         {providers.map((provider, index) => (
           <RequestRow key={provider.id} provider={provider} index={index} />
         ))}

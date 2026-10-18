@@ -6,9 +6,9 @@ import { Alert, AlertAction } from "@/components/ui/alert"
 
 /**
  * The page frame every top-level screen shares: a title block with its actions
- * on the right, and a scrolling body under it. The measurements mirror the
- * reference project — pt-5 px-14 on the page, py-5 on the header row, pb-6 on
- * the body — so every page lines up with every other one.
+ * on the right, and the content under it. The page grows with its content and
+ * scrolls as one, so the heading moves with the cards instead of staying pinned
+ * above a second scroll area.
  */
 export function PageShell({
   title,
@@ -26,7 +26,7 @@ export function PageShell({
   children: ReactNode
 }) {
   return (
-    <div className="flex h-full flex-col px-14 pt-5">
+    <div className="flex min-h-full flex-col px-14 pt-5">
       <div className="flex shrink-0 items-center justify-between py-5">
         <div>
           <h1 className="text-xl font-semibold text-white/90">{title}</h1>
@@ -48,9 +48,8 @@ export function PageShell({
         </Alert>
       ) : null}
 
-      {/* min-h-0 lets the body shrink to the frame so it scrolls instead of
-          growing past it, where the shell would clip it. */}
-      <div className="min-h-0 flex-1 overflow-auto pb-6">{children}</div>
+      {/* The page scrolls as one, so the body simply grows with its content. */}
+      <div className="flex-1 pb-6">{children}</div>
     </div>
   )
 }

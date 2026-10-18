@@ -1,4 +1,9 @@
-import { createRootRoute, Outlet, redirect, useLocation } from "@tanstack/react-router"
+import {
+  createRootRoute,
+  Outlet,
+  redirect,
+  useLocation,
+} from "@tanstack/react-router"
 import { useEffect } from "react"
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
@@ -22,11 +27,7 @@ import { hydrate } from "@/lib/chat-store"
 import { session } from "@/lib/auth"
 import { loadModels } from "@/lib/model-store"
 import { toggleArtifacts, usePanelState } from "@/lib/panel-store"
-import {
-  isStandalone,
-  hasTopbar,
-  chatIdFrom,
-} from "@/lib/routes"
+import { isStandalone, hasTopbar, chatIdFrom } from "@/lib/routes"
 
 export const Route = createRootRoute({
   /**
@@ -75,7 +76,12 @@ function RootLayout() {
             middle of it has to read on black, and the one part of a phone that
             wants something behind it is the composer, docked at the bottom. */}
         <WaveBackground fixed className="max-md:hidden" />
-        <WaveBackground fixed band speed={0.55} className="hidden max-md:block" />
+        <WaveBackground
+          fixed
+          band
+          speed={0.55}
+          className="hidden max-md:block"
+        />
         <div className="relative z-10 flex min-h-0 flex-1 overflow-hidden">
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
             {showsTopbar ? (
@@ -118,12 +124,15 @@ function RootLayout() {
                 </div>
               </header>
             ) : null}
-            <div className="relative flex min-h-0 flex-1 flex-col">
+            <div className="relative flex min-h-0 flex-1 scrollbar-thin flex-col overflow-y-auto">
               <Outlet />
             </div>
           </div>
           {showsTopbar ? (
-            <ArtifactsPanel open={artifactsOpen} chatId={chatIdFrom(pathname)} />
+            <ArtifactsPanel
+              open={artifactsOpen}
+              chatId={chatIdFrom(pathname)}
+            />
           ) : null}
         </div>
       </SidebarInset>
