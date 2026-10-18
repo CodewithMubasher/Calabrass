@@ -37,6 +37,7 @@ const data = {
       title: "Cal Live",
       to: "/cal-live",
       icon: AiSpeechIcon,
+      badge: "Beta",
     },
     {
       title: "Workspaces",

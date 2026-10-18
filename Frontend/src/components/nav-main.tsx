@@ -2,6 +2,7 @@ import { Link, useLocation } from "@tanstack/react-router"
 import { HugeiconsIcon } from "@hugeicons/react"
 import type { IconSvgElement } from "@hugeicons/react"
 
+import { Badge } from "@/components/ui/badge"
 import {
   SidebarGroup,
   SidebarMenu,
@@ -24,6 +25,8 @@ export interface NavItem {
   title: string
   to: NavTo
   icon: IconSvgElement
+  /** A short marker shown beside the title, such as "Beta". */
+  badge?: string
 }
 
 export function NavMain({ items }: { items: NavItem[] }) {
@@ -41,6 +44,11 @@ export function NavMain({ items }: { items: NavItem[] }) {
             >
               <HugeiconsIcon icon={item.icon} strokeWidth={2} />
               <span>{item.title}</span>
+              {item.badge ? (
+                <Badge className="ml-auto h-4 border-transparent bg-sky-50 px-1.5 text-[10px] text-sky-700 dark:bg-sky-950 dark:text-sky-300">
+                  {item.badge}
+                </Badge>
+              ) : null}
             </SidebarMenuButton>
           </SidebarMenuItem>
         ))}
