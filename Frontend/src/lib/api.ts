@@ -16,6 +16,7 @@ import type {
   TurnTrace,
   Usage,
   UsageSnapshot,
+  WorkspaceGitInfo,
   WorkspaceInput,
   WorkspaceRow,
 } from "@/types/chat"
@@ -154,6 +155,10 @@ export const api = {
     request<{ workspaces: WorkspaceRow[] }>(`/workspaces/${workspaceId}`, {
       method: "DELETE",
     }).then((r) => r.workspaces ?? []),
+
+  /** A workspace folder's own git state: remote, commit count and latest commit. */
+  getWorkspaceGit: (workspaceId: string) =>
+    request<WorkspaceGitInfo>(`/workspaces/${workspaceId}/git`),
 
   listChats: () => request<{ chats: Chat[] }>("/chats").then((r) => r.chats ?? []),
 

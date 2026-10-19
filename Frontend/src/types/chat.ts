@@ -155,6 +155,31 @@ export interface WorkspaceInput {
   description?: string
 }
 
+/**
+ * One commit of a workspace's repository, as the Git & GitHub card shows it.
+ */
+export interface WorkspaceCommit {
+  hash: string
+  message: string
+  /** The commit time, RFC 3339. */
+  date: string
+}
+
+/**
+ * A workspace folder's own git state, read from the folder on disk. `isRepo` is
+ * false for a folder that is not under version control, which is a state the
+ * card shows rather than an error.
+ */
+export interface WorkspaceGitInfo {
+  isRepo: boolean
+  /** The origin's URL, empty when no remote is set. */
+  remoteUrl: string
+  /** Commits on HEAD; zero on a repository with none. */
+  totalCommits: number
+  /** The tip of HEAD, null while there are no commits. */
+  latestCommit: WorkspaceCommit | null
+}
+
 /** A connector row on the Connectors page: one MCP server. */
 export interface ConnectorRow {
   id: string
