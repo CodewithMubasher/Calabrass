@@ -525,12 +525,16 @@ const PromptInput = forwardRef<PromptInputRef, PromptInputProps>(
 
     return (
       // Anchored from the top rather than centred: attaching a file grows the
-      // composer downward, and the heading above it stays where it is.
+      // composer downward, and the heading above it stays where it is. The offset
+      // is a fixed one rather than a share of the viewport height: `vh` measures
+      // the web viewport, which is a different height in a browser (below its
+      // toolbar) than in the desktop shell (below the OS title bar), so the
+      // composer landed at a different spot in each.
       //
       // A phone is the other way round — the heading takes the middle of the
       // screen and the composer sits under it, at the foot of the screen, which
       // is where a thumb already is. The heading row is what grows to push it there.
-      <div className="flex h-full flex-col items-center px-4 pt-[20vh] pb-4 max-md:pt-0">
+      <div className="flex h-full flex-col items-center px-4 pt-40 pb-4 max-md:pt-0">
         <div className="flex w-full max-w-[780px] flex-col items-center gap-5 max-md:flex-1">
           <div className="flex items-center gap-2.5 max-md:flex-1">
             <img
