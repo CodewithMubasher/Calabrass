@@ -11,6 +11,23 @@ Calabrass/
 └─ dev.cmd      Same, for cmd.exe / double-click
 ```
 
+## Install the Windows app
+
+Download `Calabrass-setup-v1.0-x64.exe` from
+[Releases](https://github.com/CodewithMubasher/Calabrass/releases) and run it.
+It installs for the current user only, so it never asks for administrator
+rights. The wizard asks for the install folder and Start Menu folder, and
+offers a desktop shortcut and the bundled MCP servers — Excel and Windows
+automation — which arrive switched off until you turn them on.
+
+Windows may say "Windows protected your PC" because the installer is not code
+signed yet: choose **More info → Run anyway**.
+
+Windows 10 or 11 on x64 is required, plus the WebView2 runtime. If that runtime
+is missing the installer says so and can open Microsoft's download page.
+Uninstalling asks whether to delete `%LOCALAPPDATA%\Calabrass`, and keeps your
+data unless you say otherwise.
+
 ## Run everything with one command
 
 ```powershell
@@ -37,22 +54,14 @@ there is no CORS setup to worry about.
 
 ## Setup
 
-1. Put your provider keys in the app's data folder — `%LOCALAPPDATA%\Calabrass\.env`
-   on Windows — using `Backend/.env.example` as the template:
+1. Add a provider. Nothing ships with a key: open **Providers** in the app and
+   add one with its base URL and key, and its models appear in the picker. The
+   backend has no built-in providers and reads no provider keys from the
+   environment, so an account starts empty and only has what you add.
 
-   ```
-   GOOGLE_GENERATIVE_AI_API_KEY=...
-   GROQ_API_KEY=...
-   CALABRASS_PROVIDER_PRIORITY=groq,google
-   ```
-
-   That folder is where the app keeps everything of yours: the database, the
-   workspaces and the log. Nothing user-made is ever written into the checkout,
-   so a clean, a fresh clone or an update cannot touch it. You can also skip the
-   `.env` and add a provider on the Providers page instead.
-   `CALABRASS_PROVIDER_PRIORITY` decides which provider is offered first and
-   used as the fallback — Groq is the default because it is the verified-working
-   provider.
+   Everything of yours — the database, the workspaces, the log, the connector
+   list — lives in `%LOCALAPPDATA%\Calabrass` on Windows, never in this
+   checkout, so a clean, a fresh clone or an update cannot touch it.
 
 2. Install frontend dependencies:
 
@@ -122,9 +131,9 @@ the database and the port.
 | POST   | `/api/auth/logout`            | Revoke an `Authorization` token     |
 | GET    | `/api/models`                 | Live model catalog (`?refresh=1`)   |
 | GET    | `/api/providers`              | Providers + on/off state            |
-| POST   | `/api/providers`              | Add a custom provider               |
+| POST   | `/api/providers`              | Add a provider                      |
 | PUT    | `/api/providers/{id}`         | Edit a provider, or turn it on/off  |
-| DELETE | `/api/providers/{id}`         | Remove a custom provider            |
+| DELETE | `/api/providers/{id}`         | Remove a provider                   |
 | GET    | `/api/chats`                  | List chats, newest first            |
 | POST   | `/api/chats`                  | Create a chat                       |
 | GET    | `/api/chats/{id}`             | One chat with its messages          |
@@ -153,12 +162,11 @@ disconnects mid-stream.
 - Turning a provider off on the Providers page stores the choice in SQLite and
   removes that provider from `/api/models`, so its models leave the composer's
   picker and are refused by the send path.
-- Providers are rows in SQLite. A built-in (Google, Groq) keeps its key in the
-  data folder's `.env` unless the Providers page saves an override; a custom
-  provider you add carries its own base URL and key, and is called through
-  GoAI's OpenAI-compatible client. Because the API is bound to the loopback
-  interface and is for a single local user, `/api/providers` returns the
-  effective key so the detail dialog can show and edit it.
+- Providers are rows in SQLite, one per account. A provider you add carries its
+  own base URL and key, and is called through GoAI's OpenAI-compatible client.
+  Because the API is bound to the loopback interface and is for a single local
+  user, `/api/providers` returns the effective key so the detail dialog can show
+  and edit it.
 - Chats and messages live in SQLite in the app's data folder
   (`%LOCALAPPDATA%\Calabrass\calabrass.db`), alongside the workspaces the agent
   works in.
