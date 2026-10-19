@@ -1,110 +1,98 @@
-# Calabrass AI
+<p align="center">
+  <img src="logo-preview.png" alt="Calabrass logo" width="180"/>
+</p>
 
-A local-first AI chat app: React + Vite frontend, Go + SQLite backend, streaming
-replies over Server-Sent Events.
+<h1 align="center">Calabrass</h1>
 
-```
-Calabrass/
-├─ Backend/     Go API, SQLite persistence, provider streaming (GoAI SDK)
-├─ Frontend/    React 19 + Vite + Tailwind v4 + Base UI
-├─ dev.ps1      Runs both dev servers together
-└─ dev.cmd      Same, for cmd.exe / double-click
-```
+<p align="center">
+  <strong>The open source personal AI agent.</strong>
+</p>
 
-## Install the Windows app
+<p align="center">
+  <img src="homescreen.png" alt="Calabrass home screen" width="100%"/>
+</p>
 
-Download `Calabrass-setup-v1.0-x64.exe` from
-[Releases](https://github.com/CodewithMubasher/Calabrass/releases) and run it.
-It installs for the current user only, so it never asks for administrator
-rights. The wizard asks for the install folder and Start Menu folder, and
-offers a desktop shortcut and the bundled MCP servers — Excel and Windows
-automation — which arrive switched off until you turn them on.
+---
 
-Windows may say "Windows protected your PC" because the installer is not code
-signed yet: choose **More info → Run anyway**.
+Calabrass is a **local-first, single-user AI assistant** that runs entirely on your machine. It combines a chat interface, an agent that can use tools (file system, web, desktop automation), a workspace-aware file context, and a Model Context Protocol (MCP) host — all in one native Windows app. No cloud account required, no data leaves your computer.
 
-Windows 10 or 11 on x64 is required, plus the WebView2 runtime. If that runtime
-is missing the installer says so and can open Microsoft's download page.
-Uninstalling asks whether to delete `%LOCALAPPDATA%\Calabrass`, and keeps your
-data unless you say otherwise.
+## ✨ Features
 
-## Run everything with one command
+### 💬 Chat & Composer
+- Streaming replies over Server-Sent Events — tokens appear as they are generated.
+- **Reasoning / thinking** streamed on its own channel, rendered inline with a clean trace UI.
+- **Model picker** shows live models from every provider you configure — always up to date.
+- Auto-generated chat titles from the first user message.
+- Per-chat model selection; switch mid-conversation.
 
+### 🤖 Agent & Tools
+- Built-in tools: `read_file`, `write_file`, `list_files`, `glob`, `grep`, `run_shell`, `open_app`, `web_search`, `fetch_url`.
+- **Agent loop** plans, calls tools, and iterates until the task is done.
+- **Workspaces** — point the agent at a folder and it reads/writes files there with full context.
+- **Schedules** — cron-style tasks that run agents on a timer.
+
+### 🔌 MCP (Model Context Protocol) Host
+- Starts and manages MCP servers as child processes.
+- **Bundled servers ship with the installer** (opt-in, off by default):
+  - `excel-mcp` — create, read, and modify Excel workbooks.
+  - `win-control-mcp` — window management, keyboard/mouse automation, screenshots.
+- Add your own MCP servers by path; they appear in the Connectors page, one click to enable.
+
+### 🔑 Providers — Bring Your Own Keys
+- **No built-in providers, no keys in the repo.** Add any OpenAI-compatible endpoint (Groq, OpenAI, Together, local vLLM/Ollama, etc.) or Google Gemini (native adapter).
+- Provider rows live in your account's SQLite database — fully isolated per user.
+- Turn providers on/off without deleting them; models disappear from the picker instantly.
+- Groq endpoint automatically gets `max_completion_tokens` and the reasoning-content fix.
+- Gemini endpoint uses the native Generative Language API.
+
+### 🗣️ Cal Live (Voice)
+- Real-time speech-to-text via Mistral or Groq Whisper.
+- Push-to-talk or voice-activity detection.
+- Transcripts land in the chat composer, ready to send.
+
+### 💾 Data Ownership & Privacy
+- **Everything yours stays in `%LOCALAPPDATA%\Calabrass`** (Windows) or the platform config folder:
+  - `calabrass.db` — chats, messages, providers, connectors, agents, schedules, usage.
+  - Workspace folders the agent creates.
+  - `desktop.log` — structured JSONL logs.
+- **Nothing user-made is ever written into the source checkout.** Clone, clean, update, delete the repo — your data is untouched.
+- API bound to `127.0.0.1:8787`; no network exposure.
+
+### 🖥️ Native Windows Installer
+- Per-user install — **no UAC prompt**.
+- Wizard: welcome → MIT licence → install folder → Start Menu folder → optional desktop shortcut + bundled MCP servers → ready → install → finish with "Launch Calabrass" tickbox.
+- WebView2 runtime check; offers Microsoft download page if missing.
+- Uninstall asks before touching `%LOCALAPPDATA%\Calabrass` (keeps it by default).
+- `excel-mcp.exe` and `win-control-mcp.exe` installed beside the app, built as GUI subsystems (`-H=windowsgui`) — **no blank console windows**.
+- SHA256: `767b9ebadd99f0b6e66076cdf52b492119c65d46533bab26f102899b7eb99ff8`
+
+---
+
+## 🚀 Quick Start (Windows)
+
+### Option A — Install the built app (recommended)
+1. Download **`Calabrass-setup-v1.0-x64.exe`** from [Releases](https://github.com/CodewithMubasher/Calabrass/releases).
+2. Run it. Windows SmartScreen may warn "Windows protected your PC" (not code-signed yet) → **More info → Run anyway**.
+3. On first launch, click **Sign up**, create your account, then open **Providers** and add at least one provider (base URL + API key).
+4. Start chatting.
+
+### Option B — Run from source (development)
 ```powershell
+# 1. Frontend deps
+cd Frontend; pnpm install
+
+# 2. Run both servers together (Ctrl+C stops both)
 .\dev.ps1
 ```
+- Frontend: http://localhost:5173
+- Backend API: http://127.0.0.1:8787/api
 
-or, if your PowerShell execution policy blocks scripts:
-
-```cmd
-dev.cmd
-```
-
-Both start in the foreground and stream their logs into the same console.
-**Ctrl+C stops both.** If either process exits on its own, the other is shut
-down too.
-
-| Service  | URL                            |
-| -------- | ------------------------------ |
-| Frontend | http://localhost:5173          |
-| Backend  | http://127.0.0.1:8787/api      |
-
-The frontend calls the backend through the Vite dev proxy (`/api` → `:8787`), so
-there is no CORS setup to worry about.
-
-## Setup
-
-1. Add a provider. Nothing ships with a key: open **Providers** in the app and
-   add one with its base URL and key, and its models appear in the picker. The
-   backend has no built-in providers and reads no provider keys from the
-   environment, so an account starts empty and only has what you add.
-
-   Everything of yours — the database, the workspaces, the log, the connector
-   list — lives in `%LOCALAPPDATA%\Calabrass` on Windows, never in this
-   checkout, so a clean, a fresh clone or an update cannot touch it.
-
-2. Install frontend dependencies:
-
-   ```powershell
-   cd Frontend; pnpm install
-   ```
-
-3. Run `.\dev.ps1`.
-
-## Accounts
-
-There is no account in the source and no default password. On first run you
-land on the login page; use **Sign up** to create your own account, and that
-first account owns the install. Every account is fully isolated: each one has
-its own chats, messages, providers, workspaces, connectors, agents, schedules
-and usage, and its own workspace folder, which is created when the account first
-opens one.
-
-Passwords are stored as bcrypt hashes in SQLite and a sign-in lasts 30 days via
-a bearer token; the database only stores the token's SHA-256. Every API
-request must present that token, and the backend scopes all reads and writes to
-the account it belongs to. The API is bound to the loopback interface and
-remains reachable by local processes, so the account gate decides what the app
-shows rather than what the machine allows.
-
-## Desktop app (Wails)
-
-The desktop shell is in `Backend/desktop`. It runs the same Go backend on
-`127.0.0.1:8787` and embeds the same React frontend, so the whole app — chat,
-Cal Live, workspaces, agents, connectors, schedules, providers, usage and
-settings — is available in a native window.
-
-The desktop shell keeps nothing of the user's inside the checkout. Its
-database, workspaces and log live in one per-user folder —
-`%LOCALAPPDATA%\Calabrass` on Windows, the platform's config folder elsewhere —
-so the built `.exe` behaves the same wherever it is put, and editing or cleaning
-the project never touches real data.
-
+### Desktop development (Wails)
 ```powershell
 # once
 go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
 
-# live development, with Vite hot reload
+# live dev with Vite HMR
 cd Backend\desktop
 wails dev
 
@@ -113,65 +101,69 @@ wails build
 # -> Backend\desktop\build\bin\Calabrass.exe
 ```
 
-The window icon comes from `Frontend/public/vite.svg`, rendered into
-`Backend/desktop/build/appicon.png` and `build/windows/icon.ico`.
+---
 
-If the browser dev server (`dev.ps1`) is already running, the desktop app
-reuses its backend instead of starting a second one, so only one process owns
-the database and the port.
-
-## API
-
-| Method | Path                          | Purpose                             |
-| ------ | ----------------------------- | ----------------------------------- |
-| GET    | `/api/health`                 | Liveness + configured providers     |
-| POST   | `/api/auth/signup`            | Create an account, return a session |
-| POST   | `/api/auth/login`             | Check a password, return a session  |
-| GET    | `/api/auth/me`                | Resolve an `Authorization` token    |
-| POST   | `/api/auth/logout`            | Revoke an `Authorization` token     |
-| GET    | `/api/models`                 | Live model catalog (`?refresh=1`)   |
-| GET    | `/api/providers`              | Providers + on/off state            |
-| POST   | `/api/providers`              | Add a provider                      |
-| PUT    | `/api/providers/{id}`         | Edit a provider, or turn it on/off  |
-| DELETE | `/api/providers/{id}`         | Remove a provider                   |
-| GET    | `/api/chats`                  | List chats, newest first            |
-| POST   | `/api/chats`                  | Create a chat                       |
-| GET    | `/api/chats/{id}`             | One chat with its messages          |
-| PATCH  | `/api/chats/{id}`             | Rename / change model               |
-| DELETE | `/api/chats/{id}`             | Delete a chat                       |
-| POST   | `/api/chats/{id}/messages`    | Send a turn, stream the reply (SSE) |
-
-The message endpoint replies with a Server-Sent Event stream:
+## 📁 Repository Structure
 
 ```
-event: chat      -> the chat summary (auto-title, selected model)
-event: message   -> the persisted user message
-event: reasoning -> one delta of the model's thinking (repeated, optional)
-event: token     -> one text delta of the reply (repeated)
-event: done      -> the persisted assistant message + token usage
-event: error     -> provider/stream failure
+Calabrass/
+├─ Backend/              Go API, SQLite, provider streaming (GoAI SDK)
+│  ├─ internal/ai/       Provider registry, model catalog, GoAI adapters
+│  ├─ internal/httpapi/  REST + SSE endpoints, auth, connectors, voice
+│  ├─ internal/store/    SQLite schema, migrations, queries
+│  ├─ internal/connectors/  MCP server pool, bundled server registry
+│  └─ desktop/           Wails v2 shell (Go + embedded React)
+├─ Frontend/             React 19 + Vite + Tailwind v4 + Base UI
+├─ MCP/                  MCP server sources (excel, win-control)
+├─ installer/            Inno Setup script + build script
+├─ dev.ps1 / dev.cmd     One-command dev stack
+└─ LICENSE               MIT
 ```
 
-A partial reply is still persisted if generation fails or the client
-disconnects mid-stream.
+---
 
-## Notes
+## 🔧 Configuration
 
-- Models are listed live from each provider, so the picker always reflects what
-  your keys can actually reach.
-- Turning a provider off on the Providers page stores the choice in SQLite and
-  removes that provider from `/api/models`, so its models leave the composer's
-  picker and are refused by the send path.
-- Providers are rows in SQLite, one per account. A provider you add carries its
-  own base URL and key, and is called through GoAI's OpenAI-compatible client.
-  Because the API is bound to the loopback interface and is for a single local
-  user, `/api/providers` returns the effective key so the detail dialog can show
-  and edit it.
-- Chats and messages live in SQLite in the app's data folder
-  (`%LOCALAPPDATA%\Calabrass\calabrass.db`), alongside the workspaces the agent
-  works in.
-- The model's thinking is streamed on its own channel, never mixed into the
-  answer, and stored alongside the message. The UI renders it with the shadcn
-  [Trace](https://ui.shadcn.com/docs/components/trace) component as a
-  "Thinking → Thought for Ns" row that opens while the model thinks and closes
-  when it is done (`Frontend/src/components/reasoning-trace.tsx`).
+No `.env` required for providers — add them in the UI.  
+Optional backend settings via `%LOCALAPPDATA%\Calabrass\.env` (see `Backend/.env.example`):
+
+```
+CALABRASS_ADDR=127.0.0.1:8787          # API listen address
+CALABRASS_DB=calabrass.db               # DB filename (inside data folder)
+MISTRAL_API_KEY=...                     # For Cal Live (optional)
+CALABRASS_VOICE_PROVIDER=mistral        # or "groq"
+CALABRASS_VOICE_MODEL=voxtral-mini-latest
+CALABRASS_SYSTEM_PROMPT=...             # Global system prompt override
+CALABRASS_WORKSPACES_DIR=workspace      # Subfolder inside data folder
+CALABRASS_QUOTAS=model_free_tier_quotas.md  # Free-tier limits file
+```
+
+---
+
+## 🧱 Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Frontend | React 19, Vite, Tailwind CSS v4, Base UI, TanStack Router, TanStack Query |
+| Backend | Go 1.23, SQLite (modernc.org/sqlite), GoAI SDK, Server-Sent Events |
+| Desktop | Wails v2 (native WebView2 window) |
+| MCP | Official Go MCP SDK, stdio transport |
+| Auth | bcrypt (cost 12), 30-day bearer tokens, SHA-256 token storage |
+| Logging | slog JSONL to `%LOCALAPPDATA%\Calabrass\desktop.log` |
+
+---
+
+## 📄 License
+
+MIT — see [LICENSE](LICENSE).  
+Copyright (c) 2026 Mubasher Chaudhary.
+
+---
+
+## 🙏 Acknowledgements
+
+- [GoAI](https://github.com/zendev-sh/goai) — unified provider interface
+- [Wails](https://wails.io/) — Go + WebView2 desktop apps
+- [MCP](https://modelcontextprotocol.io/) — Model Context Protocol
+- [Base UI](https://base-ui.com/) — unstyled, accessible React components
+- [shadcn/ui](https://ui.shadcn.com/) — Trace component for reasoning display
