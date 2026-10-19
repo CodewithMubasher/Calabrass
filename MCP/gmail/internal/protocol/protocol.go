@@ -14,6 +14,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"time"
@@ -226,7 +227,20 @@ func (r *Registry) callTool(ctx context.Context, raw json.RawMessage, logger *lo
 	defer cancel()
 
 	logger.Printf("calling %s", tool.Name)
-	text, err := tool.Handler(ctx, params.Arguments)
+	
+	// Panic recovery to prevent server crash
+	var text string
+	var err error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Printf("PANIC in tool %s: %v", tool.Name, r)
+				err = fmt.Errorf("tool panicked: %v", r)
+			}
+		}()
+		text, err = tool.Handler(ctx, params.Arguments)
+	}()
+	
 	if err != nil {
 		// A tool that could not do the thing is something the model should read
 		// and work around, not a broken conversation.

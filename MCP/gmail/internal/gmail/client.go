@@ -198,6 +198,13 @@ func (c *Client) ensureAuthed(ctx context.Context) error {
 		}
 	}
 
+	// Try to refresh token if we have one (even if expired, try refresh if we have refresh token)
+	if c.token != nil {
+		if err := c.refreshTokenIfNeeded(ctx); err != nil {
+			c.logger.Printf("token refresh failed: %v", err)
+		}
+	}
+
 	// If token is valid, create service
 	if c.token != nil && c.token.Valid() {
 		httpClient := c.config.Client(ctx, c.token)
@@ -212,6 +219,43 @@ func (c *Client) ensureAuthed(ctx context.Context) error {
 
 	// Need to authenticate - use web flow
 	return c.authenticateWebFlow(ctx)
+}
+
+// refreshTokenIfNeeded explicitly refreshes the OAuth token if it has a refresh token and is expired
+func (c *Client) refreshTokenIfNeeded(ctx context.Context) error {
+	if c.token == nil {
+		return errors.New("no token to refresh")
+	}
+
+	// If token is still valid, no need to refresh
+	if c.token.Valid() {
+		return nil
+	}
+
+	// If no refresh token, we can't refresh
+	if c.token.RefreshToken == "" {
+		c.logger.Printf("token expired and no refresh token available")
+		return errors.New("no refresh token available")
+	}
+
+	c.logger.Printf("refreshing expired OAuth token...")
+	
+	// Create a new token source that will refresh the token
+	tokenSource := c.config.TokenSource(ctx, c.token)
+	newToken, err := tokenSource.Token()
+	if err != nil {
+		return fmt.Errorf("failed to refresh token: %w", err)
+	}
+
+	c.token = newToken
+	
+	// Save the refreshed token
+	if err := c.saveToken(); err != nil {
+		c.logger.Printf("failed to save refreshed token: %v", err)
+	}
+	
+	c.logger.Printf("OAuth token refreshed successfully")
+	return nil
 }
 
 // authenticateWebFlow uses the standard OAuth2 Authorization Code flow with local server.
@@ -290,14 +334,100 @@ func (c *Client) getService(ctx context.Context) (*gmailapi.Service, error) {
 	return c.service, nil
 }
 
+// doWithRetry executes a function that uses the Gmail service, retrying with token refresh on 401 errors.
+func (c *Client) doWithRetry(ctx context.Context, fn func(*gmailapi.Service) error) error {
+	for attempts := 0; attempts < 2; attempts++ {
+		service, err := c.getService(ctx)
+		if err != nil {
+			return err
+		}
+		
+		err = fn(service)
+		if err == nil {
+			return nil
+		}
+		
+		// Check if it's a 401 error (token expired/invalid)
+		if isAuthError(err) {
+			c.logger.Printf("auth error detected, refreshing token: %v", err)
+			c.mu.Lock()
+			c.authed = false
+			c.service = nil
+			c.mu.Unlock()
+			
+			// Force token refresh
+			if err := c.refreshTokenIfNeeded(ctx); err != nil {
+				c.logger.Printf("failed to refresh token: %v", err)
+			}
+			continue // retry
+		}
+		
+		return err
+	}
+	
+	return fmt.Errorf("max retries exceeded")
+}
+
+// isAuthError checks if the error is an authentication/authorization error (401)
+func isAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "401") || 
+		strings.Contains(errStr, "invalid authentication credentials") ||
+		strings.Contains(errStr, "invalid_grant") ||
+		strings.Contains(errStr, "unauthorized")
+}
+
 // loadToken loads the saved OAuth2 token from disk.
 func (c *Client) loadToken() error {
 	data, err := os.ReadFile(c.tokenPath)
 	if err != nil {
 		return err
 	}
-	c.token = new(oauth2.Token)
-	return json.Unmarshal(data, c.token)
+	
+	// Parse with custom handling for empty expiry
+	type tokenJSON struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		TokenType    string `json:"token_type"`
+		Expiry       string `json:"expiry"`
+	}
+	
+	var tj tokenJSON
+	if err := json.Unmarshal(data, &tj); err != nil {
+		return err
+	}
+	
+	c.token = &oauth2.Token{
+		AccessToken:  tj.AccessToken,
+		RefreshToken: tj.RefreshToken,
+		TokenType:    tj.TokenType,
+	}
+	
+	if tj.Expiry != "" {
+		expiry, err := time.Parse(time.RFC3339, tj.Expiry)
+		if err != nil {
+			// Try alternative format (without timezone)
+			expiry, err = time.Parse("2006-01-02T15:04:05", tj.Expiry)
+			if err != nil {
+				// Try with Z suffix
+				expiry, err = time.Parse(time.RFC3339, tj.Expiry+"Z")
+				if err != nil {
+					c.logger.Printf("could not parse expiry: %v", err)
+				} else {
+					c.token.Expiry = expiry
+				}
+			} else {
+				c.token.Expiry = expiry
+			}
+		} else {
+			c.token.Expiry = expiry
+		}
+	}
+	
+	return nil
 }
 
 // saveToken saves the OAuth2 token to disk.
@@ -340,44 +470,42 @@ func loadConfigFromFile(config *Config) error {
 
 // ListMessages retrieves messages matching the query.
 func (c *Client) ListMessages(ctx context.Context, query string, maxResults int64) ([]Message, error) {
-	service, err := c.getService(ctx)
-	if err != nil {
-		return nil, err
-	}
-	
-	call := service.Users.Messages.List("me").Q(query).MaxResults(maxResults)
-	resp, err := call.Do()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list messages: %w", err)
-	}
-	
 	var messages []Message
-	for _, msg := range resp.Messages {
-		m, err := c.GetMessage(ctx, msg.Id)
+	err := c.doWithRetry(ctx, func(service *gmailapi.Service) error {
+		call := service.Users.Messages.List("me").Q(query).MaxResults(maxResults)
+		resp, err := call.Do()
 		if err != nil {
-			c.logger.Printf("failed to get message %s: %v", msg.Id, err)
-			continue
+			return fmt.Errorf("failed to list messages: %w", err)
 		}
-		messages = append(messages, *m)
-	}
-	
-	return messages, nil
+		
+		for _, msg := range resp.Messages {
+			m, err := c.GetMessage(ctx, msg.Id)
+			if err != nil {
+				c.logger.Printf("failed to get message %s: %v", msg.Id, err)
+				continue
+			}
+			messages = append(messages, *m)
+		}
+		
+		return nil
+	})
+	return messages, err
 }
 
 // GetMessage retrieves a single message by ID.
 func (c *Client) GetMessage(ctx context.Context, id string) (*Message, error) {
-	service, err := c.getService(ctx)
-	if err != nil {
-		return nil, err
-	}
-	
-	call := service.Users.Messages.Get("me", id).Format("full")
-	resp, err := call.Do()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get message: %w", err)
-	}
-	
-	return c.parseMessage(resp), nil
+	var msg *Message
+	err := c.doWithRetry(ctx, func(service *gmailapi.Service) error {
+		call := service.Users.Messages.Get("me", id).Format("full")
+		resp, err := call.Do()
+		if err != nil {
+			return fmt.Errorf("failed to get message: %w", err)
+		}
+		
+		msg = c.parseMessage(resp)
+		return nil
+	})
+	return msg, err
 }
 
 // parseMessage converts a Gmail API message to our simplified Message.
@@ -430,98 +558,90 @@ func (c *Client) extractBody(payload *gmailapi.MessagePart) string {
 
 // SendMessage sends an email.
 func (c *Client) SendMessage(ctx context.Context, to, subject, body string) error {
-	service, err := c.getService(ctx)
-	if err != nil {
-		return err
-	}
-	
-	message := fmt.Sprintf("To: %s\r\nSubject: %s\r\n\r\n%s", to, subject, body)
-	encoded := base64URLEncode([]byte(message))
-	
-	gmailMsg := &gmailapi.Message{Raw: encoded}
-	
-	_, err = service.Users.Messages.Send("me", gmailMsg).Do()
-	if err != nil {
-		return fmt.Errorf("failed to send message: %w", err)
-	}
-	return nil
+	return c.doWithRetry(ctx, func(service *gmailapi.Service) error {
+		message := fmt.Sprintf("To: %s\r\nSubject: %s\r\n\r\n%s", to, subject, body)
+		encoded := base64URLEncode([]byte(message))
+		
+		gmailMsg := &gmailapi.Message{Raw: encoded}
+		
+		_, err := service.Users.Messages.Send("me", gmailMsg).Do()
+		if err != nil {
+			return fmt.Errorf("failed to send message: %w", err)
+		}
+		return nil
+	})
 }
 
 // CreateDraft creates a draft email.
 func (c *Client) CreateDraft(ctx context.Context, to, subject, body string) (*Draft, error) {
-	service, err := c.getService(ctx)
-	if err != nil {
-		return nil, err
-	}
-	
-	message := fmt.Sprintf("To: %s\r\nSubject: %s\r\n\r\n%s", to, subject, body)
-	encoded := base64URLEncode([]byte(message))
-	
-	draft := &gmailapi.Draft{
-		Message: &gmailapi.Message{Raw: encoded},
-	}
-	
-	resp, err := service.Users.Drafts.Create("me", draft).Do()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create draft: %w", err)
-	}
-	
-	return &Draft{ID: resp.Id}, nil
+	var draft *Draft
+	err := c.doWithRetry(ctx, func(service *gmailapi.Service) error {
+		message := fmt.Sprintf("To: %s\r\nSubject: %s\r\n\r\n%s", to, subject, body)
+		encoded := base64URLEncode([]byte(message))
+		
+		d := &gmailapi.Draft{
+			Message: &gmailapi.Message{Raw: encoded},
+		}
+		
+		resp, err := service.Users.Drafts.Create("me", d).Do()
+		if err != nil {
+			return fmt.Errorf("failed to create draft: %w", err)
+		}
+		
+		draft = &Draft{ID: resp.Id}
+		return nil
+	})
+	return draft, err
 }
 
 // ListDrafts lists all drafts.
 func (c *Client) ListDrafts(ctx context.Context, maxResults int64) ([]Draft, error) {
-	service, err := c.getService(ctx)
-	if err != nil {
-		return nil, err
-	}
-	
-	call := service.Users.Drafts.List("me").MaxResults(maxResults)
-	resp, err := call.Do()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list drafts: %w", err)
-	}
-	
 	var drafts []Draft
-	for _, d := range resp.Drafts {
-		drafts = append(drafts, Draft{ID: d.Id})
-	}
-	return drafts, nil
+	err := c.doWithRetry(ctx, func(service *gmailapi.Service) error {
+		call := service.Users.Drafts.List("me").MaxResults(maxResults)
+		resp, err := call.Do()
+		if err != nil {
+			return fmt.Errorf("failed to list drafts: %w", err)
+		}
+		
+		for _, d := range resp.Drafts {
+			drafts = append(drafts, Draft{ID: d.Id})
+		}
+		return nil
+	})
+	return drafts, err
 }
 
 // ModifyLabels adds/removes labels on a message.
 func (c *Client) ModifyLabels(ctx context.Context, id string, addLabels, removeLabels []string) error {
-	service, err := c.getService(ctx)
-	if err != nil {
-		return err
-	}
-	
-	mod := &gmailapi.ModifyMessageRequest{
-		AddLabelIds:    addLabels,
-		RemoveLabelIds: removeLabels,
-	}
-	
-	_, err = service.Users.Messages.Modify("me", id, mod).Do()
-	if err != nil {
-		return fmt.Errorf("failed to modify labels: %w", err)
-	}
-	return nil
+	return c.doWithRetry(ctx, func(service *gmailapi.Service) error {
+		mod := &gmailapi.ModifyMessageRequest{
+			AddLabelIds:    addLabels,
+			RemoveLabelIds: removeLabels,
+		}
+		
+		_, err := service.Users.Messages.Modify("me", id, mod).Do()
+		if err != nil {
+			return fmt.Errorf("failed to modify labels: %w", err)
+		}
+		return nil
+	})
 }
 
 // ListLabels lists all labels.
 func (c *Client) ListLabels(ctx context.Context) ([]*gmailapi.Label, error) {
-	service, err := c.getService(ctx)
-	if err != nil {
-		return nil, err
-	}
-	
-	call := service.Users.Labels.List("me")
-	resp, err := call.Do()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list labels: %w", err)
-	}
-	
-	return resp.Labels, nil
+	var labels []*gmailapi.Label
+	err := c.doWithRetry(ctx, func(service *gmailapi.Service) error {
+		call := service.Users.Labels.List("me")
+		resp, err := call.Do()
+		if err != nil {
+			return fmt.Errorf("failed to list labels: %w", err)
+		}
+		
+		labels = resp.Labels
+		return nil
+	})
+	return labels, err
 }
 
 // base64URLEncode encodes data using base64 URL encoding.
@@ -539,7 +659,7 @@ func base64URLDecode(s string) ([]byte, error) {
 
 // stripHTML removes HTML tags from a string.
 func stripHTML(s string) string {
-	re := regexp.MustCompile(`(?s)<(script|style)[^>]*>.*?</\1>`)
+	re := regexp.MustCompile(`(?s)<(script|style)[^>]*>.*?</$1>`)
 	s = re.ReplaceAllString(s, "")
 	re = regexp.MustCompile(`<[^>]+>`)
 	s = re.ReplaceAllString(s, " ")
