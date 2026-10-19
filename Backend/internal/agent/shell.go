@@ -13,6 +13,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"github.com/CodewithMubasher/Calabrass/backend/internal/proc"
 	"github.com/zendev-sh/goai"
 )
 
@@ -75,6 +76,10 @@ func (w *Workspace) runCommand(ctx context.Context, args runCommandArgs) (string
 	name, argv := shellFor(command)
 	cmd := exec.CommandContext(runCtx, name, argv...)
 	cmd.Dir = w.Root()
+	// The shell runs without a console window of its own: the desktop app has no
+	// console to lend it, and a terminal flashing over the app for every command
+	// the agent runs is not something the user asked to watch.
+	proc.Hide(cmd)
 
 	// One buffer for both streams, so the report reads in the order the command
 	// wrote it rather than as two piles to be compared.
