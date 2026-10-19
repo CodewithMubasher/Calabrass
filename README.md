@@ -37,7 +37,8 @@ there is no CORS setup to worry about.
 
 ## Setup
 
-1. Copy `Backend/.env.example` to `Backend/.env` and add provider keys:
+1. Put your provider keys in the app's data folder — `%LOCALAPPDATA%\Calabrass\.env`
+   on Windows — using `Backend/.env.example` as the template:
 
    ```
    GOOGLE_GENERATIVE_AI_API_KEY=...
@@ -45,9 +46,13 @@ there is no CORS setup to worry about.
    CALABRASS_PROVIDER_PRIORITY=groq,google
    ```
 
-   `Backend/.env` is gitignored. `CALABRASS_PROVIDER_PRIORITY` decides which
-   provider is offered first and used as the fallback — Groq is the default
-   because it is the verified-working provider.
+   That folder is where the app keeps everything of yours: the database, the
+   workspaces and the log. Nothing user-made is ever written into the checkout,
+   so a clean, a fresh clone or an update cannot touch it. You can also skip the
+   `.env` and add a provider on the Providers page instead.
+   `CALABRASS_PROVIDER_PRIORITY` decides which provider is offered first and
+   used as the fallback — Groq is the default because it is the verified-working
+   provider.
 
 2. Install frontend dependencies:
 
@@ -79,11 +84,11 @@ The desktop shell is in `Backend/desktop`. It runs the same Go backend on
 Cal Live, workspaces, agents, connectors, schedules, providers, usage and
 settings — is available in a native window.
 
-Inside the repository it deliberately uses `Backend/.env` and
-`Backend/data/calabrass.db`, so the desktop and browser builds share chats and
-providers. The built `.exe` finds the repository when it is launched from
-anywhere inside it; copied elsewhere, it falls back to
-`%APPDATA%\Calabrass` for its database and workspaces.
+The desktop shell keeps nothing of the user's inside the checkout. Its
+database, workspaces and log live in one per-user folder —
+`%LOCALAPPDATA%\Calabrass` on Windows, the platform's config folder elsewhere —
+so the built `.exe` behaves the same wherever it is put, and editing or cleaning
+the project never touches real data.
 
 ```powershell
 # once
@@ -147,13 +152,15 @@ disconnects mid-stream.
 - Turning a provider off on the Providers page stores the choice in SQLite and
   removes that provider from `/api/models`, so its models leave the composer's
   picker and are refused by the send path.
-- Providers are rows in SQLite. A built-in (Google, Groq) keeps its key in
-  `Backend/.env` unless the Providers page saves an override; a custom provider
-  you add carries its own base URL and key, and is called through GoAI's
-  OpenAI-compatible client. Because the API is bound to the loopback interface
-  and is for a single local user, `/api/providers` returns the effective key so
-  the detail dialog can show and edit it.
-- Chats and messages live in SQLite at `Backend/data/calabrass.db`.
+- Providers are rows in SQLite. A built-in (Google, Groq) keeps its key in the
+  data folder's `.env` unless the Providers page saves an override; a custom
+  provider you add carries its own base URL and key, and is called through
+  GoAI's OpenAI-compatible client. Because the API is bound to the loopback
+  interface and is for a single local user, `/api/providers` returns the
+  effective key so the detail dialog can show and edit it.
+- Chats and messages live in SQLite in the app's data folder
+  (`%LOCALAPPDATA%\Calabrass\calabrass.db`), alongside the workspaces the agent
+  works in.
 - The model's thinking is streamed on its own channel, never mixed into the
   answer, and stored alongside the message. The UI renders it with the shadcn
   [Trace](https://ui.shadcn.com/docs/components/trace) component as a

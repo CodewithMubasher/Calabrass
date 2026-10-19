@@ -54,8 +54,11 @@ if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
 $goExe = Resolve-CommandPath "go"
 $pnpmExe = Resolve-CommandPath "pnpm"
 
-if (-not (Test-Path (Join-Path $backendDir ".env"))) {
-  Write-Warn "Backend/.env is missing. Copy Backend/.env.example and add your API keys."
+# User data lives in one per-user folder, never in the checkout: the database,
+# the workspaces, and the .env that carries provider keys.
+$dataDir = Join-Path $(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $env:APPDATA }) "Calabrass"
+if (-not (Test-Path (Join-Path $dataDir ".env"))) {
+  Write-Warn "No .env in $dataDir. Copy Backend\.env.example there and add your API keys, or add a provider on the Providers page."
 }
 
 if (-not (Test-Path (Join-Path $frontendDir "node_modules")) -and -not $SkipInstall) {
@@ -108,7 +111,7 @@ $cancelHandler = [System.ConsoleCancelEventHandler] {
 [Console]::add_CancelKeyPress($cancelHandler)
 
 try {
-  # The backend resolves Backend/.env relative to its working directory.
+  # The backend reads the .env in the per-user Calabrass data folder.
   Start-DevProcess -Name "backend" -FilePath $goExe `
     -ArgumentList @("run", "./cmd/server") `
     -WorkingDirectory $backendDir -Color DarkYellow | Out-Null

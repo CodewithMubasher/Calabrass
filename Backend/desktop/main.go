@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/app"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/config"
 	"github.com/wailsapp/wails/v2"
@@ -101,37 +100,15 @@ func main() {
 	}
 }
 
-// resolveConfig finds the backend the desktop should use. Inside the
-// repository it reads Backend/.env and points at Backend/data/calabrass.db, so
-// the desktop and browser builds share chats and providers. Anywhere else it
-// uses the per-user config folder and carries the quota file with it.
+// resolveConfig points the desktop at the per-user data folder. The database,
+// the workspaces and the log all live there, never inside the checkout the app
+// was built from: a clean, a fresh clone or an update must not be able to move
+// or delete what the user made with the app.
 //
 // It deliberately does not change the working directory: Wails runs the app
 // from the project root while generating bindings and expects wails.json there.
 func resolveConfig() (config.Config, string) {
-	root := agent.DiscoverRoot("")
-	if info, err := os.Stat(filepath.Join(root, ".git")); err == nil && info.IsDir() {
-		backendDir := filepath.Join(root, "Backend")
-		if _, err := os.Stat(filepath.Join(backendDir, "go.mod")); err == nil {
-			cfg := config.LoadFrom(filepath.Join(backendDir, ".env"))
-			if !filepath.IsAbs(cfg.DatabasePath) {
-				cfg.DatabasePath = filepath.Join(backendDir, cfg.DatabasePath)
-			}
-			if !filepath.IsAbs(cfg.WorkspacesDir) && cfg.WorkspacesDir != "" {
-				cfg.WorkspacesDir = filepath.Join(backendDir, cfg.WorkspacesDir)
-			}
-			if cfg.QuotasPath == "" {
-				cfg.QuotasPath = filepath.Join(root, "model_free_tier_quotas.md")
-			}
-			return cfg, filepath.Join(backendDir, "data", "desktop.log")
-		}
-	}
-
-	configDir, err := os.UserConfigDir()
-	if err != nil || configDir == "" {
-		configDir = "."
-	}
-	dataDir := filepath.Join(configDir, appName)
+	dataDir := config.DataDir()
 	_ = os.MkdirAll(dataDir, 0o755)
 
 	cfg := config.LoadFrom(filepath.Join(dataDir, ".env"))
@@ -142,6 +119,8 @@ func resolveConfig() (config.Config, string) {
 		cfg.WorkspacesDir = filepath.Join(dataDir, "workspace")
 	}
 
+	// The quota file travels with the app, so the installed build has limits
+	// without the checkout it was built from.
 	quotaPath := filepath.Join(dataDir, "model_free_tier_quotas.md")
 	if err := os.WriteFile(quotaPath, embeddedQuotas, 0o644); err == nil {
 		cfg.QuotasPath = quotaPath

@@ -81,16 +81,17 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error)
 		})
 
 	if admin.ID != "" && len(registry.ForUser(admin.ID).ProviderOrder(ctx)) == 0 {
-		log.Warn("no usable AI provider; set GROQ_API_KEY or GOOGLE_GENERATIVE_AI_API_KEY in Backend/.env, or add a provider on the Providers page")
+		log.Warn("no usable AI provider; set GROQ_API_KEY or GOOGLE_GENERATIVE_AI_API_KEY in the .env of the Calabrass data folder, or add a provider on the Providers page", "dataDir", config.DataDir())
 	}
 
 	// The harness works inside one workspace folder at a time, and every
-	// workspace lives inside a single library directory: <project>/workspace
-	// unless it is configured elsewhere. A missing library is not fatal: chat
-	// still works, it just has no tools.
+	// workspace lives inside a single library directory: the workspace folder in
+	// the user's data directory. It is never the project the app was built from,
+	// where a clean would delete the files someone was working on. A missing
+	// library is not fatal: chat still works, it just has no tools.
 	libraryDir := cfg.WorkspacesDir
 	if strings.TrimSpace(libraryDir) == "" {
-		libraryDir = filepath.Join(agent.DiscoverRoot(""), "workspace")
+		libraryDir = filepath.Join(config.DataDir(), "workspace")
 	}
 
 	var (
