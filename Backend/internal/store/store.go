@@ -140,9 +140,9 @@ CREATE TABLE IF NOT EXISTS messages (
 	created_at INTEGER NOT NULL
 );
 
--- One row per provider that has been configured or toggled. A provider with no
--- row uses its built-in defaults (credentials from .env, on). Custom providers
--- always have a row and carry their own endpoint and key.
+-- One row per provider the person added: its endpoint, its key and whether it
+-- is on. A provider exists only because there is a row here, so a fresh database
+-- offers none.
 CREATE TABLE IF NOT EXISTS providers (
 	user_id    TEXT NOT NULL DEFAULT '',
 	id         TEXT NOT NULL,
@@ -298,6 +298,13 @@ CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_events(provider_id, creat
 		}
 	}
 
+	// Providers used to be built into the backend, with their endpoint implied by
+	// the id. They are ordinary rows now, so a row that build left behind is
+	// given the name and endpoint it used to imply, and keeps the key it holds.
+	if err := s.adoptBuiltinProviders(ctx); err != nil {
+		return err
+	}
+
 	// Every user-facing record belongs to the account that made it. The empty
 	// default is a migration placeholder: existing rows have no owner yet and
 	// are assigned to the shipped admin account once it has been seeded.
@@ -367,6 +374,35 @@ ALTER TABLE providers_user_keyed RENAME TO providers;
 `
 	if _, err := s.db.ExecContext(ctx, rebuild); err != nil {
 		return fmt.Errorf("store: rebuild providers: %w", err)
+	}
+	return nil
+}
+
+// adoptBuiltinProviders turns a row left by the build that had built-in
+// providers into an ordinary provider. Such a row carries no name or endpoint
+// because the backend supplied both; here it is given what it used to imply.
+//
+// The URLs are written out rather than taken from the AI package on purpose: a
+// migration has to keep meaning what it meant when it was written, whatever the
+// code that talks to those vendors does later. It is idempotent — once a row is
+// custom it no longer matches.
+func (s *Store) adoptBuiltinProviders(ctx context.Context) error {
+	const adopt = `
+UPDATE providers SET
+	custom = 1,
+	name = CASE
+		WHEN name = '' AND id = 'google' THEN 'Google Gemini'
+		WHEN name = '' AND id = 'groq'   THEN 'Groq'
+		ELSE name
+	END,
+	base_url = CASE
+		WHEN base_url = '' AND id = 'google' THEN 'https://generativelanguage.googleapis.com'
+		WHEN base_url = '' AND id = 'groq'   THEN 'https://api.groq.com/openai/v1'
+		ELSE base_url
+	END
+WHERE custom = 0`
+	if _, err := s.db.ExecContext(ctx, adopt); err != nil {
+		return fmt.Errorf("store: adopt built-in providers: %w", err)
 	}
 	return nil
 }

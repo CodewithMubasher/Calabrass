@@ -36,8 +36,6 @@ func DataDir() string {
 type Config struct {
 	Addr         string
 	DatabasePath string
-	GeminiKey    string
-	GroqKey      string
 	// MistralKey is the credential for the realtime transcription endpoint that
 	// Cal Live listens with. Empty means "fall back to Groq Whisper".
 	MistralKey   string
@@ -49,9 +47,6 @@ type Config struct {
 	// WorkspacesDir is the folder that holds every workspace the agent may read
 	// and change. It lives in the data folder with everything else.
 	WorkspacesDir string
-	// ProviderPriority is the order in which providers are offered and picked
-	// as a fallback, e.g. ["groq", "google"].
-	ProviderPriority []string
 	// QuotasPath points at the free-tier limits file. Empty means "use the one
 	// in the project root". The desktop shell sets it to the copy it carries.
 	QuotasPath string
@@ -72,8 +67,6 @@ func LoadFrom(envPath string) Config {
 	return Config{
 		Addr:          envOr("CALABRASS_ADDR", "127.0.0.1:8787"),
 		DatabasePath:  inDataDir(dataDir, envOr("CALABRASS_DB", "calabrass.db")),
-		GeminiKey:     firstNonEmpty(os.Getenv("GOOGLE_GENERATIVE_AI_API_KEY"), os.Getenv("GEMINI_API_KEY"), os.Getenv("GOOGLE_API_KEY")),
-		GroqKey:       os.Getenv("GROQ_API_KEY"),
 		MistralKey:    os.Getenv("MISTRAL_API_KEY"),
 		VoiceProvider: os.Getenv("CALABRASS_VOICE_PROVIDER"),
 		VoiceModel:    os.Getenv("CALABRASS_VOICE_MODEL"),
@@ -84,9 +77,7 @@ func LoadFrom(envPath string) Config {
 			os.Getenv("CALABRASS_WORKSPACE"),
 			"workspace",
 		)),
-		// Groq first: it is the provider that is verified working by default.
-		ProviderPriority: splitList(envOr("CALABRASS_PROVIDER_PRIORITY", "groq,google")),
-		QuotasPath:       strings.TrimSpace(os.Getenv("CALABRASS_QUOTAS")),
+		QuotasPath: strings.TrimSpace(os.Getenv("CALABRASS_QUOTAS")),
 	}
 }
 
@@ -102,17 +93,6 @@ func inDataDir(dir, path string) string {
 		return path
 	}
 	return filepath.Join(dir, path)
-}
-
-func splitList(value string) []string {
-	parts := strings.Split(value, ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if part = strings.TrimSpace(part); part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
 }
 
 func envOr(key, fallback string) string {

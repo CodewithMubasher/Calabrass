@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -25,7 +26,35 @@ func (s *Server) handleSignUp(w http.ResponseWriter, r *http.Request) {
 		s.writeAuthError(w, err)
 		return
 	}
+
+	s.seedBundledConnectors(r.Context(), session.User.ID)
 	writeJSON(w, http.StatusCreated, session)
+}
+
+// seedBundledConnectors gives a brand new account the MCP servers that shipped
+// with the app, so they are already there to switch on rather than something to
+// be typed in by path. A server the installer left out was never found, and so
+// is not registered. Seeding only happens once, at sign-up: a server the person
+// then removes stays removed.
+//
+// They are registered switched off. A server that drives Excel, the keyboard
+// and other people's windows is a decision, not a default: it is listed and
+// waiting, and does nothing at all until the person turns it on.
+func (s *Server) seedBundledConnectors(ctx context.Context, userID string) {
+	for _, bundled := range s.bundled {
+		record, err := s.store.CreateConnector(ctx, bundled.Name, bundled.Command, userID)
+		if err != nil {
+			// The account exists and is signed in; a connector that could not be
+			// written down must not turn that into a failed sign-up.
+			s.log.Warn("could not register a bundled MCP server",
+				"connector", bundled.Name, "error", err)
+			continue
+		}
+		if _, err := s.store.SetConnectorEnabled(ctx, record.ID, false, userID); err != nil {
+			s.log.Warn("could not leave a bundled MCP server switched off",
+				"connector", bundled.Name, "error", err)
+		}
+	}
 }
 
 // handleSignIn checks a password and returns a session.

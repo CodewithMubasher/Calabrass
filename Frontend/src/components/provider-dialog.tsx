@@ -210,8 +210,7 @@ export function ProviderDetailDialog({
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
-  const custom = provider.custom
-  const ready = custom ? name.trim() !== "" && baseUrl.trim() !== "" : true
+  const ready = name.trim() !== "" && baseUrl.trim() !== ""
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -222,7 +221,8 @@ export function ProviderDetailDialog({
     try {
       await saveProvider(provider.id, {
         apiKey: apiKey.trim(),
-        ...(custom ? { name: name.trim(), baseUrl: baseUrl.trim() } : {}),
+        name: name.trim(),
+        baseUrl: baseUrl.trim(),
       })
       onOpenChange(false)
     } catch (err) {
@@ -254,33 +254,27 @@ export function ProviderDetailDialog({
           <DialogHeader>
             <DialogTitle className="text-white">{provider.name}</DialogTitle>
             <DialogDescription className="text-white/50">
-              {custom
-                ? "A provider you added. Its models are listed from its endpoint."
-                : "A provider built into Calabrass. Its endpoint is fixed; only the key can be changed here."}
+              A provider you added. Its models are listed from its endpoint.
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-3">
-            {custom ? (
-              <>
-                <Field label="Name">
-                  <Input
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    className="h-9 border-white/10 bg-white/5 px-3 text-white/80 placeholder:text-white/30"
-                  />
-                </Field>
-                <Field label="Base URL">
-                  <Input
-                    value={baseUrl}
-                    onChange={(event) => setBaseUrl(event.target.value)}
-                    autoComplete="off"
-                    spellCheck={false}
-                    className="h-9 border-white/10 bg-white/5 px-3 font-mono text-xs text-white/80 placeholder:text-white/30"
-                  />
-                </Field>
-              </>
-            ) : null}
+            <Field label="Name">
+              <Input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                className="h-9 border-white/10 bg-white/5 px-3 text-white/80 placeholder:text-white/30"
+              />
+            </Field>
+            <Field label="Base URL">
+              <Input
+                value={baseUrl}
+                onChange={(event) => setBaseUrl(event.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                className="h-9 border-white/10 bg-white/5 px-3 font-mono text-xs text-white/80 placeholder:text-white/30"
+              />
+            </Field>
 
             <KeyField
               value={apiKey}
@@ -293,19 +287,15 @@ export function ProviderDetailDialog({
           {error ? <p className="text-sm text-red-400">{error}</p> : null}
 
           <DialogFooter className="sm:justify-between">
-            {custom ? (
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={() => void remove()}
-                disabled={saving}
-              >
-                <HugeiconsIcon icon={Delete02Icon} strokeWidth={1.8} />
-                Delete
-              </Button>
-            ) : (
-              <span />
-            )}
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void remove()}
+              disabled={saving}
+            >
+              <HugeiconsIcon icon={Delete02Icon} strokeWidth={1.8} />
+              Delete
+            </Button>
             <div className="flex flex-col-reverse gap-2 sm:flex-row">
               <Button
                 type="button"

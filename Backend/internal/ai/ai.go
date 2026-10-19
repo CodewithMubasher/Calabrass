@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -35,15 +36,13 @@ type Message struct {
 	Replay json.RawMessage
 }
 
-// Registry resolves provider IDs to GoAI language models.
+// Registry resolves provider IDs to GoAI language models. Every provider comes
+// from the account's stored rows: nothing is built in, so a fresh account has
+// none until it adds one.
 type Registry struct {
-	geminiKey string
-	groqKey   string
-	priority  []string
-	source    ProviderSource
+	source ProviderSource
 	// userID scopes the stored provider rows to one account. A registry made
-	// by ForUser carries that account's id; the base registry carries only the
-	// built-in providers.
+	// by ForUser carries that account's id; the base registry carries none.
 	userID string
 	// catalog is this registry's cached model list, so one account's providers
 	// cannot populate or invalidate another's.
@@ -57,63 +56,47 @@ type ProviderRecord struct {
 	BaseURL string
 	APIKey  string
 	Enabled bool
-	Custom  bool
 }
 
-// ProviderSource returns the stored provider rows for one account. It may be
-// nil, leaving only the built-in providers.
+// ProviderSource returns the stored provider rows for one account. A registry
+// with no source has no providers at all.
 type ProviderSource func(ctx context.Context, userID string) ([]ProviderRecord, error)
 
-// NewRegistry builds a registry from the configured provider credentials.
-// priority controls the order in which available providers are offered, and
-// source supplies the providers stored in the database.
-func NewRegistry(geminiKey, groqKey string, priority []string, source ProviderSource) *Registry {
-	return &Registry{
-		geminiKey: geminiKey,
-		groqKey:   groqKey,
-		priority:  priority,
-		source:    source,
-	}
+// NewRegistry builds a registry over the providers stored in the database.
+func NewRegistry(source ProviderSource) *Registry {
+	return &Registry{source: source}
 }
 
 // ForUser returns a registry scoped to one account. The copy shares the
-// credentials and provider source but keeps its own model catalog, so changing
-// one account's providers does not disturb another's.
+// provider source but keeps its own model catalog, so changing one account's
+// providers does not disturb another's.
 func (r *Registry) ForUser(userID string) *Registry {
 	if r == nil {
 		return nil
 	}
 	return &Registry{
-		geminiKey: r.geminiKey,
-		groqKey:   r.groqKey,
-		priority:  r.priority,
-		source:    r.source,
-		userID:    userID,
+		source: r.source,
+		userID: userID,
 	}
 }
 
-// resolvedProvider is a provider joined with its stored settings. Built-ins
-// carry the behaviour from providerSpecs; custom providers are
-// OpenAI-compatible endpoints the user added.
+// resolvedProvider is a provider row joined with the adapter its endpoint calls
+// for.
 type resolvedProvider struct {
 	ID      string
 	Name    string
 	BaseURL string
 	APIKey  string
 	Enabled bool
-	Custom  bool
 
 	defaults []string
 	fetch    func(ctx context.Context, defaults []string) ([]ModelInfo, error)
 }
 
-// connected reports whether the provider has what it needs to be called. A
-// custom provider only needs a base URL: local servers take no key.
+// connected reports whether the provider has what it needs to be called: an
+// endpoint. A key is optional, because a local server may take none.
 func (p resolvedProvider) connected() bool {
-	if p.Custom {
-		return p.BaseURL != ""
-	}
-	return p.APIKey != ""
+	return p.BaseURL != ""
 }
 
 // ProviderSummary describes one provider, as the providers page needs it.
@@ -121,86 +104,78 @@ type ProviderSummary struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	BaseURL string `json:"baseUrl"`
-	// Connected reports whether the provider has credentials or, for a custom
-	// provider, an endpoint.
+	// Connected reports whether the provider has an endpoint.
 	Connected bool `json:"connected"`
 	// Enabled reports whether the provider may be used.
 	Enabled bool `json:"enabled"`
-	// Custom reports whether the user added this provider.
-	Custom bool `json:"custom"`
-	// APIKey is the effective credential: the stored override when one exists,
-	// otherwise the value from the environment. Never serialised directly; the
+	// APIKey is the provider's credential. Never serialised directly; the
 	// handlers decide what to expose.
 	APIKey string `json:"-"`
 }
 
-// providers merges the built-in specs with the stored rows: built-ins in
-// priority order, then custom providers by name. A read failure is not fatal;
-// it just leaves the built-ins.
-// GroqKey is the Groq credential the audio endpoints fall back to when nothing
-// is stored for Groq.
-func (r *Registry) GroqKey() string { return r.groqKey }
-
+// providers returns the account's stored providers, each paired with the adapter
+// and model listing its endpoint calls for. A read failure is not fatal: it
+// leaves no providers, which is also what a fresh account has.
 func (r *Registry) providers(ctx context.Context) []resolvedProvider {
-	records := map[string]ProviderRecord{}
-	if r.source != nil {
-		if rows, err := r.source(ctx, r.userID); err == nil {
-			for _, row := range rows {
-				records[strings.ToLower(strings.TrimSpace(row.ID))] = row
-			}
-		}
+	if r.source == nil {
+		return nil
+	}
+	rows, err := r.source(ctx, r.userID)
+	if err != nil {
+		return nil
 	}
 
-	specs := r.providerSpecs()
-	out := make([]resolvedProvider, 0, len(specs)+len(records))
-
-	for _, id := range r.builtinOrder(specs) {
-		spec := specs[id]
+	out := make([]resolvedProvider, 0, len(rows))
+	for _, row := range rows {
 		p := resolvedProvider{
-			ID:       id,
-			Name:     spec.name,
-			APIKey:   r.staticKey(id),
-			Enabled:  true,
-			defaults: spec.defaults,
-			fetch:    spec.fetch,
-		}
-		// A stored row overrides the built-in defaults. An empty stored key
-		// leaves the one from the environment in place.
-		if row, ok := records[id]; ok {
-			if key := strings.TrimSpace(row.APIKey); key != "" {
-				p.APIKey = key
-			}
-			if name := strings.TrimSpace(row.Name); name != "" {
-				p.Name = name
-			}
-			p.Enabled = row.Enabled
-		}
-		out = append(out, p)
-	}
-
-	custom := make([]ProviderRecord, 0, len(records))
-	for _, row := range records {
-		if row.Custom {
-			custom = append(custom, row)
-		}
-	}
-	sort.Slice(custom, func(i, j int) bool { return custom[i].Name < custom[j].Name })
-
-	for _, row := range custom {
-		p := resolvedProvider{
-			ID:      row.ID,
-			Name:    row.Name,
+			ID:      strings.ToLower(strings.TrimSpace(row.ID)),
+			Name:    strings.TrimSpace(row.Name),
 			BaseURL: NormaliseBaseURL(row.BaseURL),
 			APIKey:  row.APIKey,
 			Enabled: row.Enabled,
-			Custom:  true,
+		}
+		if p.ID == "" {
+			continue
+		}
+		if p.Name == "" {
+			p.Name = p.ID
+		}
+		switch endpointKind(p.BaseURL) {
+		case endpointGemini:
+			p.defaults = geminiPreferredModels
+		case endpointGroq:
+			p.defaults = groqPreferredModels
 		}
 		p.fetch = func(ctx context.Context, defaults []string) ([]ModelInfo, error) {
+			switch endpointKind(p.BaseURL) {
+			case endpointGemini:
+				return fetchGoogleModels(ctx, p.ID, p.APIKey, defaults)
+			case endpointGroq:
+				return fetchGroqModels(ctx, p.ID, p.APIKey, defaults)
+			}
 			return fetchCompatModels(ctx, p.ID, p.BaseURL, p.APIKey, defaults)
 		}
 		out = append(out, p)
 	}
+
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out
+}
+
+// GroqKey is the key of the account's Groq provider, for the audio endpoints,
+// which need a transcription credential without having a provider of their own.
+func (r *Registry) GroqKey(ctx context.Context) string {
+	for _, p := range r.providers(ctx) {
+		if endpointKind(p.BaseURL) == endpointGroq && p.APIKey != "" {
+			return p.APIKey
+		}
+	}
+	return ""
 }
 
 // Providers lists every provider, whether or not it is usable.
@@ -214,15 +189,14 @@ func (r *Registry) Providers(ctx context.Context) []ProviderSummary {
 			BaseURL:   p.BaseURL,
 			Connected: p.connected(),
 			Enabled:   p.Enabled,
-			Custom:    p.Custom,
 			APIKey:    p.APIKey,
 		})
 	}
 	return out
 }
 
-// ProviderOrder returns the providers that can actually be used, in preference
-// order: built-ins first, then custom providers by name.
+// ProviderOrder returns the providers that can actually be used, in the order
+// they are offered.
 func (r *Registry) ProviderOrder(ctx context.Context) []string {
 	out := []string{}
 	for _, p := range r.providers(ctx) {
@@ -241,68 +215,6 @@ func (r *Registry) Usable(ctx context.Context, providerID string) bool {
 		}
 	}
 	return false
-}
-
-// Known reports whether a provider id exists, built-in or custom.
-func (r *Registry) Known(ctx context.Context, providerID string) bool {
-	for _, p := range r.providers(ctx) {
-		if p.ID == providerID {
-			return true
-		}
-	}
-	return false
-}
-
-// staticKey returns the credential a built-in provider gets from the
-// environment.
-func (r *Registry) staticKey(providerID string) string {
-	switch providerID {
-	case ProviderGoogle:
-		return r.geminiKey
-	case ProviderGroq:
-		return r.groqKey
-	default:
-		return ""
-	}
-}
-
-// builtinOrder returns the built-in provider ids in priority order, followed by
-// any other built-in (sorted, so the order stays stable). A provider named in
-// the priority list that is not built in is ignored.
-func (r *Registry) builtinOrder(specs map[string]providerSpec) []string {
-	seen := make(map[string]bool, len(specs))
-	order := make([]string, 0, len(specs))
-
-	add := func(id string) {
-		id = strings.ToLower(strings.TrimSpace(id))
-		if id == "" || seen[id] {
-			return
-		}
-		if _, known := specs[id]; !known {
-			return
-		}
-		seen[id] = true
-		order = append(order, id)
-	}
-
-	for _, id := range r.priority {
-		add(id)
-	}
-	for _, id := range []string{ProviderGoogle, ProviderGroq} {
-		add(id)
-	}
-
-	rest := make([]string, 0, len(specs))
-	for id := range specs {
-		if !seen[id] {
-			rest = append(rest, id)
-		}
-	}
-	sort.Strings(rest)
-	for _, id := range rest {
-		add(id)
-	}
-	return order
 }
 
 // InvalidateCatalog drops this registry's cached model catalog so the next read
@@ -327,32 +239,17 @@ func (r *Registry) resolve(ctx context.Context, providerID, model string) (provi
 			continue
 		}
 		if !p.connected() {
-			if p.Custom {
-				return nil, fmt.Errorf("ai: %s has no base URL", p.ID)
-			}
-			return nil, fmt.Errorf("ai: %s API key is not configured", p.ID)
+			return nil, fmt.Errorf("ai: %s has no base URL", p.ID)
 		}
 		if !p.Enabled {
 			return nil, fmt.Errorf("ai: %s is turned off", p.ID)
 		}
 
-		if p.Custom {
-			opts := []compat.Option{
-				compat.WithBaseURL(p.BaseURL),
-				compat.WithProviderID(p.ID),
-			}
-			// A custom provider may legitimately take no key, in which case
-			// the Authorization header is left off entirely.
-			if p.APIKey != "" {
-				opts = append(opts, compat.WithAPIKey(p.APIKey))
-			}
-			return compat.Chat(model, opts...), nil
-		}
-
-		switch p.ID {
-		case ProviderGoogle:
+		switch endpointKind(p.BaseURL) {
+		case endpointGemini:
+			// Gemini speaks its own protocol rather than the OpenAI one.
 			return google.Chat(model, google.WithAPIKey(p.APIKey)), nil
-		case ProviderGroq:
+		case endpointGroq:
 			// Groq goes through the generic OpenAI-compatible model rather than
 			// groq.Chat because that one always replays the model's reasoning
 			// back as `reasoning_content`, and Groq rejects that field outright
@@ -360,15 +257,58 @@ func (r *Registry) resolve(ctx context.Context, providerID, model string) (provi
 			// loop would fail. Everything else stays the same: Groq's endpoint,
 			// and max_completion_tokens, which Groq prefers to max_tokens.
 			return compat.Chat(model,
-				compat.WithProviderID(ProviderGroq),
+				compat.WithProviderID(p.ID),
 				compat.WithBaseURL(groqBaseURL),
 				compat.WithAPIKey(p.APIKey),
 				compat.WithMaxCompletionTokens(true),
 			), nil
 		}
+
+		opts := []compat.Option{
+			compat.WithBaseURL(p.BaseURL),
+			compat.WithProviderID(p.ID),
+		}
+		// A provider may legitimately take no key, in which case the
+		// Authorization header is left off entirely.
+		if p.APIKey != "" {
+			opts = append(opts, compat.WithAPIKey(p.APIKey))
+		}
+		return compat.Chat(model, opts...), nil
 	}
 
 	return nil, fmt.Errorf("%w: %q", ErrUnsupportedProvider, providerID)
+}
+
+// endpoint tells the registry which adapter a provider's base URL needs.
+type endpoint int
+
+const (
+	endpointCompat endpoint = iota
+	endpointGemini
+	endpointGroq
+)
+
+// endpointKind recognises the two vendors that do not speak the plain OpenAI
+// protocol. It matches on the endpoint rather than on a name, because a provider
+// exists only because the person added it: where it points decides how to talk
+// to it.
+func endpointKind(raw string) endpoint {
+	u, err := url.Parse(NormaliseBaseURL(raw))
+	if err != nil || u.Host == "" {
+		return endpointCompat
+	}
+	switch {
+	case strings.EqualFold(u.Host, "generativelanguage.googleapis.com"):
+		// Gemini's own API is not OpenAI-compatible. Its /openai path is a
+		// translation layer, and pointing there is a request for that layer.
+		if strings.Contains(strings.ToLower(u.Path), "/openai") {
+			return endpointCompat
+		}
+		return endpointGemini
+	case strings.EqualFold(u.Host, "api.groq.com"):
+		return endpointGroq
+	}
+	return endpointCompat
 }
 
 // Usage reports token consumption for one completion.

@@ -12,11 +12,8 @@ import (
 	"time"
 )
 
-// Provider identifiers used across the backend and the API.
+// Roles a stored message can have.
 const (
-	ProviderGoogle = "google"
-	ProviderGroq   = "groq"
-
 	RoleUser      = "user"
 	RoleAssistant = "assistant"
 )
@@ -52,9 +49,10 @@ var (
 )
 
 // Models returns the live model catalog, using a short-lived cache unless
-// force is set. Providers that are turned off or have no credentials are
-// skipped; if every live lookup fails the static fallback list is returned so
-// the UI is never empty.
+// force is set. Providers that are turned off or have no endpoint are skipped.
+// When no live lookup succeeds, the endpoints known to serve a fixed set of
+// models fall back to that set, so a network blip does not empty the picker. An
+// account with no providers gets an empty catalog, which is the truth.
 func (r *Registry) Models(ctx context.Context, force bool) []ProviderInfo {
 	r.catalog.mu.Lock()
 	defer r.catalog.mu.Unlock()
@@ -99,43 +97,29 @@ func NormaliseBaseURL(raw string) string {
 // groqBaseURL is Groq's OpenAI-compatible endpoint.
 const groqBaseURL = "https://api.groq.com/openai/v1"
 
-// providerSpec describes how to talk to one provider's model listing.
-type providerSpec struct {
-	id       string
-	name     string
-	defaults []string
-	fetch    func(ctx context.Context, defaults []string) ([]ModelInfo, error)
-}
+// geminiBaseURL is the Google Generative Language API. It speaks its own
+// protocol rather than the OpenAI one, which is why it gets its own adapter.
+const geminiBaseURL = "https://generativelanguage.googleapis.com"
 
-func (r *Registry) providerSpecs() map[string]providerSpec {
-	return map[string]providerSpec{
-		ProviderGoogle: {
-			id:   ProviderGoogle,
-			name: "Google Gemini",
-			// Preference order: the first id present in the live catalog wins.
-			defaults: []string{
-				"gemini-3.8-flash",
-				"gemini-flash-latest",
-				"gemini-3.5-flash",
-				"gemini-2.5-flash",
-				"gemini-2.5-pro",
-			},
-			fetch: r.fetchGoogleModels,
-		},
-		ProviderGroq: {
-			id:   ProviderGroq,
-			name: "Groq",
-			// Not every Groq key exposes llama-3.3-70b-versatile.
-			defaults: []string{
-				"openai/gpt-oss-120b",
-				"qwen/qwen3.8-27b",
-				"llama-3.3-70b-versatile",
-				"llama-3.1-8b-instant",
-			},
-			fetch: r.fetchGroqModels,
-		},
+// The preferred model order for the two vendors whose API is not plain
+// OpenAI-compatible. The first id the live catalog actually offers wins, so the
+// picker opens on a sensible model without hard-coding the only choice. These
+// are also what a fallback shows when the live listing cannot be fetched.
+var (
+	geminiPreferredModels = []string{
+		"gemini-3.8-flash",
+		"gemini-flash-latest",
+		"gemini-3.5-flash",
+		"gemini-2.5-flash",
+		"gemini-2.5-pro",
 	}
-}
+	groqPreferredModels = []string{
+		"openai/gpt-oss-120b",
+		"qwen/qwen3.8-27b",
+		"llama-3.3-70b-versatile",
+		"llama-3.1-8b-instant",
+	}
+)
 
 // DefaultModel returns the default model for a provider, or an empty string.
 func (r *Registry) DefaultModel(ctx context.Context, providerID string) string {
@@ -168,13 +152,13 @@ type geminiModel struct {
 	SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
 }
 
-func (r *Registry) fetchGoogleModels(ctx context.Context, defaults []string) ([]ModelInfo, error) {
+func fetchGoogleModels(ctx context.Context, providerID, apiKey string, defaults []string) ([]ModelInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		"https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", nil)
+		geminiBaseURL+"/v1beta/models?pageSize=200", nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("x-goog-api-key", r.geminiKey)
+	req.Header.Set("x-goog-api-key", apiKey)
 
 	var payload struct {
 		Models []geminiModel `json:"models"`
@@ -196,18 +180,18 @@ func (r *Registry) fetchGoogleModels(ctx context.Context, defaults []string) ([]
 		if label == "" {
 			label = Prettify(id)
 		}
-		models = append(models, ModelInfo{ID: id, Label: label, Provider: ProviderGoogle})
+		models = append(models, ModelInfo{ID: id, Label: label, Provider: providerID})
 	}
 	sortModels(models, defaults)
 	return models, nil
 }
 
-func (r *Registry) fetchGroqModels(ctx context.Context, defaults []string) ([]ModelInfo, error) {
+func fetchGroqModels(ctx context.Context, providerID, apiKey string, defaults []string) ([]ModelInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, groqBaseURL+"/models", nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+r.groqKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	var payload struct {
 		Data []struct {
@@ -223,7 +207,7 @@ func (r *Registry) fetchGroqModels(ctx context.Context, defaults []string) ([]Mo
 		if m.ID == "" || isNonChatModel(m.ID) {
 			continue
 		}
-		models = append(models, ModelInfo{ID: m.ID, Label: Prettify(m.ID), Provider: ProviderGroq})
+		models = append(models, ModelInfo{ID: m.ID, Label: Prettify(m.ID), Provider: providerID})
 	}
 	sortModels(models, defaults)
 	return models, nil
@@ -296,14 +280,14 @@ func pickDefault(models []ModelInfo) string {
 	return models[0].ID
 }
 
-// fallbackCatalog lists each usable built-in provider's preferred models, used
-// when every live lookup fails. Custom providers are left out, since their
-// model ids cannot be guessed.
+// fallbackCatalog lists the models a recognised endpoint is known to serve, used
+// when its live listing cannot be fetched. A plain OpenAI-compatible provider is
+// left out: its model ids cannot be guessed.
 func fallbackCatalog(r *Registry, ctx context.Context) []ProviderInfo {
 	providers := []ProviderInfo{}
 
 	for _, p := range r.providers(ctx) {
-		if p.Custom || !p.connected() || !p.Enabled || len(p.defaults) == 0 {
+		if !p.connected() || !p.Enabled || len(p.defaults) == 0 {
 			continue
 		}
 		models := make([]ModelInfo, 0, len(p.defaults))

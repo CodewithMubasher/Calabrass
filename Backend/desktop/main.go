@@ -134,7 +134,16 @@ func newLogger(path string) (*slog.Logger, func()) {
 	if err != nil {
 		return slog.New(slog.NewTextHandler(os.Stdout, nil)), func() {}
 	}
-	return slog.New(slog.NewTextHandler(io.MultiWriter(os.Stdout, file), nil)), func() {
+	// The file writes first, and stdout only joins when there is a console to
+	// write to. An installed app is a GUI process with none, so os.Stdout is an
+	// invalid handle, every write to it fails, and io.MultiWriter stops at the
+	// first writer that fails — which left the log empty for every real run and
+	// a whole turn's history unreadable.
+	writers := []io.Writer{file}
+	if info, statErr := os.Stdout.Stat(); statErr == nil && info.Mode()&os.ModeCharDevice != 0 {
+		writers = append(writers, os.Stdout)
+	}
+	return slog.New(slog.NewTextHandler(io.MultiWriter(writers...), nil)), func() {
 		_ = file.Close()
 	}
 }

@@ -59,3 +59,7 @@ Frontend/package.json.md5
 
 # The desktop build's loopback API address is not a secret.
 !Frontend/.env.desktop
+
+# The Windows installer, as built. The script and its Inno Setup source are the
+# source; the setup executable is the product of them.
+installer/out/

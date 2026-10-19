@@ -189,14 +189,12 @@ func (s *Server) voiceModel(ctx context.Context, userID string, chat store.ChatD
 	return s.resolveModelFor(ctx, userID, chat.Provider, chat.Model)
 }
 
-// groqKey is the key the audio endpoints use: the one stored for the account's
-// Groq provider if there is one, otherwise the key from the environment.
+// groqKey is the key the audio endpoints use: the one on the account's Groq
+// provider, if it has one. Those endpoints transcribe over Groq's own API, so
+// they need its credential without having a provider row of their own.
 func (s *Server) groqKey(ctx context.Context, userID string) string {
-	if record, err := s.store.GetProvider(ctx, "groq", userID); err == nil && record.APIKey != "" {
-		return record.APIKey
-	}
 	if reg := s.registryFor(userID); reg != nil {
-		return reg.GroqKey()
+		return reg.GroqKey(ctx)
 	}
 	return ""
 }

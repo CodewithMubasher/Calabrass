@@ -25,7 +25,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import { hydrate } from "@/lib/chat-store"
-import { refreshSession, session } from "@/lib/auth"
+import { refreshSession, session, useSession } from "@/lib/auth"
 import { loadModels } from "@/lib/model-store"
 import { toggleArtifacts, usePanelState } from "@/lib/panel-store"
 import { isStandalone, hasTopbar, chatIdFrom } from "@/lib/routes"
@@ -58,17 +58,25 @@ function RootLayout() {
   // The artifacts rail rides with that bar, which is where its icon is.
   const showsTopbar = hasTopbar(pathname)
   const { artifactsOpen } = usePanelState()
+  // Whether anyone is signed in, not who: the session check below rebuilds the
+  // account object on every run, so keying on the object itself would re-run the
+  // effect forever.
+  const signedIn = useSession() !== null
 
-  // Validate session on mount, then hydrate data. If the token is expired or
-  // revoked, refreshSession clears it and we redirect to login. Only after a
-  // valid session do we load models and chats, so we never hit 401 on those calls.
+  // Validate the session, then load the account's data. The login and sign-up
+  // pages are reached without a session, so there is nothing to load there and
+  // asking would only 401 — which used to leave the store unhydrated and every
+  // chat stuck on "Loading…" until the app was restarted. Re-running when
+  // someone signs in or out is what lets a fresh sign-in load its chats.
   useEffect(() => {
     let mounted = true
     void (async () => {
       const current = await refreshSession()
       if (!mounted) return
-      if (!current && !isStandalone(window.location.pathname)) {
-        void navigate({ to: "/login", replace: true })
+      if (!current) {
+        if (!isStandalone(window.location.pathname)) {
+          void navigate({ to: "/login", replace: true })
+        }
         return
       }
       void hydrate()
@@ -77,7 +85,7 @@ function RootLayout() {
     return () => {
       mounted = false
     }
-  }, [navigate])
+  }, [navigate, signedIn])
 
   // The login page stands on its own: nothing from the shell is around it, not
   // even the surface the rest of the app sits in. Its page brings its own.

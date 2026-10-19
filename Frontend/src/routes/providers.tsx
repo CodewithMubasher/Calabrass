@@ -61,11 +61,10 @@ const PROVIDER_ICONS: Record<string, IconSvgElement> = {
   deepseek: DeepseekIcon,
 }
 
-/** The middle line of a card: the endpoint, or why there is not one. */
+/** The middle line of a card: the endpoint the provider calls. */
 function describe(provider: ProviderRow) {
   if (provider.baseUrl) return provider.baseUrl
-  if (!provider.connected) return "No base URL configured"
-  return "Built in"
+  return "No base URL configured"
 }
 
 /** The chip: green when the provider can be used, grey when it cannot. */
@@ -219,14 +218,12 @@ function ProvidersPage() {
                         >
                           <span>Edit</span>
                         </DropdownMenuItem>
-                        {provider.custom ? (
-                          <DropdownMenuItem
-                            variant="destructive"
-                            onClick={() => void remove(provider.id)}
-                          >
-                            <span>Delete</span>
-                          </DropdownMenuItem>
-                        ) : null}
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onClick={() => void remove(provider.id)}
+                        >
+                          <span>Delete</span>
+                        </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>

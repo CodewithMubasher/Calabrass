@@ -48,6 +48,10 @@ type Deps struct {
 	// Connectors holds the MCP servers the agent may start. When it is nil one
 	// is built here, which is what tests get.
 	Connectors *connectors.Pool
+	// Bundled holds the MCP servers that shipped with the app, which every new
+	// account gets so they are ready to switch on instead of having to be typed
+	// in by path. Empty registers nothing, which is what tests get.
+	Bundled []connectors.Bundled
 	// Quotas holds the free-tier limits read from model_free_tier_quotas.md.
 	// Nil means no limits are known, which is how a missing file is handled.
 	Quotas *quota.Catalog
@@ -67,6 +71,7 @@ type Server struct {
 	voiceProvider string
 	voiceModelID  string
 	connectors    *connectors.Pool
+	bundled       []connectors.Bundled
 	quotas        *quota.Catalog
 	log           *slog.Logger
 	// registries and libraries cache the per-account views, so each account
@@ -116,6 +121,7 @@ func NewServer(deps Deps) *Server {
 		voiceProvider: deps.VoiceProvider,
 		voiceModelID:  deps.VoiceModel,
 		connectors:    pool,
+		bundled:       deps.Bundled,
 		quotas:        deps.Quotas,
 		log:           log,
 		registries:    map[string]*ai.Registry{},

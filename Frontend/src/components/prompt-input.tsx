@@ -363,7 +363,7 @@ const PromptInput = forwardRef<PromptInputRef, PromptInputProps>(
                 )}
                 {!loadingModels && !modelError && providers.length === 0 && agents.length === 0 && (
                   <div className="px-3 py-2 text-xs text-white/40">
-                    No models available — check backend API keys.
+                    No models available — add a provider on the Providers page.
                   </div>
                 )}
                 {agents.length > 0 && (

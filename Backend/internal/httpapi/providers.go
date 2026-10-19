@@ -28,7 +28,6 @@ type providerPayload struct {
 	APIKey       string `json:"apiKey"`
 	Connected    bool   `json:"connected"`
 	Enabled      bool   `json:"enabled"`
-	Custom       bool   `json:"custom"`
 	DefaultModel string `json:"defaultModel"`
 	ModelCount   int    `json:"modelCount"`
 }
@@ -61,7 +60,6 @@ func (s *Server) providerRows(ctx context.Context, userID string) ([]providerPay
 			APIKey:    p.APIKey,
 			Connected: p.Connected,
 			Enabled:   p.Enabled,
-			Custom:    p.Custom,
 		}
 		if info, ok := catalog[p.ID]; ok {
 			row.DefaultModel = info.DefaultModel
@@ -135,17 +133,11 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 	s.respondWithProviders(w, r)
 }
 
-// handleUpdateProvider edits a provider, or just turns it on or off. Built-in
-// providers only accept a key and the toggle: their endpoint and name are part
-// of the backend.
+// handleUpdateProvider edits a provider, or just turns it on or off. Every field
+// is optional, so a toggle can send only `enabled`.
 func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r.Context())
 	reg := s.registryFor(user.ID)
-	providerID := r.PathValue("providerID")
-	if !reg.Known(r.Context(), providerID) {
-		writeError(w, http.StatusNotFound, ErrUnknownProvider)
-		return
-	}
 
 	var req providerRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -153,38 +145,30 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rec, err := s.store.GetProvider(r.Context(), providerID, user.ID)
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		// A built-in with nothing stored yet: start from its defaults and let
-		// the submitted fields create the override.
-		rec = store.ProviderRecord{ID: providerID, Enabled: true}
-	case err != nil:
+	rec, err := s.store.GetProvider(r.Context(), r.PathValue("providerID"), user.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, ErrUnknownProvider)
+		return
+	}
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 
-	if rec.Custom {
-		if req.Name != nil {
-			rec.Name = strings.TrimSpace(*req.Name)
-		}
-		if req.BaseURL != nil {
-			rec.BaseURL = ai.NormaliseBaseURL(*req.BaseURL)
-		}
-		if rec.Name == "" {
-			writeError(w, http.StatusBadRequest, errors.New("name is required"))
-			return
-		}
-		if err := validateBaseURL(rec.BaseURL); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-	} else {
-		// Built-in: the name and endpoint belong to the backend.
-		rec.Name = ""
-		rec.BaseURL = ""
+	if req.Name != nil {
+		rec.Name = strings.TrimSpace(*req.Name)
 	}
-
+	if req.BaseURL != nil {
+		rec.BaseURL = ai.NormaliseBaseURL(*req.BaseURL)
+	}
+	if rec.Name == "" {
+		writeError(w, http.StatusBadRequest, errors.New("name is required"))
+		return
+	}
+	if err := validateBaseURL(rec.BaseURL); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	if req.APIKey != nil {
 		rec.APIKey = strings.TrimSpace(*req.APIKey)
 	}
@@ -201,35 +185,16 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 	s.respondWithProviders(w, r)
 }
 
-// handleDeleteProvider removes a custom provider. Built-ins cannot be removed,
-// only turned off.
+// handleDeleteProvider removes a provider, and with it its endpoint and key.
 func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r.Context())
 	reg := s.registryFor(user.ID)
-	providerID := r.PathValue("providerID")
-	if !reg.Known(r.Context(), providerID) {
-		writeError(w, http.StatusNotFound, ErrUnknownProvider)
-		return
-	}
 
-	rec, err := s.store.GetProvider(r.Context(), providerID, user.ID)
-	if errors.Is(err, store.ErrNotFound) {
-		// A built-in that has never been edited has no row, and cannot go.
-		writeError(w, http.StatusBadRequest,
-			errors.New("built-in providers cannot be removed; turn it off instead"))
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if !rec.Custom {
-		writeError(w, http.StatusBadRequest,
-			errors.New("built-in providers cannot be removed; turn it off instead"))
-		return
-	}
-
-	if err := s.store.DeleteProvider(r.Context(), providerID, user.ID); err != nil {
+	if err := s.store.DeleteProvider(r.Context(), r.PathValue("providerID"), user.ID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, ErrUnknownProvider)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

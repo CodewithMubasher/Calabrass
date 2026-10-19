@@ -106,16 +106,14 @@ export interface ProviderRow {
   /** The OpenAI-compatible endpoint, for a provider the user added. */
   baseUrl: string
   /**
-   * The effective credential: the stored override, or the value from the
-   * backend's environment. Only ever sent to this local API.
+   * The provider's credential. It lives with the provider row, and is only ever
+   * sent to this local API.
    */
   apiKey: string
-  /** Credentials are configured for this provider. */
+  /** An endpoint is configured for this provider. */
   connected: boolean
   /** Whether the provider may be used; turning it off hides its models. */
   enabled: boolean
-  /** The user added this provider, so it can also be renamed or removed. */
-  custom: boolean
   defaultModel: string
   /** Chat models the live catalog exposes for this provider. */
   modelCount: number

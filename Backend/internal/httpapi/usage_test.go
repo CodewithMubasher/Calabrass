@@ -59,7 +59,7 @@ func TestUsageEndpoint(t *testing.T) {
 		}
 	}
 
-	registry := ai.NewRegistry("", "", nil, nil)
+	registry := ai.NewRegistry(nil)
 	server := httptest.NewServer(NewServer(Deps{
 		Store:    st,
 		Registry: registry,

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -44,12 +45,11 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error)
 	// build still starts, and is signed into once the schema catches up.
 	accounts := auth.New(st)
 
-	// Providers are stored in the database, so the registry reads them on
-	// demand: built-in providers (Google, Groq) keep their credential in the
-	// environment unless a stored override exists, and custom providers carry
-	// their own endpoint and key. The registry is scoped per account: a row on
-	// one account is invisible to another.
-	registry := ai.NewRegistry(cfg.GeminiKey, cfg.GroqKey, cfg.ProviderPriority,
+	// Providers live in the database, so the registry reads them on demand:
+	// every row carries its own endpoint and key, and a fresh account starts
+	// with none. The registry is scoped per account: a row on one account is
+	// invisible to another.
+	registry := ai.NewRegistry(
 		func(ctx context.Context, userID string) ([]ai.ProviderRecord, error) {
 			rows, sourceErr := st.ListProviders(ctx, userID)
 			if sourceErr != nil {
@@ -63,7 +63,6 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error)
 					BaseURL: row.BaseURL,
 					APIKey:  row.APIKey,
 					Enabled: row.Enabled,
-					Custom:  row.Custom,
 				})
 			}
 			return records, nil
@@ -93,8 +92,11 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error)
 
 	// The MCP servers the agent may start. They are started when a turn first
 	// needs them and stopped when they have been idle, or when this process
-	// ends — the connector's own process lives inside this one.
-	pool := connectors.New(st, agent.DiscoverRoot(""), log)
+	// ends — the connector's own process lives inside this one. mcpRoot is both
+	// what a connector's command is resolved against and where the servers that
+	// ship with the app are looked for.
+	mcpRoot := mcpRoot()
+	pool := connectors.New(st, mcpRoot, log)
 
 	// The free-tier limits are optional: usage still works without them, there
 	// is just nothing to measure against. CALABRASS_QUOTAS lets the desktop
@@ -121,6 +123,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error)
 		VoiceProvider: cfg.VoiceProvider,
 		VoiceModel:    cfg.VoiceModel,
 		Connectors:    pool,
+		Bundled:       connectors.BundledAt(mcpRoot),
 		Quotas:        quotas,
 		Logger:        log,
 	})
@@ -131,6 +134,23 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error)
 		Handler: handler,
 		pool:    pool,
 	}, nil
+}
+
+// mcpRoot is the folder a connector's command is resolved against, and the
+// folder the MCP servers that ship with the app are looked for in. An installed
+// app keeps them in an MCP folder beside the executable, so that folder wins
+// when it is there; running from the source tree there is no such folder, and
+// the project root is used instead. It matters that the answer does not depend
+// on the working directory: a shortcut, a file association and a terminal all
+// start the app from somewhere different.
+func mcpRoot() string {
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		if info, err := os.Stat(filepath.Join(dir, "MCP")); err == nil && info.IsDir() {
+			return dir
+		}
+	}
+	return agent.DiscoverRoot("")
 }
 
 // Close releases the connector processes and the database.
