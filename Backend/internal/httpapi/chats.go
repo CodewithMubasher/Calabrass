@@ -49,10 +49,10 @@ func (s *Server) handleListChats(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r.Context())
 	var req struct {
-		Provider   string `json:"provider"`
-		Model      string `json:"model"`
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
 		// Mode is the chat's operating mode: "build" (full tools) or "plan" (read-only).
-		Mode       string `json:"mode"`
+		Mode string `json:"mode"`
 		// WorkspaceID binds the chat to one workspace's folder. Empty means the
 		// default workspace.
 		WorkspaceID string `json:"workspaceId"`
@@ -151,7 +151,7 @@ func (s *Server) handleUpdateChat(w http.ResponseWriter, r *http.Request) {
 		Provider string `json:"provider"`
 		Model    string `json:"model"`
 		// Mode is the chat's operating mode: "build" or "plan".
-		Mode   string `json:"mode"`
+		Mode string `json:"mode"`
 		// Pinned is a pointer so "leave it alone" is different from false.
 		Pinned *bool `json:"pinned"`
 	}
@@ -283,7 +283,7 @@ func (s *Server) workspaceForUser(userID string, chat store.Chat) *agent.Workspa
 
 	dir := strings.TrimSpace(chat.WorkspaceDir)
 	if dir == "" || dir == agent.DefaultWorkspaceName {
-		if userID == "" || userID == s.adminID {
+		if userID == "" {
 			if s.workspace != nil {
 				return s.workspace
 			}

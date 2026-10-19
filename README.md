@@ -64,11 +64,12 @@ there is no CORS setup to worry about.
 
 ## Accounts
 
-The backend creates the original `admin@cal.com` / `Zorin1122` account on first
-start, so existing installs keep working. Use **Sign up** on the login page to
-create another account. Every account is fully isolated: each one has its own
-chats, messages, providers, workspaces, connectors, agents, schedules and
-usage. Rows written before accounts existed belong to the admin account.
+There is no account in the source and no default password. On first run you
+land on the login page; use **Sign up** to create your own account, and that
+first account owns the install. Every account is fully isolated: each one has
+its own chats, messages, providers, workspaces, connectors, agents, schedules
+and usage, and its own workspace folder, which is created when the account first
+opens one.
 
 Passwords are stored as bcrypt hashes in SQLite and a sign-in lasts 30 days via
 a bearer token; the database only stores the token's SHA-256. Every API

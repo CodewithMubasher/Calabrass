@@ -371,28 +371,6 @@ ALTER TABLE providers_user_keyed RENAME TO providers;
 	return nil
 }
 
-// AssignOrphanData gives rows that predate accounts to one account. It is how
-// the chats, providers and settings an installation already had stay with the
-// shipped admin account after accounts arrive.
-func (s *Store) AssignOrphanData(ctx context.Context, userID string) error {
-	if strings.TrimSpace(userID) == "" {
-		return nil
-	}
-	tables := []string{
-		"chats", "providers", "workspaces", "connectors",
-		"scheduled_tasks", "agents", "usage_events",
-	}
-	for _, table := range tables {
-		if _, err := s.db.ExecContext(ctx,
-			fmt.Sprintf(`UPDATE %s SET user_id = ? WHERE user_id = '' OR user_id IS NULL`, table),
-			userID,
-		); err != nil {
-			return fmt.Errorf("store: assign %s to account: %w", table, err)
-		}
-	}
-	return nil
-}
-
 // ensureColumn adds a column when an older database does not have it yet.
 func (s *Store) ensureColumn(ctx context.Context, table, column, ddl string) error {
 	var count int
@@ -1075,8 +1053,8 @@ func (s *Store) DeleteConnector(ctx context.Context, id string, userID ...string
 type AgentRecord struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
-	Prompt       string `json:"prompt"`        // System prompt replacement when used as primary agent
-	SystemPrompt string `json:"systemPrompt"`  // Explicit system prompt (optional, falls back to Prompt)
+	Prompt       string `json:"prompt"`       // System prompt replacement when used as primary agent
+	SystemPrompt string `json:"systemPrompt"` // Explicit system prompt (optional, falls back to Prompt)
 	// Mode is "build" or "plan".
 	Mode string `json:"mode"`
 	// ConnectorID is the MCP connector the agent may use; empty for none.

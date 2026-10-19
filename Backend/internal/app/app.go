@@ -38,22 +38,11 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error)
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
-	// Accounts live in the same database as the chats. The shipped admin
-	// account keeps the old login working; new people can sign up for their
-	// own. Failures are logged rather than fatal, so a database from an older
-	// build can still start and be signed into once the schema catches up.
+	// Accounts live in the same database as the chats. Nothing is created here:
+	// the first account is whoever signs up on the login page, and it owns its
+	// own chats, providers, workspaces and settings. A database from an older
+	// build still starts, and is signed into once the schema catches up.
 	accounts := auth.New(st)
-	admin, err := accounts.EnsureDefaultAccount(ctx)
-	if err != nil {
-		log.Warn("could not create the default account", "error", err)
-	}
-	if admin.ID != "" {
-		// Rows written before accounts existed belong to the shipped admin, so
-		// the chats and settings already on this machine stay where they were.
-		if err := st.AssignOrphanData(ctx, admin.ID); err != nil {
-			log.Warn("could not assign pre-account data to the admin account", "error", err)
-		}
-	}
 
 	// Providers are stored in the database, so the registry reads them on
 	// demand: built-in providers (Google, Groq) keep their credential in the
@@ -80,10 +69,6 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error)
 			return records, nil
 		})
 
-	if admin.ID != "" && len(registry.ForUser(admin.ID).ProviderOrder(ctx)) == 0 {
-		log.Warn("no usable AI provider; set GROQ_API_KEY or GOOGLE_GENERATIVE_AI_API_KEY in the .env of the Calabrass data folder, or add a provider on the Providers page", "dataDir", config.DataDir())
-	}
-
 	// The harness works inside one workspace folder at a time, and every
 	// workspace lives inside a single library directory: the workspace folder in
 	// the user's data directory. It is never the project the app was built from,
@@ -94,32 +79,16 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error)
 		libraryDir = filepath.Join(config.DataDir(), "workspace")
 	}
 
-	var (
-		library   *agent.Library
-		workspace *agent.Workspace
-	)
+	// The folder is only the container an account's workspaces live under.
+	// Nothing is made inside it here: an account gets its own workspace the
+	// first time it opens one, so a fresh install holds no user data at all.
+	var library *agent.Library
 	library, err = agent.NewLibrary(libraryDir)
 	if err != nil {
 		log.Warn("agent tools are off: no usable workspaces folder", "dir", libraryDir, "error", err)
 		library = nil
 	} else {
-		// The default workspace is the one a chat works in until it picks its
-		// own, so it exists from the first boot.
-		workspace, err = library.Ensure(agent.DefaultWorkspaceName)
-		if err != nil {
-			log.Warn("agent tools are off: the default workspace is unusable", "error", err)
-			workspace = nil
-		} else {
-			log.Info("agent workspace", "root", workspace.Root(), "library", library.Root())
-		}
-		if _, err := st.EnsureWorkspace(ctx, store.WorkspaceRecord{
-			Name:        "Default",
-			Description: "Where chats work until they pick a workspace of their own.",
-			Dir:         agent.DefaultWorkspaceName,
-			Builtin:     true,
-		}, admin.ID); err != nil {
-			log.Warn("could not record the default workspace", "error", err)
-		}
+		log.Info("agent workspaces", "library", library.Root())
 	}
 
 	// The MCP servers the agent may start. They are started when a turn first
@@ -147,9 +116,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error)
 		Registry:      registry,
 		SystemPrompt:  cfg.SystemPrompt,
 		Auth:          accounts,
-		AdminID:       admin.ID,
 		Library:       library,
-		Workspace:     workspace,
 		MistralKey:    cfg.MistralKey,
 		VoiceProvider: cfg.VoiceProvider,
 		VoiceModel:    cfg.VoiceModel,

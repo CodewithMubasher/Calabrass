@@ -23,16 +23,6 @@ import (
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
 )
 
-// DefaultEmail and DefaultPassword are the account the app ships with, so the
-// credentials the login screen always had keep working after accounts moved to
-// the server. New people can sign up for their own account; each account owns
-// its own chats, providers, workspaces and settings.
-const (
-	DefaultName     = "Admin"
-	DefaultEmail    = "admin@cal.com"
-	DefaultPassword = "Zorin1122"
-)
-
 // SessionTTL is how long a sign-in lasts before the token stops being accepted.
 const SessionTTL = 30 * 24 * time.Hour
 
@@ -130,33 +120,6 @@ func (s *Service) SignOut(ctx context.Context, token string) error {
 		return nil
 	}
 	return s.store.DeleteSession(ctx, hashToken(token))
-}
-
-// EnsureDefaultAccount creates the account the login screen has always named,
-// once, and returns it. It does nothing when that account already exists, so
-// changing the default password on the account later is not undone on the next
-// start.
-func (s *Service) EnsureDefaultAccount(ctx context.Context) (User, error) {
-	existing, err := s.store.UserByEmail(ctx, DefaultEmail)
-	if err == nil {
-		return publicUser(existing), nil
-	}
-	if !errors.Is(err, store.ErrNotFound) {
-		return User{}, err
-	}
-	user, err := s.createUser(ctx, DefaultName, DefaultEmail, DefaultPassword)
-	if errors.Is(err, ErrEmailTaken) {
-		// Another start created it between the read and the write.
-		existing, lookupErr := s.store.UserByEmail(ctx, DefaultEmail)
-		if lookupErr != nil {
-			return User{}, lookupErr
-		}
-		return publicUser(existing), nil
-	}
-	if err != nil {
-		return User{}, err
-	}
-	return publicUser(user), nil
 }
 
 func (s *Service) createUser(ctx context.Context, name, email, password string) (store.UserRecord, error) {

@@ -31,9 +31,6 @@ type Deps struct {
 	SystemPrompt string
 	// Auth holds the local accounts. When it is nil one is built from Store.
 	Auth *auth.Service
-	// AdminID is the shipped account that inherits pre-account data and keeps
-	// the original workspace library. Empty gives every account its own library.
-	AdminID string
 	// Library holds the workspace folders. When it is nil the workspace
 	// endpoints report unavailable.
 	Library *agent.Library
@@ -62,7 +59,6 @@ type Server struct {
 	store         *store.Store
 	registry      *ai.Registry
 	auth          *auth.Service
-	adminID       string
 	system        string
 	library       *agent.Library
 	workspace     *agent.Workspace
@@ -112,7 +108,6 @@ func NewServer(deps Deps) *Server {
 		store:         deps.Store,
 		registry:      deps.Registry,
 		auth:          accounts,
-		adminID:       strings.TrimSpace(deps.AdminID),
 		system:        deps.SystemPrompt,
 		library:       deps.Library,
 		workspace:     deps.Workspace,
@@ -321,14 +316,15 @@ func (s *Server) registryFor(userID string) *ai.Registry {
 	return reg
 }
 
-// libraryFor returns the workspace library an account may use. The shipped
-// admin keeps the original library, so chats that predate accounts still find
-// their files; every other account gets a private folder beneath it.
+// libraryFor returns the workspace library an account may use. Rows that
+// predate accounts use the root library, so files the app already made stay
+// where they were; a signed-in account gets a private folder beneath it, so two
+// accounts on one machine never share files.
 func (s *Server) libraryFor(userID string) *agent.Library {
 	if s.library == nil {
 		return nil
 	}
-	if s.adminID == "" || strings.TrimSpace(userID) == "" || userID == s.adminID {
+	if strings.TrimSpace(userID) == "" {
 		return s.library
 	}
 
