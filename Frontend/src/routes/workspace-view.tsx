@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
@@ -29,7 +29,9 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import { createChat, sendMessage, useChats } from "@/lib/chat-store"
+import { api } from "@/lib/api"
 import { useWorkspacesState } from "@/lib/workspace-store"
+import type { WorkspaceGitInfo } from "@/types/chat"
 import { Route as rootRoute } from "@/routes/__root"
 
 export const Route = createRoute({
@@ -45,20 +47,12 @@ function WorkspaceRoute() {
   return <WorkspaceView key={workspaceId} workspaceId={workspaceId} />
 }
 
-/** Git data and context files live on this machine, keyed by workspace. */
-interface GitData {
-  remoteUrl: string
-  totalCommits: number
-  recentCommits: { hash: string; message: string }[]
-}
-
+/** Context files live on this machine, keyed by workspace. */
 interface ContextFile {
   id: string
   name: string
   size: number
 }
-
-const emptyGit: GitData = { remoteUrl: "", totalCommits: 0, recentCommits: [] }
 
 const ACCEPTED_EXTENSIONS = [
   ".txt", ".md", ".json", ".csv", ".py", ".js", ".ts", ".tsx", ".jsx",
@@ -108,7 +102,7 @@ function formatDate(at: number) {
 
 /**
  * One workspace: a composer that starts a chat inside it, its recents, and the
- * three cards beside them (git, instructions, context).
+ * two cards beside them (git, context).
  */
 function WorkspaceView({ workspaceId }: { workspaceId: string }) {
   const navigate = useNavigate()
@@ -122,9 +116,8 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
 
   const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
-  const [git, setGit] = useState<GitData>(() =>
-    readJson<GitData>(`calabrass-git-${workspaceId}`, emptyGit)
-  )
+  const [git, setGit] = useState<WorkspaceGitInfo | null>(null)
+  const [gitError, setGitError] = useState<string | null>(null)
   const [contextFiles, setContextFiles] = useState<ContextFile[]>(() =>
     readJson<ContextFile[]>(`calabrass-context-${workspaceId}`, [])
   )
@@ -137,6 +130,29 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
         : [],
     [chats, workspace]
   )
+
+  // The Git card describes the folder's own repository rather than a remembered
+  // URL, so the server is asked to read it each time the workspace is opened.
+  useEffect(() => {
+    if (!workspace) return
+    let live = true
+    api
+      .getWorkspaceGit(workspace.id)
+      .then((info) => {
+        if (!live) return
+        setGit(info)
+        setGitError(null)
+      })
+      .catch((err) => {
+        if (!live) return
+        setGitError(
+          err instanceof Error ? err.message : "Could not read the repository."
+        )
+      })
+    return () => {
+      live = false
+    }
+  }, [workspace])
 
   async function handleSend(message: string) {
     if (!workspace || sending) return
@@ -158,11 +174,6 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
     } finally {
       setSending(false)
     }
-  }
-
-  function updateGit(next: GitData) {
-    setGit(next)
-    writeJson(`calabrass-git-${workspaceId}`, next)
   }
 
   function addContextFiles(added: ContextFile[]) {
@@ -238,7 +249,7 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
       ) : (
         <div className="mt-8 flex items-start gap-10 px-14">
           <div className="flex min-w-0 flex-1 flex-col">
-            <div className="-mt-16">
+            <div className="-mt-8">
               <PromptInput
                 onSend={handleSend}
                 heading={`Ready to work on ${title}`}
@@ -296,23 +307,30 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
               </div>
 
               <div className="space-y-3">
-                <div>
-                  <label className="mb-1 block text-xs text-white/40">
-                    Git remote url
-                  </label>
-                  <input
-                    type="url"
-                    placeholder="https://github.com/user/repo.git"
-                    value={git.remoteUrl}
-                    onChange={(event) =>
-                      updateGit({ ...git, remoteUrl: event.target.value })
-                    }
-                    className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white/80 transition-colors outline-none placeholder:text-white/30 focus:border-white/20"
-                  />
-                </div>
-
-                {git.remoteUrl ? (
+                {gitError ? (
+                  <p className="text-xs text-red-400">{gitError}</p>
+                ) : !git ? (
+                  <p className="text-xs text-white/30">
+                    Reading the repository…
+                  </p>
+                ) : !git.isRepo ? (
+                  <p className="text-xs text-white/40">
+                    This folder is not a git repository yet.
+                  </p>
+                ) : (
                   <>
+                    <div>
+                      <span className="mb-1 block text-xs text-white/40">
+                        Git remote url
+                      </span>
+                      <p
+                        title={git.remoteUrl}
+                        className="truncate text-sm text-white/70"
+                      >
+                        {git.remoteUrl || "No remote configured"}
+                      </p>
+                    </div>
+
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-white/40">Total commits</span>
                       <span className="font-medium text-white/70">
@@ -320,50 +338,31 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
                       </span>
                     </div>
 
-                    {git.recentCommits.length > 0 ? (
+                    {git.latestCommit ? (
                       <div className="space-y-1.5">
                         <span className="text-xs text-white/40">
-                          Recent commits
+                          Latest commit
                         </span>
-                        {git.recentCommits.map((commit) => (
-                          <div
-                            key={commit.hash}
-                            className="flex items-start gap-2"
-                          >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex min-w-0 items-start gap-2">
                             <span className="shrink-0 font-mono text-xs text-primary">
-                              {commit.hash}
+                              {git.latestCommit.hash}
                             </span>
-                            <span className="truncate text-xs text-white/60">
-                              {commit.message}
+                            <span className="line-clamp-2 text-xs text-white/60">
+                              {git.latestCommit.message}
                             </span>
                           </div>
-                        ))}
+                          <span className="shrink-0 text-xs text-white/30">
+                            {formatDate(Date.parse(git.latestCommit.date))}
+                          </span>
+                        </div>
                       </div>
-                    ) : null}
+                    ) : (
+                      <p className="text-xs text-white/30">No commits yet.</p>
+                    )}
                   </>
-                ) : null}
+                )}
               </div>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-              <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-sm font-medium text-white/90">
-                  Instructions
-                </h3>
-                <button
-                  type="button"
-                  className="cursor-pointer rounded-lg p-1 transition-colors hover:bg-white/10"
-                >
-                  <HugeiconsIcon
-                    icon={Add01Icon}
-                    strokeWidth={2}
-                    className="size-4 text-white/50"
-                  />
-                </button>
-              </div>
-              <p className="text-xs text-white/40">
-                Add instructions to tailor Calabrass&apos;s responses
-              </p>
             </div>
 
             <div className="flex flex-col rounded-2xl border border-white/10 bg-white/5 p-4">
