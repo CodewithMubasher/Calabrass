@@ -160,6 +160,13 @@ export const api = {
   getWorkspaceGit: (workspaceId: string) =>
     request<WorkspaceGitInfo>(`/workspaces/${workspaceId}/git`),
 
+  /** Clone a repository into a workspace, and answer with the state that follows. */
+  cloneWorkspaceRepo: (workspaceId: string, remoteUrl: string) =>
+    request<WorkspaceGitInfo>(`/workspaces/${workspaceId}/git/clone`, {
+      method: "POST",
+      body: JSON.stringify({ remoteUrl }),
+    }),
+
   listChats: () => request<{ chats: Chat[] }>("/chats").then((r) => r.chats ?? []),
 
   getChat: (chatId: string) =>

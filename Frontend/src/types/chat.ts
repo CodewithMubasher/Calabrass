@@ -178,6 +178,8 @@ export interface WorkspaceGitInfo {
   totalCommits: number
   /** The tip of HEAD, null while there are no commits. */
   latestCommit: WorkspaceCommit | null
+  /** "public" or "private" when it is known, empty when it is not. */
+  visibility: "public" | "private" | ""
 }
 
 /** A connector row on the Connectors page: one MCP server. */

@@ -118,6 +118,9 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
   const [sending, setSending] = useState(false)
   const [git, setGit] = useState<WorkspaceGitInfo | null>(null)
   const [gitError, setGitError] = useState<string | null>(null)
+  const [remoteDraft, setRemoteDraft] = useState("")
+  const [cloneError, setCloneError] = useState<string | null>(null)
+  const [cloning, setCloning] = useState(false)
   const [contextFiles, setContextFiles] = useState<ContextFile[]>(() =>
     readJson<ContextFile[]>(`calabrass-context-${workspaceId}`, [])
   )
@@ -131,9 +134,12 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
     [chats, workspace]
   )
 
-  // The Git card describes the folder's own repository rather than a remembered
-  // URL, so the server is asked to read it each time the workspace is opened.
+  // The Git card describes the repository cloned into the workspace, so the
+  // server is asked to read it each time a workspace is opened — and the clone
+  // form starts empty again, so one workspace's URL does not carry into another.
   useEffect(() => {
+    setRemoteDraft("")
+    setCloneError(null)
     if (!workspace) return
     let live = true
     api
@@ -153,6 +159,25 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
       live = false
     }
   }, [workspace])
+
+  // The repository is cloned into the workspace itself, so what the card shows
+  // afterwards is read back from disk rather than taken from the request.
+  async function cloneRepo() {
+    if (!workspace) return
+    const remote = remoteDraft.trim()
+    if (remote === "") return
+    setCloning(true)
+    setCloneError(null)
+    try {
+      setGit(await api.cloneWorkspaceRepo(workspace.id, remote))
+    } catch (err) {
+      setCloneError(
+        err instanceof Error ? err.message : "Could not clone the repository."
+      )
+    } finally {
+      setCloning(false)
+    }
+  }
 
   async function handleSend(message: string) {
     if (!workspace || sending) return
@@ -294,7 +319,7 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
           </div>
 
           <div className="mt-20 flex w-[320px] flex-col gap-3">
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-sm font-medium text-white/90">
                   Git &amp; Github
@@ -313,22 +338,25 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
                   <p className="text-xs text-white/30">
                     Reading the repository…
                   </p>
-                ) : !git.isRepo ? (
-                  <p className="text-xs text-white/40">
-                    This folder is not a git repository yet.
-                  </p>
-                ) : (
+                ) : git.isRepo ? (
                   <>
                     <div>
                       <span className="mb-1 block text-xs text-white/40">
                         Git remote url
                       </span>
-                      <p
-                        title={git.remoteUrl}
-                        className="truncate text-sm text-white/70"
-                      >
-                        {git.remoteUrl || "No remote configured"}
-                      </p>
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          title={git.remoteUrl}
+                          className="truncate text-sm text-white/70"
+                        >
+                          {git.remoteUrl || "No remote configured"}
+                        </span>
+                        {git.visibility ? (
+                          <span className="shrink-0 rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-white/50">
+                            {git.visibility === "private" ? "Private" : "Public"}
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
 
                     <div className="flex items-center justify-between text-xs">
@@ -361,6 +389,41 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
                       <p className="text-xs text-white/30">No commits yet.</p>
                     )}
                   </>
+                ) : (
+                  <div>
+                    <label
+                      htmlFor="git-clone-url"
+                      className="mb-1 block text-xs text-white/40"
+                    >
+                      Git remote url
+                    </label>
+                    <input
+                      id="git-clone-url"
+                      type="url"
+                      placeholder="https://github.com/user/repo.git"
+                      value={remoteDraft}
+                      onChange={(event) => setRemoteDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault()
+                          void cloneRepo()
+                        }
+                      }}
+                      disabled={cloning}
+                      autoComplete="off"
+                      spellCheck={false}
+                      className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white/80 transition-colors outline-none placeholder:text-white/30 focus:border-white/20 disabled:opacity-60"
+                    />
+                    {cloneError ? (
+                      <p className="mt-1 text-xs text-red-400">{cloneError}</p>
+                    ) : cloning ? (
+                      <p className="mt-1 text-xs text-white/40">Cloning…</p>
+                    ) : (
+                      <p className="mt-1 text-xs text-white/30">
+                        Press Enter to clone it into this workspace
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
