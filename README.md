@@ -1,6 +1,10 @@
 <div align="center">
 
-  <img src="logo-preview.png" alt="Calabrass Logo" width="380" />
+  <img src="logo-preview.png" alt="Calabrass Logo" width="350" />
+
+  <br/>
+  <br/>
+  <br/>
 
   <p><strong>The open source personal AI agent.</strong></p>
 
