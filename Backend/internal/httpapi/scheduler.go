@@ -81,7 +81,7 @@ func (s *Server) runScheduledTask(ctx context.Context, task store.ScheduledTask)
 		// A task booked from the Schedules page has no conversation yet. It
 		// gets one, named after what it was asked to do, so the answer has
 		// somewhere to land and the user can read what it did.
-		created, err := s.store.CreateChat(ctx, "", "", "", task.UserID)
+		created, err := s.store.CreateChat(ctx, "", "", "", "", "build", task.UserID)
 		if err != nil {
 			s.recordRun(ctx, task, "error", "could not open a conversation: "+err.Error())
 			return err

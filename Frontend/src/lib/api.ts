@@ -160,17 +160,18 @@ export const api = {
   getChat: (chatId: string) =>
     request<{ chat: ChatDetail }>(`/chats/${chatId}`).then((r) => r.chat),
 
-  createChat: (selection?: ModelSelection | null, workspaceId?: string, agentId?: string) =>
+  createChat: (selection?: ModelSelection | null, workspaceId?: string, agentId?: string, mode?: "build" | "plan") =>
     request<{ chat: Chat }>("/chats", {
       method: "POST",
       body: JSON.stringify({
         ...(selection ?? {}),
         ...(workspaceId ? { workspaceId } : {}),
         ...(agentId ? { agentId } : {}),
+        ...(mode ? { mode } : {}),
       }),
     }).then((r) => r.chat),
 
-  updateChat: (chatId: string, patch: { title?: string; pinned?: boolean }) =>
+  updateChat: (chatId: string, patch: { title?: string; pinned?: boolean; mode?: "build" | "plan" }) =>
     request<{ chat: Chat }>(`/chats/${chatId}`, {
       method: "PATCH",
       body: JSON.stringify(patch),

@@ -9,6 +9,7 @@ import {
   ensureChatLoaded,
   retryReply,
   sendMessage,
+  updateChatMode,
   useChat,
   useChatError,
   useChatMessages,
@@ -119,6 +120,8 @@ function ChatPage() {
         <PromptInput
           isInChat
           disabled={streaming}
+          mode={chat?.mode ?? "build"}
+          onModeChange={(newMode) => void updateChatMode(chatId, newMode)}
           onSend={(value) => void sendMessage(chat.id, value)}
         />
       </div>

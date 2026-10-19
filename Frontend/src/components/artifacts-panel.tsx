@@ -6,7 +6,7 @@ import { cn } from "cn"
 import { ArtifactCard } from "@/components/artifact-card"
 import { ArtifactDetail } from "@/components/artifact-detail"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { useArtifactFiles, watchArtifacts } from "@/lib/artifact-store"
+import { useArtifactFiles, useSelectedArtifactPath, setSelectedArtifactPath, watchArtifacts } from "@/lib/artifact-store"
 import { setArtifactsOpen } from "@/lib/panel-store"
 import { api, startDownload } from "@/lib/api"
 
@@ -50,10 +50,14 @@ export function ArtifactsPanel({
   chatId: string
 }) {
   const files = useArtifactFiles(chatId)
-  const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const selectedPath = useSelectedArtifactPath(chatId)
   const [maximized, setMaximized] = useState(false)
   const isMobile = useIsMobile()
   const sheetRef = useRef<HTMLElement>(null)
+
+  const setSelectedPath = (path: string | null) => {
+    setSelectedArtifactPath(chatId, path)
+  }
 
   /**
    * How far the sheet has been dragged, in pixels to the right of open, or null

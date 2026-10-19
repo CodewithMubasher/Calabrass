@@ -29,6 +29,8 @@ type Chat struct {
 	Title    string `json:"title"`
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
+	// Mode is the chat's operating mode: "build" (full tools) or "plan" (read-only).
+	Mode string `json:"mode"`
 	// WorkspaceDir is the workspace folder this chat works in. Empty means the
 	// default workspace.
 	WorkspaceDir string `json:"workspaceDir"`
@@ -116,6 +118,7 @@ CREATE TABLE IF NOT EXISTS chats (
 	title      TEXT NOT NULL,
 	provider   TEXT NOT NULL DEFAULT '',
 	model      TEXT NOT NULL DEFAULT '',
+	mode       TEXT NOT NULL DEFAULT 'build',
 	workspace_dir TEXT NOT NULL DEFAULT '',
 	agent_id   TEXT NOT NULL DEFAULT '',
 	pinned     INTEGER NOT NULL DEFAULT 0,
@@ -274,6 +277,7 @@ CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_events(provider_id, creat
 		{"chats", "pinned", "pinned INTEGER NOT NULL DEFAULT 0"},
 		{"chats", "workspace_dir", "workspace_dir TEXT NOT NULL DEFAULT ''"},
 		{"chats", "agent_id", "agent_id TEXT NOT NULL DEFAULT ''"},
+		{"chats", "mode", "mode TEXT NOT NULL DEFAULT 'build'"},
 		{"agents", "system_prompt", "system_prompt TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, col := range added {
@@ -447,7 +451,7 @@ func NewID() string {
 func (s *Store) ListChats(ctx context.Context, userID ...string) ([]Chat, error) {
 	owner := ownerOf(userID)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, title, provider, model, workspace_dir, agent_id, pinned, created_at, updated_at
+		SELECT id, title, provider, model, mode, workspace_dir, agent_id, pinned, created_at, updated_at
 		FROM chats
 		WHERE user_id = ?
 		ORDER BY pinned DESC, updated_at DESC, rowid DESC`, owner)
@@ -462,7 +466,7 @@ func (s *Store) ListChats(ctx context.Context, userID ...string) ([]Chat, error)
 			c      Chat
 			pinned int
 		)
-		if err := rows.Scan(&c.ID, &c.Title, &c.Provider, &c.Model, &c.WorkspaceDir, &c.AgentID, &pinned, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Title, &c.Provider, &c.Model, &c.Mode, &c.WorkspaceDir, &c.AgentID, &pinned, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("store: scan chat: %w", err)
 		}
 		c.Pinned = pinned != 0
@@ -474,22 +478,26 @@ func (s *Store) ListChats(ctx context.Context, userID ...string) ([]Chat, error)
 // CreateChat inserts a new chat. A workspaceDir binds the chat to one of the
 // library's folders; empty means the default workspace. The trailing account id
 // is the owner; calls without one are for tests and migration only.
-func (s *Store) CreateChat(ctx context.Context, providerID, model, workspaceDir, agentID string, userID ...string) (Chat, error) {
+func (s *Store) CreateChat(ctx context.Context, providerID, model, workspaceDir, agentID, mode string, userID ...string) (Chat, error) {
 	now := time.Now().UnixMilli()
+	if mode == "" {
+		mode = "build"
+	}
 	chat := Chat{
 		ID:           NewID(),
 		Title:        "New Chat",
 		Provider:     providerID,
 		Model:        model,
+		Mode:         mode,
 		WorkspaceDir: workspaceDir,
 		AgentID:      agentID,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO chats (id, user_id, title, provider, model, workspace_dir, agent_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		chat.ID, ownerOf(userID), chat.Title, chat.Provider, chat.Model, chat.WorkspaceDir, chat.AgentID, chat.CreatedAt, chat.UpdatedAt)
+		INSERT INTO chats (id, user_id, title, provider, model, mode, workspace_dir, agent_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		chat.ID, ownerOf(userID), chat.Title, chat.Provider, chat.Model, chat.Mode, chat.WorkspaceDir, chat.AgentID, chat.CreatedAt, chat.UpdatedAt)
 	if err != nil {
 		return Chat{}, fmt.Errorf("store: create chat: %w", err)
 	}
@@ -502,9 +510,9 @@ func (s *Store) getChat(ctx context.Context, id string, userID ...string) (Chat,
 		pinned int
 	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, title, provider, model, workspace_dir, agent_id, pinned, created_at, updated_at
+		SELECT id, title, provider, model, mode, workspace_dir, agent_id, pinned, created_at, updated_at
 		FROM chats WHERE id = ? AND user_id = ?`, id, ownerOf(userID)).
-		Scan(&c.ID, &c.Title, &c.Provider, &c.Model, &c.WorkspaceDir, &c.AgentID, &pinned, &c.CreatedAt, &c.UpdatedAt)
+		Scan(&c.ID, &c.Title, &c.Provider, &c.Model, &c.Mode, &c.WorkspaceDir, &c.AgentID, &pinned, &c.CreatedAt, &c.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Chat{}, ErrNotFound
 	}
@@ -668,6 +676,22 @@ func (s *Store) SetChatPinned(ctx context.Context, id string, pinned bool, userI
 		`UPDATE chats SET pinned = ? WHERE id = ? AND user_id = ?`, boolToInt(pinned), id, ownerOf(userID))
 	if err != nil {
 		return Chat{}, fmt.Errorf("store: pin chat: %w", err)
+	}
+	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+		return Chat{}, ErrNotFound
+	}
+	return s.getChat(ctx, id, userID...)
+}
+
+// SetChatMode updates the chat's mode (build/plan).
+func (s *Store) SetChatMode(ctx context.Context, id string, mode string, userID ...string) (Chat, error) {
+	if mode != "build" && mode != "plan" {
+		mode = "build"
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE chats SET mode = ? WHERE id = ? AND user_id = ?`, mode, id, ownerOf(userID))
+	if err != nil {
+		return Chat{}, fmt.Errorf("store: set chat mode: %w", err)
 	}
 	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
 		return Chat{}, ErrNotFound

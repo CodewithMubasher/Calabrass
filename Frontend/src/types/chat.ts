@@ -56,11 +56,15 @@ export interface ChatMessage {
   pending?: boolean
 }
 
+export type ChatMode = "build" | "plan"
+
 export interface Chat {
   id: string
   title: string
   provider: string
   model: string
+  /** The chat's operating mode: "build" (full tools) or "plan" (read-only). */
+  mode: ChatMode
   /** The workspace folder this chat works in. Empty means the default. */
   workspaceDir: string
   /** The agent this chat is associated with. Empty means no agent. */
@@ -189,8 +193,8 @@ export interface AgentRow {
   /** Explicit system prompt replacement (optional, falls back to prompt) */
   systemPrompt: string
   mode: AgentMode
-  /** The MCP connector it may use; empty for none. */
-  connectorId: string
+  /** The MCP connectors it may use; empty for none. */
+  connectorIds: string[]
   provider: string
   model: string
   altProvider: string
@@ -206,7 +210,7 @@ export interface AgentInput {
   /** Explicit system prompt replacement (optional, falls back to prompt) */
   systemPrompt: string
   mode: AgentMode
-  connectorId: string
+  connectorIds: string[]
   provider: string
   model: string
   altProvider: string

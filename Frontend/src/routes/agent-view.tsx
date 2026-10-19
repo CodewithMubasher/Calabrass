@@ -65,8 +65,8 @@ function AgentView({ agentId }: { agentId: string }) {
   )
 
   const connector = useMemo(
-    () => connectors.find((c) => c.id === agent?.connectorId),
-    [connectors, agent?.connectorId]
+    () => connectors.find((c) => agent?.connectorIds?.includes(c.id)),
+    [connectors, agent?.connectorIds]
   )
 
   const agentChats = useMemo(
@@ -344,7 +344,7 @@ function AgentDialog({
   const [prompt, setPrompt] = useState(agent.prompt)
   const [systemPrompt, setSystemPrompt] = useState(agent.systemPrompt)
   const [mode, setMode] = useState<AgentMode>(agent.mode)
-  const [connectorId, setConnectorId] = useState(agent.connectorId)
+  const [connectorIds, setConnectorIds] = useState<string[]>(agent.connectorIds ?? [])
   const [model, setModel] = useState(
     `${agent.provider}::${agent.model}`
   )
@@ -368,18 +368,11 @@ function AgentDialog({
   }, [])
 
   const connectorOptions = useMemo(() => {
-    const options: { value: string; label: string }[] = [
-      { value: "", label: "No connector" },
-      ...connectors.map((connector) => ({
-        value: connector.id,
-        label: connector.name,
-      })),
-    ]
-    if (connectorId && !options.some((o) => o.value === connectorId)) {
-      options.push({ value: connectorId, label: "Unavailable connector" })
-    }
-    return options
-  }, [connectors, connectorId])
+    return connectors.map((connector) => ({
+      value: connector.id,
+      label: connector.name,
+    }))
+  }, [connectors])
 
   // Build model options from providers
   const modelOptions = useMemo(() => {
@@ -409,7 +402,7 @@ function AgentDialog({
       prompt: prompt.trim(),
       systemPrompt: systemPrompt.trim(),
       mode,
-      connectorId,
+      connectorIds,
       provider: provider || "",
       model: modelId || "",
       altProvider: altProvider || "",
@@ -485,15 +478,29 @@ function AgentDialog({
               </label>
               <label className="block">
                 <span className="mb-2 block text-sm text-white/60">MCP</span>
-                <select
-                  value={connectorId}
-                  onChange={(e) => setConnectorId(e.target.value)}
-                  className="w-full h-9 border-white/10 bg-white/5 px-3 text-white/80 rounded-lg outline-none focus:border-white/20"
-                >
-                  {connectorOptions.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {connectorOptions.map((option) => (
+                    <label
+                      key={option.value}
+                      className="flex items-center gap-2 cursor-pointer p-2 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={connectorIds.includes(option.value)}
+                        onChange={() => setConnectorIds((prev) =>
+                          prev.includes(option.value)
+                            ? prev.filter((x) => x !== option.value)
+                            : [...prev, option.value]
+                        )}
+                        className="size-4 accent-primary"
+                      />
+                      <span className="text-sm text-white/80">{option.label}</span>
+                    </label>
                   ))}
-                </select>
+                  {connectors.length === 0 && (
+                    <p className="text-xs text-white/40">No connectors available</p>
+                  )}
+                </div>
               </label>
             </div>
 

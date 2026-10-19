@@ -157,7 +157,7 @@ function AgentsPage() {
             <AgentCard
               key={agent.id}
               agent={agent}
-              connectorName={connectorNames.get(agent.connectorId) ?? ""}
+              connectorName={connectorNames.get(agent.connectorIds?.[0]) ?? ""}
               onClick={() => setEditing(agent)}
             />
           ))}

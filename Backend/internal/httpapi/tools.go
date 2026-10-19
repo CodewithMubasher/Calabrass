@@ -35,11 +35,12 @@ func (s *Server) setupTurn(ctx context.Context, workspace *agent.Workspace, chat
 // id means there is no conversation to bind to. userID scopes the connectors and
 // the tasks the turn may see. agentID is the agent this chat is associated with.
 func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *agent.Workspace, chatID, agentID string) turnSetup {
-	tools := agent.Tools(workspace)
+	var tools []goai.Tool
 	var described []agent.Connector
 	var origins map[string]string
 	var agentSystemPrompt string
 	var agentConnectorID string
+	var agentMode string
 
 	// If this chat is associated with an agent, load its configuration
 	if agentID != "" {
@@ -51,10 +52,32 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 				agentSystemPrompt = agentRec.Prompt
 			}
 			agentConnectorID = agentRec.ConnectorID
+			agentMode = agentRec.Mode
 		}
 	}
 
-	// Start with workspace tools
+	// Get chat mode (from chat or agent)
+	mode := "build"
+	if chatID != "" {
+		if chatDetail, err := s.store.GetChat(ctx, chatID, userID); err == nil {
+			if chatDetail.Mode != "" {
+				mode = chatDetail.Mode
+			}
+		}
+	}
+	// Agent mode overrides chat mode if set
+	if agentMode != "" {
+		mode = agentMode
+	}
+
+	// Select tools based on mode
+	if mode == "plan" {
+		tools = agent.ReadTools(workspace)
+	} else {
+		tools = agent.Tools(workspace)
+	}
+
+	// Start with workspace tools (or read-only tools for plan mode)
 	if s.connectors != nil {
 		briefs, offered := s.connectors.Turn(ctx, userID)
 		var skipped []string
@@ -94,7 +117,7 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 	// is a row in the database and a turn of its own, not something done to the
 	// project. It needs a store to write that row to, which is what keeps it out
 	// of the tests that build a server for its workspace alone.
-	if s.store != nil {
+	if s.store != nil && mode != "plan" {
 		tools = append(tools, s.scheduleTool(chatID, userID))
 	}
 
@@ -110,7 +133,7 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 	if workspace == nil && len(described) == 0 {
 		return turnSetup{system: systemPrompt, tools: tools, origins: origins}
 	}
-	return turnSetup{system: agent.SystemPrompt(workspace, systemPrompt, described), tools: tools, origins: origins}
+	return turnSetup{system: agent.SystemPrompt(workspace, systemPrompt, described, mode), tools: tools, origins: origins}
 }
 
 // mergeTools adds what the connectors offer to a turn's tools, leaving out the

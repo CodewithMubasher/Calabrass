@@ -152,7 +152,7 @@ export function AgentDialog({
   const [name, setName] = useState(agent?.name ?? "")
   const [prompt, setPrompt] = useState(agent?.prompt ?? "")
   const [mode, setMode] = useState<AgentMode>(agent?.mode ?? "build")
-  const [connectorId, setConnectorId] = useState(agent?.connectorId ?? "")
+  const [connectorIds, setConnectorIds] = useState<string[]>(agent?.connectorIds ?? [])
   const [model, setModel] = useState(
     encodeModel(agent?.provider ?? "", agent?.model ?? "")
   )
@@ -187,23 +187,14 @@ export function AgentDialog({
   }, [])
 
   const connectorOptions = useMemo<Option[]>(() => {
-    const options: Option[] = [
-      { value: "", label: "No connector" },
+    return [
+      { value: "__ALL__", label: "All MCPs" },
       ...connectors.map((connector) => ({
         value: connector.id,
         label: connector.name,
       })),
     ]
-    // A saved connector may have been removed, or may not be loaded yet; keep
-    // its id selectable rather than letting the trigger show a bare id.
-    if (
-      connectorId &&
-      !options.some((option) => option.value === connectorId)
-    ) {
-      options.push({ value: connectorId, label: "Unavailable connector" })
-    }
-    return options
-  }, [connectors, connectorId])
+  }, [connectors])
 
   // The catalog can be long — every model of every connected provider — which
   // is exactly what the Select's scrollable list is for.
@@ -242,13 +233,19 @@ export function AgentDialog({
 
     const preferred = decodeModel(model)
     const fallback = decodeModel(altModel)
+    
+    // Handle "All MCPs" selection
+    const selectedConnectorIds = connectorIds.length === 1 && connectorIds[0] === "__ALL__"
+      ? connectors.map((c) => c.id)
+      : connectorIds
+
     // Single prompt field becomes the system prompt (replaces global)
     const input: AgentInput = {
       name: name.trim(),
       prompt: prompt.trim(),
       systemPrompt: prompt.trim(), // Agent prompt IS the system prompt
       mode,
-      connectorId,
+      connectorIds: selectedConnectorIds,
       provider: preferred.provider,
       model: preferred.model,
       altProvider: fallback.provider,
@@ -338,10 +335,10 @@ export function AgentDialog({
               <Field label="MCP">
                 <Picker
                   label="MCP"
-                  value={connectorId}
-                  onChange={setConnectorId}
+                  value={connectorIds.length > 0 ? connectorIds[0] : ""}
+                  onChange={(val) => setConnectorIds(val ? [val] : [])}
                   options={connectorOptions}
-                  placeholder="No connector"
+                  placeholder="Choose MCP(s)"
                 />
               </Field>
             </div>

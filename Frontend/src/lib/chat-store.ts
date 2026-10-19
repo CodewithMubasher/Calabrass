@@ -207,9 +207,9 @@ export async function ensureChatLoaded(chatId: string) {
   }
 }
 
-export async function createChat(workspaceId?: string, agentId?: string): Promise<Chat> {
+export async function createChat(workspaceId?: string, agentId?: string, mode?: "build" | "plan"): Promise<Chat> {
   try {
-    const chat = await api.createChat(getSelectedModel(), workspaceId, agentId)
+    const chat = await api.createChat(getSelectedModel(), workspaceId, agentId, mode)
     setState({
       chats: upsertChat(state.chats, chat),
       messages: { ...state.messages, [chat.id]: [] },
@@ -372,6 +372,26 @@ export async function togglePinChat(chatId: string, pinned: boolean) {
 
   try {
     const chat = await api.updateChat(chatId, { pinned })
+    setState({ chats: upsertChat(state.chats, chat) })
+  } catch (err) {
+    if (is401(err)) throw err
+    setState({ chats: previous, backendError: errorMessage(err) })
+  }
+}
+
+/** Update the chat's mode (build/plan). */
+export async function updateChatMode(chatId: string, mode: "build" | "plan") {
+  const previous = state.chats
+  const current = previous.find((chat) => chat.id === chatId)
+  if (!current || current.mode === mode) return
+
+  setState({
+    chats: upsertChat(previous, { ...current, mode }),
+    backendError: null,
+  })
+
+  try {
+    const chat = await api.updateChat(chatId, { mode })
     setState({ chats: upsertChat(state.chats, chat) })
   } catch (err) {
     if (is401(err)) throw err

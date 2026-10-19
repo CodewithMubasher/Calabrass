@@ -1,7 +1,7 @@
 import { createRoute, useNavigate } from "@tanstack/react-router"
-import { useState } from "react"
+import { useState, useRef } from "react"
 
-import { PromptInput } from "@/components/prompt-input"
+import { PromptInput, type PromptInputRef } from "@/components/prompt-input"
 import { createChat, sendMessage } from "@/lib/chat-store"
 import { Route as rootRoute } from "@/routes/__root"
 
@@ -15,6 +15,7 @@ function HomePage() {
   const navigate = useNavigate()
   const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
+  const promptInputRef = useRef<PromptInputRef>(null)
 
   const handleSend = (value: string) => {
     if (sending) return
@@ -23,7 +24,8 @@ function HomePage() {
 
     void (async () => {
       try {
-        const chat = await createChat()
+        const mode = promptInputRef.current?.getMode?.() ?? "build"
+        const chat = await createChat(undefined, undefined, mode)
         await navigate({ to: "/chat/$chatId", params: { chatId: chat.id } })
         // Fire and forget: the reply streams into the store and the chat page
         // renders it from there.
@@ -38,7 +40,11 @@ function HomePage() {
 
   return (
     <div className="relative flex h-full flex-col">
-      <PromptInput onSend={handleSend} disabled={sending} />
+      <PromptInput
+        ref={promptInputRef}
+        onSend={handleSend}
+        disabled={sending}
+      />
       {error ? (
         // On a phone the composer is at the foot of the screen, so the message
         // goes to the top of it rather than over the input.

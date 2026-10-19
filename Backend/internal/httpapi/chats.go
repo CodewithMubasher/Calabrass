@@ -51,6 +51,8 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Provider   string `json:"provider"`
 		Model      string `json:"model"`
+		// Mode is the chat's operating mode: "build" (full tools) or "plan" (read-only).
+		Mode       string `json:"mode"`
 		// WorkspaceID binds the chat to one workspace's folder. Empty means the
 		// default workspace.
 		WorkspaceID string `json:"workspaceId"`
@@ -81,6 +83,10 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	agentID := strings.TrimSpace(req.AgentID)
 	providerID := strings.TrimSpace(req.Provider)
 	modelID := strings.TrimSpace(req.Model)
+	mode := strings.TrimSpace(req.Mode)
+	if mode == "" {
+		mode = "build"
+	}
 
 	if agentID != "" {
 		agent, err := s.store.GetAgent(r.Context(), agentID, user.ID)
@@ -99,6 +105,10 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 		if modelID == "" {
 			modelID = agent.Model
 		}
+		// Use agent's mode if not explicitly provided
+		if mode == "build" {
+			mode = agent.Mode
+		}
 		// If still no provider/model, resolve from registry
 		if providerID == "" || modelID == "" {
 			providerID, modelID = s.resolveModelFor(r.Context(), user.ID, providerID, modelID)
@@ -112,7 +122,7 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chat, err := s.store.CreateChat(r.Context(), providerID, modelID, workspaceDir, agentID, user.ID)
+	chat, err := s.store.CreateChat(r.Context(), providerID, modelID, workspaceDir, agentID, mode, user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -140,6 +150,8 @@ func (s *Server) handleUpdateChat(w http.ResponseWriter, r *http.Request) {
 		Title    string `json:"title"`
 		Provider string `json:"provider"`
 		Model    string `json:"model"`
+		// Mode is the chat's operating mode: "build" or "plan".
+		Mode   string `json:"mode"`
 		// Pinned is a pointer so "leave it alone" is different from false.
 		Pinned *bool `json:"pinned"`
 	}
@@ -152,6 +164,9 @@ func (s *Server) handleUpdateChat(w http.ResponseWriter, r *http.Request) {
 	chat, err := s.store.UpdateChat(r.Context(), chatID, req.Title, req.Provider, req.Model, user.ID)
 	if err == nil && req.Pinned != nil {
 		chat, err = s.store.SetChatPinned(r.Context(), chatID, *req.Pinned, user.ID)
+	}
+	if err == nil && req.Mode != "" {
+		chat, err = s.store.SetChatMode(r.Context(), chatID, req.Mode, user.ID)
 	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, err)

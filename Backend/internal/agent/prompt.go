@@ -25,7 +25,8 @@ type Connector struct {
 // SystemPrompt builds the harness instructions: which project the model may
 // work on, what the tools are for, and the rules that keep its answers and its
 // trace readable. base is the application's own prompt, kept in front.
-func SystemPrompt(ws *Workspace, base string, connectors []Connector) string {
+// mode is the chat's operating mode: "build" (full tools) or "plan" (read-only).
+func SystemPrompt(ws *Workspace, base string, connectors []Connector, mode string) string {
 	var b strings.Builder
 
 	if trimmed := strings.TrimSpace(base); trimmed != "" {
@@ -53,6 +54,31 @@ func SystemPrompt(ws *Workspace, base string, connectors []Connector) string {
 	if section := machineSection(connectors); section != "" {
 		b.WriteString(section)
 		b.WriteString("\n")
+	}
+
+	// Mode-specific instructions
+	if mode == "plan" {
+		b.WriteString(strings.Join([]string{
+			"OPERATING MODE: PLAN (Read-only)",
+			"- You are in PLANNING MODE. Your tools are LIMITED TO READ-ONLY operations.",
+			"- You CAN: read files, list directories, search with glob/grep, read code.",
+			"- You CANNOT: write files, edit files, create directories, run shell commands, use MCP connectors that modify state.",
+			"- Your goal is to ANALYZE, RESEARCH, and CREATE A DETAILED PLAN when given a specific task or request.",
+			"- If the user provides a greeting, casual chat, or general question, respond conversationally FIRST. DO NOT call any workspace tools (like listing directories or reading files) unless the user asks you to inspect the workspace or gives you a specific problem to analyze.",
+			"- When the user wants to execute the plan, they will switch to BUILD mode.",
+			"- Always output your plan as a clear, structured Markdown document.",
+			"",
+		}, "\n"))
+	} else {
+		b.WriteString(strings.Join([]string{
+			"OPERATING MODE: BUILD (Full access)",
+			"- You are in BUILD MODE. You have FULL ACCESS to all tools.",
+			"- You CAN: read, write, edit files, create directories, run shell commands, use all MCP connectors.",
+			"- Your goal is to IMPLEMENT, BUILD, and EXECUTE tasks requested by the user.",
+			"- If the user provides a greeting, casual chat, or general question, respond conversationally FIRST. DO NOT call any tools unless the user gives an explicit request, task, or instruction that requires action.",
+			"- Use tools freely when executing a task, but never call tools proactively on greetings or simple conversation.",
+			"",
+		}, "\n"))
 	}
 
 	b.WriteString(strings.Join([]string{

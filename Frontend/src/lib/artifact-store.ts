@@ -17,9 +17,11 @@ interface ArtifactState {
   /** The chat the listing belongs to; empty until the first snapshot lands. */
   chatId: string
   files: ArtifactFile[]
+  /** Currently selected file path for each chat (for auto-opening new files) */
+  selectedPaths: Record<string, string>
 }
 
-let state: ArtifactState = { chatId: "", files: [] }
+let state: ArtifactState = { chatId: "", files: [], selectedPaths: {} }
 
 /**
  * What a caller sees while the listing for another chat is still on its way, so
@@ -32,8 +34,8 @@ const listeners = new Set<() => void>()
 /** Previous file paths per chatId to detect new files. */
 const previousFiles = new Map<string, Set<string>>()
 
-function emit(next: ArtifactState) {
-  state = next
+function emit(next: Partial<ArtifactState>) {
+  state = { ...state, ...next }
   for (const listener of listeners) listener()
 }
 
@@ -52,6 +54,21 @@ function getSnapshot() {
 export function useArtifactFiles(chatId: string): ArtifactFile[] {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
   return snapshot.chatId === chatId ? snapshot.files : NO_FILES
+}
+
+/** Get the currently selected file path for a chat. */
+export function useSelectedArtifactPath(chatId: string): string | null {
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  return snapshot.selectedPaths[chatId] ?? null
+}
+
+/** Set the selected file path for a chat (opens the file in the detail view). */
+export function setSelectedArtifactPath(chatId: string, path: string | null) {
+  state = {
+    ...state,
+    selectedPaths: { ...state.selectedPaths, [chatId]: path ?? "" }
+  }
+  for (const listener of listeners) listener()
 }
 
 /**
@@ -74,15 +91,17 @@ export function watchArtifacts(chatId: string) {
     const newFiles = files.filter((f) => !prevPaths.has(f.path))
     previousFiles.set(chatId, new Set(files.map((f) => f.path)))
 
-    // Auto-open artifact panel if new files appeared and panel is closed
-    if (newFiles.length > 0) {
-      // Check if panel is currently closed
-      const currentState = getSnapshot()
-      if (currentState.chatId === chatId) {
-        // Panel is for this chat, check if it's open via panel-store
-        // We'll trigger open regardless - panel-store will handle idempotency
-        setArtifactsOpen(true)
-      }
+    // Auto-open artifact panel if new .md files appeared
+    const newMdFiles = newFiles.filter((f) => f.extension.toLowerCase() === "md")
+    if (newMdFiles.length > 0) {
+      // Always open panel and select the newest .md file
+      setArtifactsOpen(true)
+      
+      // Auto-open the newest .md file in the detail view
+      const newestMd = newMdFiles.reduce((latest, f) => 
+        f.modified > latest.modified ? f : latest
+      )
+      setSelectedArtifactPath(chatId, newestMd.path)
     }
 
     emit({ chatId, files })
