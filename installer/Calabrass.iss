@@ -2,14 +2,14 @@
 ;
 ; Do not compile this by hand: installer\build-installer.ps1 builds the desktop
 ; app, builds the two MCP servers, and then compiles this into
-; installer\out\Calabrass-setup-v1.0-x64.exe.
+; installer\out\Calabrass-setup-v1.0.2-x64.exe.
 
 #define AppName "Calabrass"
 ; The one place the version is written down. Bump it here, and the installer,
 ; its file name and the entry in Apps & features all follow. It can also be
 ; overridden for a one-off build: ISCC /DAppVersion=1.1 Calabrass.iss
 #ifndef AppVersion
-  #define AppVersion "1.0"
+  #define AppVersion "1.0.2"
 #endif
 #define AppPublisher "Calabrass"
 #define AppCopyright "Copyright (c) 2026 Mubasher Chaudhary"
@@ -31,7 +31,7 @@ VersionInfoCompany={#AppPublisher}
 VersionInfoDescription={#AppName} Setup
 VersionInfoProductName={#AppName}
 VersionInfoProductVersion={#AppVersion}
-VersionInfoVersion=1.0.0.0
+VersionInfoVersion=1.0.2.0
 VersionInfoCopyright={#AppCopyright}
 
 ; Per-user by default: no administrator prompt, and the program lives with the
