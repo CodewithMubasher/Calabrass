@@ -106,6 +106,15 @@ func (s *Server) handleSignIn(w http.ResponseWriter, r *http.Request) {
 		s.writeAuthError(w, err)
 		return
 	}
+
+	// Seed provider presets if this is the first sign-in (user has no providers yet)
+	providers, err := s.store.ListProviders(r.Context(), session.User.ID)
+	if err != nil {
+		s.log.Warn("could not check existing providers", "user", session.User.ID, "error", err)
+	} else if len(providers) == 0 {
+		s.seedProviderPresets(r.Context(), session.User.ID)
+	}
+
 	writeJSON(w, http.StatusOK, session)
 }
 
