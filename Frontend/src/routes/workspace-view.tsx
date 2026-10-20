@@ -42,8 +42,6 @@ export const Route = createRoute({
   component: WorkspaceRoute,
 })
 
-// Keyed by the workspace so the per-workspace cards below start fresh instead
-// of remembering the folder the user was last on.
 function WorkspaceRoute() {
   const { workspaceId } = Route.useParams()
   return <WorkspaceView key={workspaceId} workspaceId={workspaceId} />
@@ -104,7 +102,7 @@ function formatDate(at: number) {
 
 /**
  * One workspace: a composer that starts a chat inside it, its recents, and the
- * two cards beside them (git, context).
+ * three cards beside them (git, context, command).
  */
 function WorkspaceView({ workspaceId }: { workspaceId: string }) {
   const navigate = useNavigate()
@@ -124,7 +122,6 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
   const [cloneError, setCloneError] = useState<string | null>(null)
   const [cloning, setCloning] = useState(false)
   const [cmdDraft, setCmdDraft] = useState("")
-  const [cmdOutput, setCmdOutput] = useState<string | null>(null)
   const [cmdExitCode, setCmdExitCode] = useState<number | null>(null)
   const [cmdRunning, setCmdRunning] = useState(false)
   const [contextFiles, setContextFiles] = useState<ContextFile[]>(() =>
@@ -140,9 +137,6 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
     [chats, workspace]
   )
 
-  // The Git card describes the repository cloned into the workspace, so the
-  // server is asked to read it each time a workspace is opened — and the clone
-  // form starts empty again, so one workspace's URL does not carry into another.
   useEffect(() => {
     setRemoteDraft("")
     setCloneError(null)
@@ -166,8 +160,6 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
     }
   }, [workspace])
 
-  // The repository is cloned into the workspace itself, so what the card shows
-  // afterwards is read back from disk rather than taken from the request.
   async function cloneRepo() {
     if (!workspace) return
     const remote = remoteDraft.trim()
@@ -191,39 +183,14 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
     if (command === "") return
 
     setCmdRunning(true)
-    setCmdOutput(null)
     setCmdExitCode(null)
     try {
       const result = await api.runWorkspaceCommand(workspace.id, command)
-      setCmdOutput(result.output)
       setCmdExitCode(result.exitCode)
     } catch (err) {
-      setCmdOutput(err instanceof Error ? err.message : "Command failed")
       setCmdExitCode(-1)
     } finally {
       setCmdRunning(false)
-    }
-  }
-
-  async function handleSend(message: string) {
-    if (!workspace || sending) return
-
-    setSending(true)
-    setError(null)
-    try {
-      // The chat is created in this workspace, so the agent works here from the
-      // first message on.
-      const chat = await createChat(workspace.id)
-      await navigate({ to: "/chat/$chatId", params: { chatId: chat.id } })
-      void sendMessage(chat.id, message)
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Could not start a chat in this workspace."
-      )
-    } finally {
-      setSending(false)
     }
   }
 
@@ -302,7 +269,24 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
           <div className="flex min-w-0 flex-1 flex-col">
             <div className="-mt-8">
               <PromptInput
-                onSend={handleSend}
+                onSend={async (message) => {
+                  if (!workspace || sending) return
+                  setSending(true)
+                  setError(null)
+                  try {
+                    const chat = await createChat(workspace.id)
+                    await navigate({ to: "/chat/$chatId", params: { chatId: chat.id } })
+                    void sendMessage(chat.id, message)
+                  } catch (err) {
+                    setError(
+                      err instanceof Error
+                        ? err.message
+                        : "Could not start a chat in this workspace."
+                    )
+                  } finally {
+                    setSending(false)
+                  }
+                }}
                 heading={`Ready to work on ${title}`}
                 compact
                 disabled={sending}
@@ -312,9 +296,7 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
             <div className="mt-8">
               <h3 className="mb-3 text-xs font-medium text-white/40">Recents</h3>
               {workspaceChats.length === 0 ? (
-                <p className="text-xs text-white/30">
-                  No chats yet in this workspace
-                </p>
+                <p className="text-xs text-white/30">No chats yet in this workspace</p>
               ) : (
                 <div className="space-y-1">
                   {workspaceChats.map((chat) => (
@@ -345,36 +327,23 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
           </div>
 
           <div className="mt-20 flex w-[320px] flex-col gap-3">
-            <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
+            {/* Git Card */}
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-medium text-white/90">
-                  Git &amp; Github
-                </h3>
-                <HugeiconsIcon
-                  icon={GitBranchIcon}
-                  strokeWidth={2}
-                  className="size-4 text-white/40"
-                />
+                <h3 className="text-sm font-medium text-white/90">Git & Github</h3>
+                <HugeiconsIcon icon={GitBranchIcon} strokeWidth={2} className="size-4 text-white/40" />
               </div>
-
               <div className="space-y-3">
                 {gitError ? (
                   <p className="text-xs text-red-400">{gitError}</p>
                 ) : !git ? (
-                  <p className="text-xs text-white/30">
-                    Reading the repository…
-                  </p>
+                  <p className="text-xs text-white/30">Reading the repository…</p>
                 ) : git.isRepo ? (
                   <>
                     <div>
-                      <span className="mb-1 block text-xs text-white/40">
-                        Git remote url
-                      </span>
+                      <span className="mb-1 block text-xs text-white/40">Git remote url</span>
                       <div className="flex items-center justify-between gap-2">
-                        <span
-                          title={git.remoteUrl}
-                          className="truncate text-sm text-white/70"
-                        >
+                        <span title={git.remoteUrl} className="truncate text-sm text-white/70">
                           {git.remoteUrl || "No remote configured"}
                         </span>
                         {git.visibility ? (
@@ -384,31 +353,19 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
                         ) : null}
                       </div>
                     </div>
-
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-white/40">Total commits</span>
-                      <span className="font-medium text-white/70">
-                        {git.totalCommits}
-                      </span>
+                      <span className="font-medium text-white/70">{git.totalCommits}</span>
                     </div>
-
                     {git.latestCommit ? (
                       <div className="space-y-1.5">
-                        <span className="text-xs text-white/40">
-                          Latest commit
-                        </span>
+                        <span className="text-xs text-white/40">Latest commit</span>
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex min-w-0 items-start gap-2">
-                            <span className="shrink-0 font-mono text-xs text-primary">
-                              {git.latestCommit.hash}
-                            </span>
-                            <span className="line-clamp-2 text-xs text-white/60">
-                              {git.latestCommit.message}
-                            </span>
+                            <span className="shrink-0 font-mono text-xs text-primary">{git.latestCommit.hash}</span>
+                            <span className="line-clamp-2 text-xs text-white/60">{git.latestCommit.message}</span>
                           </div>
-                          <span className="shrink-0 text-xs text-white/30">
-                            {formatDate(Date.parse(git.latestCommit.date))}
-                          </span>
+                          <span className="shrink-0 text-xs text-white/30">{formatDate(Date.parse(git.latestCommit.date))}</span>
                         </div>
                       </div>
                     ) : (
@@ -417,24 +374,14 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
                   </>
                 ) : (
                   <div>
-                    <label
-                      htmlFor="git-clone-url"
-                      className="mb-1 block text-xs text-white/40"
-                    >
-                      Git remote url
-                    </label>
+                    <label htmlFor="git-clone-url" className="mb-1 block text-xs text-white/40">Git remote url</label>
                     <input
                       id="git-clone-url"
                       type="url"
                       placeholder="https://github.com/user/repo.git"
                       value={remoteDraft}
                       onChange={(event) => setRemoteDraft(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault()
-                          void cloneRepo()
-                        }
-                      }}
+                      onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void cloneRepo() } }}
                       disabled={cloning}
                       autoComplete="off"
                       spellCheck={false}
@@ -445,175 +392,88 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
                     ) : cloning ? (
                       <p className="mt-1 text-xs text-white/40">Cloning…</p>
                     ) : (
-                      <p className="mt-1 text-xs text-white/30">
-                        Press Enter to clone it into this workspace
-                      </p>
+                      <p className="mt-1 text-xs text-white/30">Press Enter to clone it into this workspace</p>
                     )}
                   </div>
                 )}
               </div>
             </div>
 
-            <div className="flex flex-col rounded-2xl border border-white/10 bg-white/5 p-4">
+            {/* Context Card */}
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-sm font-medium text-white/90">Context</h3>
                 <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    className="cursor-pointer rounded-lg p-1 transition-colors hover:bg-white/10"
-                  >
-                    <HugeiconsIcon
-                      icon={Search01Icon}
-                      strokeWidth={2}
-                      className="size-4 text-white/50"
-                    />
+                  <button type="button" className="cursor-pointer rounded-lg p-1 transition-colors hover:bg-white/10">
+                    <HugeiconsIcon icon={Search01Icon} strokeWidth={2} className="size-4 text-white/50" />
                   </button>
-                  <button
-                    type="button"
-                    className="cursor-pointer rounded-lg p-1 transition-colors hover:bg-white/10"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <HugeiconsIcon
-                      icon={Add01Icon}
-                      strokeWidth={2}
-                      className="size-4 text-white/50"
-                    />
+                  <button type="button" className="cursor-pointer rounded-lg p-1 transition-colors hover:bg-white/10" onClick={() => fileInputRef.current?.click()}>
+                    <HugeiconsIcon icon={Add01Icon} strokeWidth={2} className="size-4 text-white/50" />
                   </button>
                 </div>
               </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept={ACCEPTED_EXTENSIONS.join(",")}
-                onChange={(event) => {
-                  const added: ContextFile[] = Array.from(
-                    event.target.files ?? []
-                  )
-                    .filter((file) => isAcceptedFile(file.name))
-                    .map((file) => ({
-                      id: crypto.randomUUID(),
-                      name: file.name,
-                      size: file.size,
-                    }))
-                  addContextFiles(added)
-                  event.target.value = ""
-                }}
-                className="hidden"
-              />
+              <input ref={fileInputRef} type="file" multiple accept={ACCEPTED_EXTENSIONS.join(",")} onChange={(event) => {
+                const added: ContextFile[] = Array.from(event.target.files ?? []).filter((file) => isAcceptedFile(file.name)).map((file) => ({ id: crypto.randomUUID(), name: file.name, size: file.size }))
+                addContextFiles(added)
+                event.target.value = ""
+              }} className="hidden" />
               {contextFiles.length === 0 ? (
                 <p className="text-xs text-white/30">No files added yet</p>
               ) : (
                 <div className="grid grid-cols-2 gap-2">
                   {contextFiles.map((file) => (
-                    <Attachment
-                      key={file.id}
-                      orientation="vertical"
-                      className="w-full cursor-pointer bg-transparent transition-colors hover:bg-white/5"
-                    >
+                    <Attachment key={file.id} orientation="vertical" className="w-full cursor-pointer bg-transparent transition-colors hover:bg-white/5">
                       <AttachmentContent className="relative px-2 py-1.5">
-                        <button
-                          type="button"
-                          onClick={() => removeContextFile(file.id)}
-                          aria-label={`Remove ${file.name}`}
-                          className="absolute top-1 right-1 cursor-pointer rounded-md p-0.5 opacity-0 transition-all group-hover/attachment:opacity-100 hover:bg-white/10"
-                        >
-                          <HugeiconsIcon
-                            icon={Cancel01Icon}
-                            strokeWidth={2}
-                            className="size-3 text-white/50"
-                          />
+                        <button type="button" onClick={() => removeContextFile(file.id)} aria-label={`Remove ${file.name}`} className="absolute top-1 right-1 cursor-pointer rounded-md p-0.5 opacity-0 transition-all group-hover/attachment:opacity-100 hover:bg-white/10">
+                          <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} className="size-3 text-white/50" />
                         </button>
-                        <AttachmentTitle className="line-clamp-2 text-white/90">
-                          {file.name}
-                        </AttachmentTitle>
-                        <AttachmentDescription className="text-white/50">
-                          {formatFileSize(file.size)}
-                        </AttachmentDescription>
-                        <AttachmentBadge className="border-white/10 bg-white/5 text-white/50">
-                          {extensionBadge(file.name)}
-                        </AttachmentBadge>
+                        <AttachmentTitle className="line-clamp-2 text-white/90">{file.name}</AttachmentTitle>
+                        <AttachmentDescription className="text-white/50">{formatFileSize(file.size)}</AttachmentDescription>
+                        <AttachmentBadge className="border-white/10 bg-white/5 text-white/50">{extensionBadge(file.name)}</AttachmentBadge>
                       </AttachmentContent>
                     </Attachment>
                   ))}
                 </div>
               )}
             </div>
-          </div>
 
-          {/* Command Card */}
-          <div className="flex flex-col rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-sm font-medium text-white/90">Command</h3>
-              <HugeiconsIcon
-                icon={ComputerTerminal01Icon}
-                strokeWidth={2}
-                className="size-4 text-white/40"
-              />
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  placeholder="Enter command (e.g., npm install, dir, git status)"
-                  value={cmdDraft}
-                  onChange={(event) => setCmdDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && !cmdRunning) {
-                      event.preventDefault()
-                      void runCommand()
-                    }
-                  }}
-                  disabled={cmdRunning}
-                  autoComplete="off"
-                  spellCheck={false}
-                  className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white/80 transition-colors outline-none placeholder:text-white/30 focus:border-white/20 disabled:opacity-60"
-                />
-                {cmdRunning ? (
-                  <button
-                    type="button"
-                    disabled
-                    className="shrink-0 rounded-lg p-2 text-white/40"
-                    aria-label="Running"
-                  >
-                    <HugeiconsIcon
-                      icon={Search01Icon}
-                      strokeWidth={2}
-                      className="size-4 animate-spin"
-                    />
-                  </button>
-                ) : cmdExitCode !== null ? (
-                  <button
-                    type="button"
-                    className={`shrink-0 rounded-lg p-2 transition-colors ${
-                      cmdExitCode === 0
-                        ? "text-emerald-400 hover:bg-emerald-500/10"
-                        : "text-red-400 hover:bg-red-500/10"
-                    }`}
-                    aria-label={cmdExitCode === 0 ? "Success" : "Failed"}
-                  >
-                    <HugeiconsIcon
-                      icon={cmdExitCode === 0 ? Tick02Icon : Cancel01Icon}
-                      strokeWidth={2}
-                      className="size-4"
-                    />
-                  </button>
-                ) : null}
+            {/* Command Card */}
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-medium text-white/90">Command</h3>
+                <HugeiconsIcon icon={ComputerTerminal01Icon} strokeWidth={2} className="size-4 text-white/40" />
               </div>
-
-              {cmdOutput !== null && (
-                <div className="rounded-lg border border-white/10 bg-white/5 p-3 max-h-60 overflow-auto">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-medium text-white/60">
-                      {cmdExitCode === 0 ? "Completed" : `Exit code: ${cmdExitCode}`}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Enter command (e.g., npm install, dir, git status)"
+                    value={cmdDraft}
+                    onChange={(event) => setCmdDraft(event.target.value)}
+                    onKeyDown={(event) => { if (event.key === "Enter" && !cmdRunning) { event.preventDefault(); void runCommand() } }}
+                    disabled={cmdRunning}
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white/80 transition-colors outline-none placeholder:text-white/30 focus:border-white/20 disabled:opacity-60"
+                  />
+                  {cmdRunning ? (
+                    <button type="button" disabled className="shrink-0 rounded-lg p-2 text-white/40" aria-label="Running">
+                      <HugeiconsIcon icon={Search01Icon} strokeWidth={2} className="size-4 animate-spin" />
+                    </button>
+                  ) : cmdExitCode !== null ? (
+                    <button type="button" className={`shrink-0 rounded-lg p-2 transition-colors ${cmdExitCode === 0 ? "text-emerald-400 hover:bg-emerald-500/10" : "text-red-400 hover:bg-red-500/10"}`} aria-label={cmdExitCode === 0 ? "Success" : "Failed"}>
+                      <HugeiconsIcon icon={cmdExitCode === 0 ? Tick02Icon : Cancel01Icon} strokeWidth={2} className="size-4" />
+                    </button>
+                  ) : null}
+                </div>
+                {cmdExitCode !== null && (
+                  <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+                    <span className={`text-xs font-medium ${cmdExitCode === 0 ? "text-emerald-400" : "text-red-400"}`}>
+                      {cmdExitCode === 0 ? "Exit code: 0 (success)" : `Exit code: ${cmdExitCode} (failed)`}
                     </span>
                   </div>
-                  <pre className="font-mono text-xs text-white/70 whitespace-pre-wrap break-all">
-                    {cmdOutput || "(no output)"}
-                  </pre>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
         </div>

@@ -26,7 +26,8 @@ type Connector struct {
 // work on, what the tools are for, and the rules that keep its answers and its
 // trace readable. base is the application's own prompt, kept in front.
 // mode is the chat's operating mode: "build" (full tools) or "plan" (read-only).
-func SystemPrompt(ws *Workspace, base string, connectors []Connector, mode string) string {
+// projectMap is an optional pre-scanned project map injected into the prompt.
+func SystemPrompt(ws *Workspace, base string, connectors []Connector, mode string, projectMap string) string {
 	var b strings.Builder
 
 	if trimmed := strings.TrimSpace(base); trimmed != "" {
@@ -38,6 +39,12 @@ func SystemPrompt(ws *Workspace, base string, connectors []Connector, mode strin
 		b.WriteString("You are working in a real project on the user's machine and can inspect and change it with tools.\n\n")
 		fmt.Fprintf(&b, "Project root: %s\n", ws.Root())
 		b.WriteString("All tool paths are resolved inside that directory; anything outside it is refused.\n")
+	}
+
+	// Inject project map (scanned fresh each run)
+	if projectMap != "" {
+		b.WriteString(projectMap)
+		b.WriteString("\n")
 	}
 
 	// The clock is stated rather than left to be inferred: a model that does not

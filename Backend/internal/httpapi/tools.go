@@ -133,7 +133,9 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 	if workspace == nil && len(described) == 0 {
 		return turnSetup{system: systemPrompt, tools: tools, origins: origins}
 	}
-	return turnSetup{system: agent.SystemPrompt(workspace, systemPrompt, described, mode), tools: tools, origins: origins}
+	// Scan project map fresh each run (depth 2)
+	projectMap := agent.ScanProjectMap(ctx, workspace.Root()).ProjectMapString()
+	return turnSetup{system: agent.SystemPrompt(workspace, systemPrompt, described, mode, projectMap), tools: tools, origins: origins}
 }
 
 // mergeTools adds what the connectors offer to a turn's tools, leaving out the
