@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
-	"time"
 )
 
 // Connector is a running MCP server, as the prompt should describe it: the name
@@ -47,16 +46,8 @@ func SystemPrompt(ws *Workspace, base string, connectors []Connector, mode strin
 		b.WriteString("\n")
 	}
 
-	// The clock is stated rather than left to be inferred: a model that does not
-	// know what time it is on this machine cannot set a timer for "in ten
-	// minutes" or turn "at nine tonight" into a time, and guesses.
-	now := time.Now()
-	fmt.Fprintf(&b, "Operating system: %s. It is %s local time (%s), on %s.\n\n",
-		runtime.GOOS,
-		now.Format("15:04"),
-		now.Format("MST"),
-		now.Format("Monday 2 January 2006"),
-	)
+	// OS info (stable, no timestamp for prompt caching)
+	fmt.Fprintf(&b, "Operating system: %s.\n\n", runtime.GOOS)
 
 	if section := machineSection(connectors); section != "" {
 		b.WriteString(section)
