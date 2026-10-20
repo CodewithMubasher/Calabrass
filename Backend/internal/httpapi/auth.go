@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/CodewithMubasher/Calabrass/backend/internal/auth"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/providers"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
 )
 
 // handleSignUp creates an account and returns its first session.
@@ -28,6 +30,7 @@ func (s *Server) handleSignUp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.seedBundledConnectors(r.Context(), session.User.ID)
+	s.seedProviderPresets(r.Context(), session.User.ID)
 	writeJSON(w, http.StatusCreated, session)
 }
 
@@ -54,6 +57,36 @@ func (s *Server) seedBundledConnectors(ctx context.Context, userID string) {
 			s.log.Warn("could not leave a bundled MCP server switched off",
 				"connector", bundled.Name, "error", err)
 		}
+	}
+}
+
+// seedProviderPresets gives a brand new account the pre-configured AI provider
+// templates, so they are already there to configure rather than something to
+// be typed in from scratch. A preset the installer left out was never found,
+// and so is not registered. Seeding only happens once, at sign-up: a preset
+// the person then removes stays removed.
+//
+// They are registered switched off with empty API keys. Adding a key is a
+// deliberate choice: the provider is listed and waiting, and does nothing at
+// all until the person turns it on.
+func (s *Server) seedProviderPresets(ctx context.Context, userID string) {
+	for _, preset := range providers.ProviderPresets {
+		// Use UpsertProvider to create or update the preset
+		err := s.store.UpsertProvider(ctx, store.ProviderRecord{
+			ID:        preset.ID,
+			Name:      preset.Name,
+			BaseURL:   preset.BaseURL,
+			APIKey:    "", // Empty - user must add their own key
+			Enabled:   false, // Disabled by default
+			Custom:    false, // These are built-in presets
+		}, userID)
+		if err != nil {
+			s.log.Warn("could not register a provider preset",
+				"provider", preset.ID, "error", err)
+			continue
+		}
+		// Note: We intentionally don't update the default model here.
+		// The provider's default model is handled by the registry when listing models.
 	}
 }
 

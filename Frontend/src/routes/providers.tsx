@@ -5,7 +5,8 @@ import {
   Add01Icon,
   BotIcon,
   ChatGptIcon,
-  ClaudeIcon,
+  CloudIcon,
+  CpuIcon,
   DeepseekIcon,
   GoogleGeminiIcon,
   Grok02Icon,
@@ -13,7 +14,11 @@ import {
   MoreHorizontalIcon,
   PowerIcon,
   PowerOffIcon,
+  RocketIcon,
+  Search02Icon,
+  TerminalIcon,
   ThreeDScaleIcon,
+  UserGroupIcon,
 } from "@hugeicons/core-free-icons"
 import { createRoute } from "@tanstack/react-router"
 
@@ -56,9 +61,17 @@ const PROVIDER_ICONS: Record<string, IconSvgElement> = {
   google: GoogleGeminiIcon,
   groq: Grok02Icon,
   openai: ChatGptIcon,
-  anthropic: ClaudeIcon,
+  anthropic: BotIcon,
   mistral: MistralIcon,
   deepseek: DeepseekIcon,
+  openrouter: ThreeDScaleIcon,
+  nvidia: CpuIcon,
+  cloudflare: CloudIcon,
+  ollama: TerminalIcon,
+  together: UserGroupIcon,
+  cohere: BotIcon,
+  perplexity: Search02Icon,
+  xai: RocketIcon,
 }
 
 /** The middle line of a card: the endpoint the provider calls. */
