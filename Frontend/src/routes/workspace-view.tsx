@@ -4,9 +4,11 @@ import { HugeiconsIcon } from "@hugeicons/react"
 import {
   Add01Icon,
   Cancel01Icon,
+  ComputerTerminal01Icon,
   Folder01Icon,
   GitBranchIcon,
   Search01Icon,
+  Tick02Icon,
 } from "@hugeicons/core-free-icons"
 import { createRoute } from "@tanstack/react-router"
 
@@ -121,6 +123,10 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
   const [remoteDraft, setRemoteDraft] = useState("")
   const [cloneError, setCloneError] = useState<string | null>(null)
   const [cloning, setCloning] = useState(false)
+  const [cmdDraft, setCmdDraft] = useState("")
+  const [cmdOutput, setCmdOutput] = useState<string | null>(null)
+  const [cmdExitCode, setCmdExitCode] = useState<number | null>(null)
+  const [cmdRunning, setCmdRunning] = useState(false)
   const [contextFiles, setContextFiles] = useState<ContextFile[]>(() =>
     readJson<ContextFile[]>(`calabrass-context-${workspaceId}`, [])
   )
@@ -176,6 +182,26 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
       )
     } finally {
       setCloning(false)
+    }
+  }
+
+  async function runCommand() {
+    if (!workspace || cmdRunning) return
+    const command = cmdDraft.trim()
+    if (command === "") return
+
+    setCmdRunning(true)
+    setCmdOutput(null)
+    setCmdExitCode(null)
+    try {
+      const result = await api.runWorkspaceCommand(workspace.id, command)
+      setCmdOutput(result.output)
+      setCmdExitCode(result.exitCode)
+    } catch (err) {
+      setCmdOutput(err instanceof Error ? err.message : "Command failed")
+      setCmdExitCode(-1)
+    } finally {
+      setCmdRunning(false)
     }
   }
 
@@ -510,6 +536,82 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
                       </AttachmentContent>
                     </Attachment>
                   ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Command Card */}
+          <div className="flex flex-col rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-medium text-white/90">Command</h3>
+              <HugeiconsIcon
+                icon={ComputerTerminal01Icon}
+                strokeWidth={2}
+                className="size-4 text-white/40"
+              />
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Enter command (e.g., npm install, dir, git status)"
+                  value={cmdDraft}
+                  onChange={(event) => setCmdDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !cmdRunning) {
+                      event.preventDefault()
+                      void runCommand()
+                    }
+                  }}
+                  disabled={cmdRunning}
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white/80 transition-colors outline-none placeholder:text-white/30 focus:border-white/20 disabled:opacity-60"
+                />
+                {cmdRunning ? (
+                  <button
+                    type="button"
+                    disabled
+                    className="shrink-0 rounded-lg p-2 text-white/40"
+                    aria-label="Running"
+                  >
+                    <HugeiconsIcon
+                      icon={Search01Icon}
+                      strokeWidth={2}
+                      className="size-4 animate-spin"
+                    />
+                  </button>
+                ) : cmdExitCode !== null ? (
+                  <button
+                    type="button"
+                    className={`shrink-0 rounded-lg p-2 transition-colors ${
+                      cmdExitCode === 0
+                        ? "text-emerald-400 hover:bg-emerald-500/10"
+                        : "text-red-400 hover:bg-red-500/10"
+                    }`}
+                    aria-label={cmdExitCode === 0 ? "Success" : "Failed"}
+                  >
+                    <HugeiconsIcon
+                      icon={cmdExitCode === 0 ? Tick02Icon : Cancel01Icon}
+                      strokeWidth={2}
+                      className="size-4"
+                    />
+                  </button>
+                ) : null}
+              </div>
+
+              {cmdOutput !== null && (
+                <div className="rounded-lg border border-white/10 bg-white/5 p-3 max-h-60 overflow-auto">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-white/60">
+                      {cmdExitCode === 0 ? "Completed" : `Exit code: ${cmdExitCode}`}
+                    </span>
+                  </div>
+                  <pre className="font-mono text-xs text-white/70 whitespace-pre-wrap break-all">
+                    {cmdOutput || "(no output)"}
+                  </pre>
                 </div>
               )}
             </div>

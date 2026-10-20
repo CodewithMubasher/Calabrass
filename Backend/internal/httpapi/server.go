@@ -145,6 +145,7 @@ func NewServer(deps Deps) *Server {
 	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}", s.handleDeleteWorkspace)
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/git", s.handleWorkspaceGit)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/git/clone", s.handleCloneWorkspaceRepo)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/command", s.handleWorkspaceCommand)
 	mux.HandleFunc("GET /api/connectors", s.handleListConnectors)
 	mux.HandleFunc("POST /api/connectors", s.handleCreateConnector)
 	mux.HandleFunc("PATCH /api/connectors/{connectorID}", s.handleUpdateConnector)

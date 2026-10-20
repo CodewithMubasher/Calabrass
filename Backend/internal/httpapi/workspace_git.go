@@ -379,3 +379,47 @@ func githubSlug(remote string) (string, string, bool) {
 	}
 	return owner, name, true
 }
+
+// handleWorkspaceCommand runs a shell command in the workspace folder.
+// The command runs in the background with no terminal window.
+func (s *Server) handleWorkspaceCommand(w http.ResponseWriter, r *http.Request) {
+	path, ok := s.workspacePath(w, r)
+	if !ok {
+		return
+	}
+
+	var body struct {
+		Command string `json:"command"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, errors.New("the request body is not valid JSON"))
+		return
+	}
+	command := strings.TrimSpace(body.Command)
+	if command == "" {
+		writeError(w, http.StatusBadRequest, errors.New("enter a command"))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "cmd", "/C", command)
+	cmd.Dir = path
+	proc.Hide(cmd)
+
+	out, err := cmd.CombinedOutput()
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = -1
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"output":    string(out),
+		"exitCode":  exitCode,
+	})
+}

@@ -167,6 +167,13 @@ export const api = {
       body: JSON.stringify({ remoteUrl }),
     }),
 
+  /** Run a shell command in the workspace folder. */
+  runWorkspaceCommand: (workspaceId: string, command: string) =>
+    request<{ output: string; exitCode: number }>(`/workspaces/${workspaceId}/command`, {
+      method: "POST",
+      body: JSON.stringify({ command }),
+    }),
+
   listChats: () => request<{ chats: Chat[] }>("/chats").then((r) => r.chats ?? []),
 
   getChat: (chatId: string) =>
