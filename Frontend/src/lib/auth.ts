@@ -7,6 +7,7 @@ import {
   useSession,
   type Session,
 } from "@/lib/session"
+import { loadProviders } from "@/lib/provider-store"
 
 export { session, useSession }
 export type { Session }
@@ -29,6 +30,8 @@ export async function signIn(
   try {
     const next = await api.signIn({ email: email.trim(), password })
     setSession(next)
+    // Force reload providers after signin
+    await loadProviders(true)
     return { ok: true, session: next.user }
   } catch (error) {
     return { ok: false, error: messageFrom(error) }
@@ -47,6 +50,8 @@ export async function signUp(
       password,
     })
     setSession(next)
+    // Force reload providers after signup
+    await loadProviders(true)
     return { ok: true, session: next.user }
   } catch (error) {
     return { ok: false, error: messageFrom(error) }

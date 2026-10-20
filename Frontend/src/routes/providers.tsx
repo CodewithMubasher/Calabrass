@@ -14,7 +14,6 @@ import {
   MoreHorizontalIcon,
   PowerIcon,
   PowerOffIcon,
-  RocketIcon,
   Search02Icon,
   TerminalIcon,
   ThreeDScaleIcon,
@@ -61,7 +60,6 @@ const PROVIDER_ICONS: Record<string, IconSvgElement> = {
   google: GoogleGeminiIcon,
   groq: Grok02Icon,
   openai: ChatGptIcon,
-  anthropic: BotIcon,
   mistral: MistralIcon,
   deepseek: DeepseekIcon,
   openrouter: ThreeDScaleIcon,
@@ -71,7 +69,6 @@ const PROVIDER_ICONS: Record<string, IconSvgElement> = {
   together: UserGroupIcon,
   cohere: BotIcon,
   perplexity: Search02Icon,
-  xai: RocketIcon,
 }
 
 /** The middle line of a card: the endpoint the provider calls. */
@@ -190,17 +187,23 @@ function ProvidersPage() {
                   <div className="flex shrink-0 items-center gap-2">
                     <button
                       type="button"
-                      onClick={() =>
-                        void setProviderEnabled(provider.id, !provider.enabled)
-                      }
+                      onClick={() => {
+                        if (!provider.enabled && !provider.connected) {
+                          void setEditing(provider)
+                        } else {
+                          void setProviderEnabled(provider.id, !provider.enabled)
+                        }
+                      }}
                       disabled={pending.includes(provider.id)}
-                      title={provider.enabled ? "Disable" : "Enable"}
-                      aria-label={`Turn ${provider.name} ${provider.enabled ? "off" : "on"}`}
+                      title={provider.enabled ? "Disable" : provider.connected ? "Enable" : "Add API key to enable"}
+                      aria-label={`Turn ${provider.name} ${provider.enabled ? "off" : provider.connected ? "on" : "on (needs API key)"}`}
                       className={cn(
                         "cursor-pointer rounded-lg p-1.5 transition-colors disabled:pointer-events-none disabled:opacity-50",
                         provider.enabled
                           ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
-                          : "bg-white/5 text-white/30 hover:bg-white/10"
+                          : provider.connected
+                          ? "bg-white/5 text-white/30 hover:bg-white/10"
+                          : "bg-amber-500/10 text-amber-400 hover:bg-amber-500/20"
                       )}
                     >
                       <HugeiconsIcon

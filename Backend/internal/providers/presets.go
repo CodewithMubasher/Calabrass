@@ -113,27 +113,11 @@ var ProviderPresets = []Preset{
 		Special:      false,
 	},
 	{
-		ID:           "anthropic",
-		Name:         "Anthropic (via OpenRouter)",
-		BaseURL:      "https://openrouter.ai/api/v1",
-		DefaultModel: "anthropic/claude-3.5-sonnet",
-		Icon:         "anthropic",
-		Special:      false,
-	},
-	{
 		ID:           "perplexity",
 		Name:         "Perplexity",
 		BaseURL:      "https://api.perplexity.ai",
 		DefaultModel: "llama-3.1-sonar-large-128k-online",
 		Icon:         "perplexity",
-		Special:      false,
-	},
-	{
-		ID:           "xai",
-		Name:         "xAI (Grok)",
-		BaseURL:      "https://api.x.ai/v1",
-		DefaultModel: "grok-beta",
-		Icon:         "xai",
 		Special:      false,
 	},
 }

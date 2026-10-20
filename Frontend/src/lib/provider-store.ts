@@ -53,8 +53,8 @@ function is401(err: unknown): err is ApiError {
 let inFlight = false
 
 /** Fetch the providers the backend can serve. */
-export async function loadProviders() {
-  if (inFlight) return
+export async function loadProviders(force = false) {
+  if (!force && inFlight) return
   inFlight = true
   setState({ loading: true, error: null })
 
