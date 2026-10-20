@@ -81,9 +81,9 @@ interface PromptInputProps {
   compact?: boolean
   /** Bottom-docked composer used inside a chat thread. */
   isInChat?: boolean
-  /** Blocks input while a reply is still streaming. */
+  /** Blocks input while a reply is still streaming or an action is pending. */
   disabled?: boolean
-  /** Whether a reply is currently streaming. */
+  /** Whether a reply is currently streaming (shows stop button). */
   isStreaming?: boolean
   /** Current chat mode. */
   mode?: Mode
@@ -449,8 +449,11 @@ const PromptInput = forwardRef<PromptInputRef, PromptInputProps>(
               disabled={!onStop}
               className={cn(
                 "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-opacity disabled:cursor-not-allowed disabled:opacity-50",
-                activeMode.text
+                activeMode.text,
+                // Ensure stop button is never disabled by parent's disabled prop
+                "pointer-events-auto"
               )}
+              style={{ pointerEvents: 'auto' }}
             >
               <HugeiconsIcon icon={BorderAll02Icon} strokeWidth={2} className="size-5" />
             </button>
@@ -508,7 +511,7 @@ const PromptInput = forwardRef<PromptInputRef, PromptInputProps>(
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={disabled}
+            disabled={isStreaming}
             placeholder={placeholder}
             rows={2}
             className="w-full resize-none bg-transparent px-1 text-sm text-white placeholder:text-white/50 outline-none disabled:opacity-60"

@@ -424,6 +424,13 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 			lastTrace = trace
 			return stream.event("trace", tracePayload{Trace: trace})
 		},
+		OnStepFinish: func(step int, usage ai.Usage) error {
+			// Record usage for each step as it completes
+			if usage.InputTokens+usage.OutputTokens > 0 {
+				s.recordUsageFor(ctx, user.ID, providerID, modelID, usage)
+			}
+			return nil
+		},
 	})
 	elapsed := time.Since(started)
 

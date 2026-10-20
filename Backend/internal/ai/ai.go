@@ -354,11 +354,13 @@ type StreamRequest struct {
 // Handlers receives incremental output from a streaming completion. All
 // callbacks are optional; returning an error aborts the stream. OnTrace is
 // called with the whole trace whenever it changes, so the caller can forward a
-// snapshot and keep the last one.
+// snapshot and keep the last one. OnStepFinish is called when a model step
+// finishes, with the step number and its token usage.
 type Handlers struct {
-	OnText      func(delta string) error
-	OnReasoning func(delta string) error
-	OnTrace     func(trace Trace) error
+	OnText       func(delta string) error
+	OnReasoning  func(delta string) error
+	OnTrace      func(trace Trace) error
+	OnStepFinish func(step int, usage Usage) error
 }
 
 // Stream runs one turn, calling the handlers for every text and reasoning delta
@@ -521,6 +523,17 @@ func (r *Registry) Stream(ctx context.Context, req StreamRequest, handlers Handl
 				builder.stepFinish(string(chunk.FinishReason))
 				if err := emit(); err != nil {
 					return current(), err
+				}
+
+				// Report per-step usage if handler is provided
+				if handlers.OnStepFinish != nil {
+					step := len(builder.trace.Steps)
+					if step > 0 {
+						usage := extractUsageFromMetadata(chunk.Metadata)
+						if err := handlers.OnStepFinish(step, usage); err != nil {
+							return current(), err
+						}
+					}
 				}
 			}
 		case provider.ChunkError:

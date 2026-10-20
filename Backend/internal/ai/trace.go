@@ -310,3 +310,21 @@ func stepSource(metadata map[string]any) string {
 	source, _ := metadata["stepSource"].(string)
 	return source
 }
+
+// extractUsageFromMetadata extracts token usage from step finish metadata.
+// goai includes usage in the metadata under the "usage" key.
+func extractUsageFromMetadata(metadata map[string]any) Usage {
+	if metadata == nil {
+		return Usage{}
+	}
+	usageMap, ok := metadata["usage"].(map[string]any)
+	if !ok {
+		return Usage{}
+	}
+	inputTokens, _ := usageMap["input_tokens"].(float64)
+	outputTokens, _ := usageMap["output_tokens"].(float64)
+	return Usage{
+		InputTokens:  int(inputTokens),
+		OutputTokens: int(outputTokens),
+	}
+}
