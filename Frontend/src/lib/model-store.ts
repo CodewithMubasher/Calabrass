@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react"
 
 import { api, ApiError } from "@/lib/api"
+import { clearNotice, notifyError } from "@/lib/toast"
 import type { ModelSelection, ProviderInfo } from "@/types/chat"
 
 const STORAGE_KEY = "calabrass-model"
@@ -8,7 +9,6 @@ const STORAGE_KEY = "calabrass-model"
 interface ModelState {
   providers: ProviderInfo[]
   loading: boolean
-  error: string | null
   selected: ModelSelection | null
 }
 
@@ -36,7 +36,6 @@ function persistSelection(selection: ModelSelection) {
 let state: ModelState = {
   providers: [],
   loading: false,
-  error: null,
   selected: loadSelection(),
 }
 
@@ -93,7 +92,7 @@ function pickDefault(providers: ProviderInfo[]): ModelSelection | null {
 /** Fetch the live model catalog from the backend. */
 export async function loadModels() {
   if (state.loading) return
-  setState({ loading: true, error: null })
+  setState({ loading: true })
 
   try {
     const providers = await api.listModels()
@@ -103,6 +102,7 @@ export async function loadModels() {
 
     if (selected) persistSelection(selected)
     setState({ providers, selected, loading: false })
+    clearNotice("models-load")
   } catch (err) {
     // Don't store 401 errors — the global API handler clears the session
     // and redirects to login. Storing the error here races with the redirect
@@ -110,9 +110,11 @@ export async function loadModels() {
     if (err instanceof ApiError && err.status === 401) {
       throw err
     }
-    setState({
-      loading: false,
-      error: err instanceof Error ? err.message : "Could not load models.",
-    })
+    setState({ loading: false })
+    notifyError(
+      err instanceof Error ? err.message : "Could not load models.",
+      "Could not load models",
+      "models-load"
+    )
   }
 }

@@ -14,7 +14,6 @@ import { createRoute } from "@tanstack/react-router"
 
 import { PageEmpty } from "@/components/page-shell"
 import { PromptInput } from "@/components/prompt-input"
-import { Alert, AlertAction } from "@/components/ui/alert"
 import {
   Attachment,
   AttachmentBadge,
@@ -33,6 +32,7 @@ import {
 import { createChat, sendMessage, useChats } from "@/lib/chat-store"
 import { api } from "@/lib/api"
 import { useWorkspacesState } from "@/lib/workspace-store"
+import { notifyError } from "@/lib/toast"
 import type { WorkspaceGitInfo } from "@/types/chat"
 import { Route as rootRoute } from "@/routes/__root"
 
@@ -106,7 +106,7 @@ function formatDate(at: number) {
  */
 function WorkspaceView({ workspaceId }: { workspaceId: string }) {
   const navigate = useNavigate()
-  const { workspaces, loading, error: listError } = useWorkspacesState()
+  const { workspaces, loading } = useWorkspacesState()
   const chats = useChats()
 
   const workspace = useMemo(
@@ -114,12 +114,9 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
     [workspaces, workspaceId]
   )
 
-  const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [git, setGit] = useState<WorkspaceGitInfo | null>(null)
-  const [gitError, setGitError] = useState<string | null>(null)
   const [remoteDraft, setRemoteDraft] = useState("")
-  const [cloneError, setCloneError] = useState<string | null>(null)
   const [cloning, setCloning] = useState(false)
   const [cmdDraft, setCmdDraft] = useState("")
   const [cmdExitCode, setCmdExitCode] = useState<number | null>(null)
@@ -139,7 +136,6 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
 
   useEffect(() => {
     setRemoteDraft("")
-    setCloneError(null)
     if (!workspace) return
     let live = true
     api
@@ -147,12 +143,12 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
       .then((info) => {
         if (!live) return
         setGit(info)
-        setGitError(null)
       })
       .catch((err) => {
         if (!live) return
-        setGitError(
-          err instanceof Error ? err.message : "Could not read the repository."
+        notifyError(
+          err instanceof Error ? err.message : "Could not read the repository.",
+          "Could not read the repository"
         )
       })
     return () => {
@@ -165,12 +161,12 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
     const remote = remoteDraft.trim()
     if (remote === "") return
     setCloning(true)
-    setCloneError(null)
     try {
       setGit(await api.cloneWorkspaceRepo(workspace.id, remote))
     } catch (err) {
-      setCloneError(
-        err instanceof Error ? err.message : "Could not clone the repository."
+      notifyError(
+        err instanceof Error ? err.message : "Could not clone the repository.",
+        "Could not clone the repository"
       )
     } finally {
       setCloning(false)
@@ -244,17 +240,6 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
         </Breadcrumb>
       </div>
 
-      {error || listError ? (
-        <Alert variant="destructive" className="mx-14 mt-4 shrink-0">
-          <AlertAction
-            onClick={() => setError(null)}
-            aria-label="Dismiss"
-          >
-            <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-          </AlertAction>
-          {error ?? listError}
-        </Alert>
-      ) : null}
 
       {!workspace ? (
         <div className="flex-1">
@@ -272,16 +257,16 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
                 onSend={async (message) => {
                   if (!workspace || sending) return
                   setSending(true)
-                  setError(null)
                   try {
                     const chat = await createChat(workspace.id)
                     await navigate({ to: "/chat/$chatId", params: { chatId: chat.id } })
                     void sendMessage(chat.id, message)
                   } catch (err) {
-                    setError(
+                    notifyError(
                       err instanceof Error
                         ? err.message
-                        : "Could not start a chat in this workspace."
+                        : "Could not start a chat in this workspace.",
+                      "Could not start the chat"
                     )
                   } finally {
                     setSending(false)
@@ -334,9 +319,7 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
                 <HugeiconsIcon icon={GitBranchIcon} strokeWidth={2} className="size-4 text-white/40" />
               </div>
               <div className="space-y-3">
-                {gitError ? (
-                  <p className="text-xs text-red-400">{gitError}</p>
-                ) : !git ? (
+                {!git ? (
                   <p className="text-xs text-white/30">Reading the repository…</p>
                 ) : git.isRepo ? (
                   <>
@@ -387,9 +370,7 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
                       spellCheck={false}
                       className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white/80 transition-colors outline-none placeholder:text-white/30 focus:border-white/20 disabled:opacity-60"
                     />
-                    {cloneError ? (
-                      <p className="mt-1 text-xs text-red-400">{cloneError}</p>
-                    ) : cloning ? (
+                    {cloning ? (
                       <p className="mt-1 text-xs text-white/40">Cloning…</p>
                     ) : (
                       <p className="mt-1 text-xs text-white/30">Press Enter to clone it into this workspace</p>

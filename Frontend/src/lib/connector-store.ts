@@ -1,12 +1,12 @@
 import { useSyncExternalStore } from "react"
 
 import { api } from "@/lib/api"
+import { clearNotice, notifyError, notifySuccess, reasonFor } from "@/lib/toast"
 import type { ConnectorInput, ConnectorRow } from "@/types/chat"
 
 interface ConnectorState {
   connectors: ConnectorRow[]
   loading: boolean
-  error: string | null
   /** Connector ids with a change in flight. */
   pending: string[]
 }
@@ -14,7 +14,6 @@ interface ConnectorState {
 let state: ConnectorState = {
   connectors: [],
   loading: false,
-  error: null,
   pending: [],
 }
 
@@ -41,33 +40,27 @@ export function useConnectorsState() {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-function reason(err: unknown, fallback: string) {
-  return err instanceof Error ? err.message : fallback
-}
-
 let inFlight = false
 
 /** Fetch the MCP servers this machine has registered. */
 export async function loadConnectors() {
   if (inFlight) return
   inFlight = true
-  setState({ loading: true, error: null })
+  setState({ loading: true })
 
   try {
     setState({ connectors: await api.listConnectors(), loading: false })
+    clearNotice("connectors-load")
   } catch (err) {
-    setState({
-      loading: false,
-      error: reason(err, "Could not load connectors."),
-    })
+    setState({ loading: false })
+    notifyError(
+      reasonFor(err, "Could not load connectors."),
+      "Could not load connectors",
+      "connectors-load"
+    )
   } finally {
     inFlight = false
   }
-}
-
-/** Dismiss the error banner on the connectors page. */
-export function clearConnectorsError() {
-  setState({ error: null })
 }
 
 /**
@@ -75,7 +68,8 @@ export function clearConnectorsError() {
  * show it next to the form.
  */
 export async function createConnector(input: ConnectorInput) {
-  setState({ connectors: await api.createConnector(input), error: null })
+  setState({ connectors: await api.createConnector(input) })
+  notifySuccess(`${input.name} was added.`, "Connector added")
 }
 
 /** Turn a connector on or off. Throws on failure. */
@@ -91,16 +85,18 @@ export async function setConnectorEnabled(
       c.id === connectorId ? { ...c, enabled } : c
     ),
     pending: [...state.pending, connectorId],
-    error: null,
   })
 
   try {
     setState({ connectors: await api.setConnectorEnabled(connectorId, enabled) })
+    clearNotice("connector-update")
   } catch (err) {
-    setState({
-      connectors: previous,
-      error: reason(err, "Could not update the connector."),
-    })
+    setState({ connectors: previous })
+    notifyError(
+      reasonFor(err, "Could not update the connector."),
+      "Could not update the connector",
+      "connector-update"
+    )
   } finally {
     setState({ pending: state.pending.filter((id) => id !== connectorId) })
   }
@@ -108,5 +104,9 @@ export async function setConnectorEnabled(
 
 /** Remove a connector. Throws on failure. */
 export async function deleteConnector(connectorId: string) {
-  setState({ connectors: await api.deleteConnector(connectorId), error: null })
+  const name =
+    state.connectors.find((connector) => connector.id === connectorId)?.name ??
+    "The connector"
+  setState({ connectors: await api.deleteConnector(connectorId) })
+  notifySuccess(`${name} was removed.`, "Connector removed")
 }

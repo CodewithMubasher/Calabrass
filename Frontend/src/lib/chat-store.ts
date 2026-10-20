@@ -6,6 +6,7 @@ import {
   ASK_QUESTIONS_TOOL,
   ASK_TEST_QUESTIONS,
 } from "@/lib/questionnaire"
+import { notifyError, notifyWarning } from "@/lib/toast"
 import type { Chat, ChatMessage, TurnTrace } from "@/types/chat"
 
 /**
@@ -63,8 +64,6 @@ interface ChatState {
   streaming: Record<string, string>
   reasoning: Record<string, string>
   traces: Record<string, TurnTrace>
-  errors: Record<string, string>
-  backendError: string | null
   hydrated: boolean
   /** Abort controllers for in-flight streaming requests, keyed by chatId. */
   abortControllers: Record<string, AbortController>
@@ -81,8 +80,6 @@ let state: ChatState = {
   streaming: {},
   reasoning: {},
   traces: {},
-  errors: {},
-  backendError: null,
   hydrated: false,
   abortControllers: {},
   askTests: {},
@@ -150,16 +147,8 @@ export function useStreamingMessage(chatId: string): ChatMessage | undefined {
   }
 }
 
-export function useChatError(chatId: string) {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot).errors[chatId]
-}
-
 export function useHydrated() {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot).hydrated
-}
-
-export function useBackendError() {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot).backendError
 }
 
 // --- helpers ----------------------------------------------------------------
@@ -202,10 +191,11 @@ function replacePending(list: ChatMessage[], message: ChatMessage): ChatMessage[
 export async function hydrate() {
   try {
     const chats = await api.listChats()
-    setState({ chats, hydrated: true, backendError: null })
+    setState({ chats, hydrated: true })
   } catch (err) {
     if (is401(err)) throw err
-    setState({ hydrated: true, backendError: errorMessage(err) })
+    setState({ hydrated: true })
+    notifyError(errorMessage(err), "Could not reach the server", "backend")
   }
 }
 
@@ -218,14 +208,15 @@ export async function ensureChatLoaded(chatId: string) {
     setState({
       chats: upsertChat(state.chats, detail),
       messages: { ...state.messages, [chatId]: detail.messages ?? [] },
-      backendError: null,
     })
   } catch (err) {
     if (is401(err)) throw err
-    setState({
-      messages: { ...state.messages, [chatId]: [] },
-      errors: { ...state.errors, [chatId]: errorMessage(err) },
-    })
+    setState({ messages: { ...state.messages, [chatId]: [] } })
+    notifyError(
+      errorMessage(err),
+      "Could not open the chat",
+      `chat-load-${chatId}`
+    )
   }
 }
 
@@ -289,7 +280,6 @@ export async function sendMessage(chatId: string, content: string) {
         ...state.messages,
         [chatId]: [...(state.messages[chatId] ?? []), asked, questionnaire],
       },
-      errors: without(state.errors, chatId),
       askTests: { ...state.askTests, [chatId]: true },
     })
     return
@@ -311,7 +301,6 @@ export async function sendMessage(chatId: string, content: string) {
         ...state.messages,
         [chatId]: [...(state.messages[chatId] ?? []), answered],
       },
-      errors: without(state.errors, chatId),
       askTests: without(state.askTests, chatId),
     })
     return
@@ -348,7 +337,6 @@ export async function sendMessage(chatId: string, content: string) {
       // Don't set streaming for image generation - no inFlight message needed
       reasoning: { ...state.reasoning, [chatId]: "" },
       traces: without(state.traces, chatId),
-      errors: without(state.errors, chatId),
     })
     return
   }
@@ -370,7 +358,6 @@ export async function sendMessage(chatId: string, content: string) {
     streaming: { ...state.streaming, [chatId]: "" },
     reasoning: { ...state.reasoning, [chatId]: "" },
     traces: without(state.traces, chatId),
-    errors: without(state.errors, chatId),
   })
 
   await runStream(chatId, text)
@@ -400,7 +387,6 @@ export async function retryReply(chatId: string, messageId: string) {
     streaming: { ...state.streaming, [chatId]: "" },
     reasoning: { ...state.reasoning, [chatId]: "" },
     traces: without(state.traces, chatId),
-    errors: without(state.errors, chatId),
   })
 
   await runStream(chatId, prompt.content, true)
@@ -419,10 +405,8 @@ export async function deleteReply(chatId: string, messageId: string) {
   try {
     await api.deleteMessage(chatId, messageId)
   } catch (err) {
-    setState({
-      messages: { ...state.messages, [chatId]: previous },
-      errors: { ...state.errors, [chatId]: errorMessage(err) },
-    })
+    setState({ messages: { ...state.messages, [chatId]: previous } })
+    notifyError(errorMessage(err), "Could not remove the reply")
   }
 }
 
@@ -437,14 +421,14 @@ export async function renameChat(chatId: string, title: string) {
 
   setState({
     chats: upsertChat(previous, { ...current, title: next }),
-    backendError: null,
   })
 
   try {
     const chat = await api.updateChat(chatId, { title: next })
     setState({ chats: upsertChat(state.chats, chat) })
   } catch (err) {
-    setState({ chats: previous, backendError: errorMessage(err) })
+    setState({ chats: previous })
+    notifyError(errorMessage(err), "Could not rename the chat")
   }
 }
 
@@ -459,7 +443,6 @@ export async function togglePinChat(chatId: string, pinned: boolean) {
 
   setState({
     chats: upsertChat(previous, { ...current, pinned }),
-    backendError: null,
   })
 
   try {
@@ -467,7 +450,8 @@ export async function togglePinChat(chatId: string, pinned: boolean) {
     setState({ chats: upsertChat(state.chats, chat) })
   } catch (err) {
     if (is401(err)) throw err
-    setState({ chats: previous, backendError: errorMessage(err) })
+    setState({ chats: previous })
+    notifyError(errorMessage(err), "Could not pin the chat")
   }
 }
 
@@ -479,7 +463,6 @@ export async function updateChatMode(chatId: string, mode: "build" | "plan") {
 
   setState({
     chats: upsertChat(previous, { ...current, mode }),
-    backendError: null,
   })
 
   try {
@@ -487,13 +470,14 @@ export async function updateChatMode(chatId: string, mode: "build" | "plan") {
     setState({ chats: upsertChat(state.chats, chat) })
   } catch (err) {
     if (is401(err)) throw err
-    setState({ chats: previous, backendError: errorMessage(err) })
+    setState({ chats: previous })
+    notifyError(errorMessage(err), "Could not change the mode")
   }
 }
 
 /** Remember a chat the server created, so the sidebar shows it. */
 export function rememberChat(chat: Chat) {
-  setState({ chats: upsertChat(state.chats, chat), backendError: null })
+  setState({ chats: upsertChat(state.chats, chat) })
 }
 
 /** The shared streaming path, for a fresh turn and for a regeneration. */
@@ -554,20 +538,21 @@ async function runStream(chatId: string, content: string, regenerate = false) {
             reasoning: without(state.reasoning, chatId),
             traces: without(state.traces, chatId),
             abortControllers: without(state.abortControllers, chatId),
-            errors: notice
-              ? { ...state.errors, [chatId]: notice }
-              : without(state.errors, chatId),
           })
+          if (notice) {
+            notifyWarning(notice, "The reply did not finish", `chat-${chatId}`)
+          }
         },
 
-        onError: (message) =>
+        onError: (message) => {
           setState({
             streaming: without(state.streaming, chatId),
             reasoning: without(state.reasoning, chatId),
             traces: without(state.traces, chatId),
             abortControllers: without(state.abortControllers, chatId),
-            errors: { ...state.errors, [chatId]: message },
-          }),
+          })
+          notifyError(message, "The reply failed", `chat-${chatId}`)
+        },
       },
       controller.signal
     )
@@ -581,8 +566,8 @@ async function runStream(chatId: string, content: string, regenerate = false) {
       reasoning: without(state.reasoning, chatId),
       traces: without(state.traces, chatId),
       abortControllers: without(state.abortControllers, chatId),
-      errors: { ...state.errors, [chatId]: errorMessage(err) },
     })
+    notifyError(errorMessage(err), "The reply failed", `chat-${chatId}`)
   }
 }
 
@@ -615,9 +600,7 @@ export async function deleteChat(chatId: string) {
   try {
     await api.deleteChat(chatId)
   } catch (err) {
-    setState({
-      chats: previous,
-      backendError: errorMessage(err),
-    })
+    setState({ chats: previous })
+    notifyError(errorMessage(err), "Could not remove the chat")
   }
 }

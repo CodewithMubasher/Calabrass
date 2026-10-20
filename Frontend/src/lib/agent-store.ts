@@ -1,18 +1,17 @@
 import { useSyncExternalStore } from "react"
 
 import { api } from "@/lib/api"
+import { clearNotice, notifyError, notifySuccess, reasonFor } from "@/lib/toast"
 import type { AgentInput, AgentRow } from "@/types/chat"
 
 interface AgentState {
   agents: AgentRow[]
   loading: boolean
-  error: string | null
 }
 
 let state: AgentState = {
   agents: [],
   loading: false,
-  error: null,
 }
 
 const listeners = new Set<() => void>()
@@ -38,33 +37,27 @@ export function useAgentsState() {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-function reason(err: unknown, fallback: string) {
-  return err instanceof Error ? err.message : fallback
-}
-
 let inFlight = false
 
 /** Fetch the sub-agents this machine has saved. */
 export async function loadAgents() {
   if (inFlight) return
   inFlight = true
-  setState({ loading: true, error: null })
+  setState({ loading: true })
 
   try {
     setState({ agents: await api.listAgents(), loading: false })
+    clearNotice("agents-load")
   } catch (err) {
-    setState({
-      loading: false,
-      error: reason(err, "Could not load agents."),
-    })
+    setState({ loading: false })
+    notifyError(
+      reasonFor(err, "Could not load agents."),
+      "Could not load agents",
+      "agents-load"
+    )
   } finally {
     inFlight = false
   }
-}
-
-/** Dismiss the error banner on the agents page. */
-export function clearAgentsError() {
-  setState({ error: null })
 }
 
 /**
@@ -72,17 +65,22 @@ export function clearAgentsError() {
  * to the form.
  */
 export async function createAgent(input: AgentInput) {
-  setState({ agents: await api.createAgent(input), error: null })
+  setState({ agents: await api.createAgent(input) })
+  notifySuccess(`${input.name} was added.`, "Agent added")
 }
 
 /** Save an agent in full. Throws on failure. */
 export async function saveAgent(agentId: string, input: AgentInput) {
-  setState({ agents: await api.saveAgent(agentId, input), error: null })
+  setState({ agents: await api.saveAgent(agentId, input) })
+  notifySuccess(`${input.name} was saved.`, "Agent saved")
 }
 
 /** Remove an agent. Throws on failure. */
 export async function deleteAgent(agentId: string) {
-  setState({ agents: await api.deleteAgent(agentId), error: null })
+  const name =
+    state.agents.find((agent) => agent.id === agentId)?.name ?? "The agent"
+  setState({ agents: await api.deleteAgent(agentId) })
+  notifySuccess(`${name} was removed.`, "Agent removed")
 }
 
 /** Fetch a single agent by ID. */

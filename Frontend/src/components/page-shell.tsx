@@ -1,28 +1,25 @@
 import type { ReactNode } from "react"
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react"
-import { Cancel01Icon, Search01Icon } from "@hugeicons/core-free-icons"
-
-import { Alert, AlertAction } from "@/components/ui/alert"
+import { Search01Icon } from "@hugeicons/core-free-icons"
 
 /**
  * The page frame every top-level screen shares: a title block with its actions
  * on the right, and the content under it. The page grows with its content and
  * scrolls as one, so the heading moves with the cards instead of staying pinned
  * above a second scroll area.
+ *
+ * There is no error banner here: a failure is said in a toast, wherever the
+ * reader is, rather than in a strip at the top of one page.
  */
 export function PageShell({
   title,
   subtitle,
   actions,
-  error,
-  onDismissError,
   children,
 }: {
   title: string
   subtitle: string
   actions?: ReactNode
-  error?: string | null
-  onDismissError?: () => void
   children: ReactNode
 }) {
   return (
@@ -36,17 +33,6 @@ export function PageShell({
           <div className="flex items-center gap-3">{actions}</div>
         ) : null}
       </div>
-
-      {error ? (
-        <Alert variant="destructive" className="mb-4 shrink-0">
-          {onDismissError ? (
-            <AlertAction onClick={onDismissError} aria-label="Dismiss">
-              <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-            </AlertAction>
-          ) : null}
-          {error}
-        </Alert>
-      ) : null}
 
       {/* The page scrolls as one, so the body simply grows with its content. */}
       <div className="flex-1 pb-6">{children}</div>

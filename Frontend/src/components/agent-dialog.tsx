@@ -24,6 +24,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { createAgent, deleteAgent, saveAgent } from "@/lib/agent-store"
 import { api } from "@/lib/api"
 import { loadConnectors, useConnectorsState } from "@/lib/connector-store"
+import { notifyError } from "@/lib/toast"
 import type {
   AgentInput,
   AgentMode,
@@ -160,8 +161,6 @@ export function AgentDialog({
     encodeModel(agent?.altProvider ?? "", agent?.altModel ?? "")
   )
   const [providers, setProviders] = useState<ProviderInfo[]>([])
-  const [modelsError, setModelsError] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   const { connectors } = useConnectorsState()
@@ -177,8 +176,9 @@ export function AgentDialog({
       })
       .catch((err) => {
         if (!live) return
-        setModelsError(
-          err instanceof Error ? err.message : "Could not load models."
+        notifyError(
+          err instanceof Error ? err.message : "Could not load models.",
+          "Could not load models"
         )
       })
     return () => {
@@ -253,7 +253,6 @@ export function AgentDialog({
     }
 
     setSaving(true)
-    setError(null)
     try {
       if (agent) {
         await saveAgent(agent.id, input)
@@ -262,7 +261,10 @@ export function AgentDialog({
       }
       onOpenChange(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save the agent.")
+      notifyError(
+        err instanceof Error ? err.message : "Could not save the agent.",
+        "Could not save the agent"
+      )
     } finally {
       setSaving(false)
     }
@@ -272,13 +274,13 @@ export function AgentDialog({
     if (!agent || saving) return
 
     setSaving(true)
-    setError(null)
     try {
       await deleteAgent(agent.id)
       onOpenChange(false)
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Could not remove the agent."
+      notifyError(
+        err instanceof Error ? err.message : "Could not remove the agent.",
+        "Could not remove the agent"
       )
     } finally {
       setSaving(false)
@@ -350,9 +352,7 @@ export function AgentDialog({
                   value={model}
                   onChange={setModel}
                   options={modelOptions}
-                  placeholder={
-                    modelsError ? "Models unavailable" : "Choose a model"
-                  }
+                  placeholder="Choose a model"
                 />
               </Field>
               <Field label="Alternative model">
@@ -366,11 +366,6 @@ export function AgentDialog({
               </Field>
             </div>
           </div>
-
-          {modelsError ? (
-            <p className="text-xs text-white/40">{modelsError}</p>
-          ) : null}
-          {error ? <p className="text-sm text-red-400">{error}</p> : null}
 
           <DialogFooter className="sm:justify-between">
             {agent ? (

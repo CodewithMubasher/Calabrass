@@ -9,7 +9,6 @@ import { ScheduleDialog } from "@/components/schedule-dialog"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import {
-  clearSchedulesError,
   setScheduleEnabled,
   useSchedulesState,
   watchSchedules,
@@ -29,7 +28,7 @@ export const Route = createRoute({
  * switch on it arms or pauses the task without opening anything.
  */
 function SchedulesPage() {
-  const { tasks, error, pending } = useSchedulesState()
+  const { tasks, pending } = useSchedulesState()
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<ScheduledTask | null>(null)
   const now = useNow()
@@ -40,8 +39,6 @@ function SchedulesPage() {
     <PageShell
       title="Schedules"
       subtitle="Run prompts and tools on a timer"
-      error={error}
-      onDismissError={clearSchedulesError}
       actions={
         <Button
           variant="default"

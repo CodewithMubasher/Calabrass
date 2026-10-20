@@ -1,18 +1,17 @@
 import { useEffect, useSyncExternalStore } from "react"
 
 import { api } from "@/lib/api"
+import { clearNotice, notifyError } from "@/lib/toast"
 import type { UsageSnapshot } from "@/types/chat"
 
 interface UsageState {
   snapshot: UsageSnapshot | null
   loading: boolean
-  error: string | null
 }
 
 let state: UsageState = {
   snapshot: null,
   loading: false,
-  error: null,
 }
 
 const listeners = new Set<() => void>()
@@ -55,16 +54,18 @@ export function loadUsage(): Promise<void> {
   setState({ loading: true })
   inFlight = api
     .getUsage()
-    .then((snapshot) => setState({ snapshot, loading: false, error: null }))
-    .catch((err: unknown) => setState({ loading: false, error: reason(err) }))
+    .then((snapshot) => {
+      setState({ snapshot, loading: false })
+      clearNotice("usage-load")
+    })
+    .catch((err: unknown) => {
+      setState({ loading: false })
+      notifyError(reason(err), "Could not load usage", "usage-load")
+    })
     .finally(() => {
       inFlight = null
     })
   return inFlight
-}
-
-export function clearUsageError() {
-  setState({ error: null })
 }
 
 /** How often an open Usage page asks for new figures. */

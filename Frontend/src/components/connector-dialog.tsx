@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { createConnector } from "@/lib/connector-store"
+import { notifyError } from "@/lib/toast"
 
 // The dialogs sit on the same dark panel as the reference project's, with our
 // own popover token standing in for its neutral-900.
@@ -42,7 +43,6 @@ export function ConnectorDialog({
 }) {
   const [name, setName] = useState("")
   const [command, setCommand] = useState("")
-  const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   const ready = name.trim() !== "" && command.trim() !== ""
@@ -52,13 +52,13 @@ export function ConnectorDialog({
     if (saving || !ready) return
 
     setSaving(true)
-    setError(null)
     try {
       await createConnector({ name: name.trim(), command: command.trim() })
       onOpenChange(false)
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Could not add the connector."
+      notifyError(
+        err instanceof Error ? err.message : "Could not add the connector.",
+        "Could not add the connector"
       )
     } finally {
       setSaving(false)
@@ -97,7 +97,6 @@ export function ConnectorDialog({
                 />
               </Field>
             </div>
-            {error ? <p className="mt-4 text-sm text-red-400">{error}</p> : null}
           </div>
 
           <DialogFooter className="gap-2">

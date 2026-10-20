@@ -39,12 +39,12 @@ import {
   ProviderDetailDialog,
 } from "@/components/provider-dialog"
 import {
-  clearProvidersError,
   deleteProvider,
   loadProviders,
   setProviderEnabled,
   useProvidersState,
 } from "@/lib/provider-store"
+import { notifyError } from "@/lib/toast"
 import type { ProviderRow } from "@/types/chat"
 import { Route as rootRoute } from "@/routes/__root"
 
@@ -92,23 +92,22 @@ function statusOf(provider: ProviderRow) {
 }
 
 function ProvidersPage() {
-  const { providers, loading, error, pending } = useProvidersState()
+  const { providers, loading, pending } = useProvidersState()
   const [query, setQuery] = useState("")
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<ProviderRow | null>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
 
   useEffect(() => {
     void loadProviders()
   }, [])
 
   const remove = async (providerId: string) => {
-    setActionError(null)
     try {
       await deleteProvider(providerId)
     } catch (err) {
-      setActionError(
-        err instanceof Error ? err.message : "Could not remove the provider."
+      notifyError(
+        err instanceof Error ? err.message : "Could not remove the provider.",
+        "Could not remove the provider"
       )
     }
   }
@@ -122,11 +121,6 @@ function ProvidersPage() {
     <PageShell
       title="Providers"
       subtitle="Save an API key for any AI provider and use its models"
-      error={actionError ?? error}
-      onDismissError={() => {
-        setActionError(null)
-        clearProvidersError()
-      }}
       actions={
         <>
           <SearchInput

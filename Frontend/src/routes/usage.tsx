@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { clearUsageError, useLiveUsage } from "@/lib/usage-store"
+import { useLiveUsage } from "@/lib/usage-store"
 import type { UsageDay, UsageProvider, UsageTotals } from "@/types/chat"
 import { Route as rootRoute } from "@/routes/__root"
 
@@ -342,7 +342,7 @@ function WeeklyUsageCard({ daily }: { daily: UsageDay[] }) {
  * in the corner narrows every card, not just the rows.
  */
 function UsagePage() {
-  const { snapshot, error } = useLiveUsage()
+  const { snapshot } = useLiveUsage()
   const [providerId, setProviderId] = useState("")
 
   const sorted = useMemo(
@@ -385,8 +385,6 @@ function UsagePage() {
     <PageShell
       title="Usage"
       subtitle="Live token and request usage across your providers"
-      error={error}
-      onDismissError={clearUsageError}
       actions={
         <>
           <span

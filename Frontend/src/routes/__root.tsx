@@ -10,7 +10,7 @@ import { HugeiconsIcon } from "@hugeicons/react"
 import {
   BubbleChatTemporaryIcon,
   Files01Icon,
-  GiftIcon,
+  StarIcon,
 } from "@hugeicons/core-free-icons"
 
 import { AppSidebar } from "@/components/app-sidebar"
@@ -19,6 +19,7 @@ import { KeyboardShortcuts } from "@/components/keyboard-shortcuts"
 import WaveBackground from "@/components/wave-background"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Toaster } from "@/components/ui/toast"
 import {
   SidebarInset,
   SidebarProvider,
@@ -119,79 +120,99 @@ function RootLayout() {
   // The login page stands on its own: nothing from the shell is around it, not
   // even the surface the rest of the app sits in. Its page brings its own.
   if (isStandalone(pathname)) {
-    return <Outlet />
+    return (
+      <>
+        <Outlet />
+        <Toaster />
+      </>
+    )
   }
 
   return (
-    <SidebarProvider className="h-svh overflow-hidden">
-      <KeyboardShortcuts />
-      <AppSidebar />
-      <SidebarInset className="relative overflow-hidden bg-background">
-        {/* A desktop gets the field over the whole surface. A phone gets a low
-            band across the foot of the screen instead: the heading in the
-            middle of it has to read on black, and the one part of a phone that
-            wants something behind it is the composer, docked at the bottom. */}
-        <WaveBackground fixed className="max-md:hidden" />
-        <WaveBackground
-          fixed
-          band
-          speed={0.55}
-          className="hidden max-md:block"
-        />
-        <div className="relative z-10 flex min-h-0 flex-1 overflow-hidden">
-          <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-            {showsTopbar ? (
-              <header className="relative flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear">
-                <div className="flex items-center gap-2 px-4">
-                  <SidebarTrigger className="-ml-1 size-[29px]" />
-                </div>
+    <>
+      <SidebarProvider className="h-svh overflow-hidden">
+        <KeyboardShortcuts />
+        <AppSidebar />
+        <SidebarInset className="relative overflow-hidden bg-background">
+          {/* A desktop gets the field over the whole surface. A phone gets a low
+              band across the foot of the screen instead: the heading in the
+              middle of it has to read on black, and the one part of a phone that
+              wants something behind it is the composer, docked at the bottom. */}
+          <WaveBackground fixed className="max-md:hidden" />
+          <WaveBackground
+            fixed
+            band
+            speed={0.55}
+            className="hidden max-md:block"
+          />
+          <div className="relative z-10 flex min-h-0 flex-1 overflow-hidden">
+            <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+              {showsTopbar ? (
+                <header className="relative flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear">
+                  <div className="flex items-center gap-2 px-4">
+                    <SidebarTrigger className="-ml-1 size-[29px]" />
+                  </div>
 
-                {/* Centered badge */}
-                <div className="pointer-events-none absolute inset-x-0 flex justify-center">
-                  <Badge className="pointer-events-auto h-6 gap-1 bg-sky-50 px-2.5 text-xs font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300">
-                    <HugeiconsIcon icon={GiftIcon} strokeWidth={2} />
-                    Upgrade for free
-                  </Badge>
-                </div>
+                  {/* Centered badge: a link to the repository, so the star can
+                      be given without leaving the app. */}
+                  <div className="pointer-events-none absolute inset-x-0 flex justify-center">
+                    <Badge
+                      render={
+                        <a
+                          href="https://github.com/CodewithMubasher/Calabrass"
+                          target="_blank"
+                          rel="noreferrer"
+                        />
+                      }
+                      className="pointer-events-auto h-6 gap-1 bg-sky-50 px-2.5 text-xs font-medium text-sky-700 hover:bg-sky-100 dark:bg-sky-950 dark:text-sky-300"
+                    >
+                      <HugeiconsIcon icon={StarIcon} strokeWidth={2} />
+                      Star on GitHub
+                    </Badge>
+                  </div>
 
-                {/* Right corner icons — same size as the sidebar trigger button */}
-                <div className="ml-auto flex items-center gap-1 px-4">
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Artifacts"
-                    aria-expanded={artifactsOpen}
-                    onClick={toggleArtifacts}
-                    className="size-[29px]"
-                  >
-                    <HugeiconsIcon icon={Files01Icon} strokeWidth={2} />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Messages"
-                    className="size-[29px]"
-                  >
-                    <HugeiconsIcon
-                      icon={BubbleChatTemporaryIcon}
-                      strokeWidth={2}
-                    />
-                  </Button>
-                </div>
-              </header>
-            ) : null}
-            <div className="relative flex min-h-0 flex-1 scrollbar-thin flex-col overflow-y-auto">
-              <Outlet />
+                  {/* Right corner icons — same size as the sidebar trigger button */}
+                  <div className="ml-auto flex items-center gap-1 px-4">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Artifacts"
+                      aria-expanded={artifactsOpen}
+                      onClick={toggleArtifacts}
+                      className="size-[29px]"
+                    >
+                      <HugeiconsIcon icon={Files01Icon} strokeWidth={2} />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Messages"
+                      className="size-[29px]"
+                    >
+                      <HugeiconsIcon
+                        icon={BubbleChatTemporaryIcon}
+                        strokeWidth={2}
+                      />
+                    </Button>
+                  </div>
+                </header>
+              ) : null}
+              <div className="relative flex min-h-0 flex-1 scrollbar-thin flex-col overflow-y-auto">
+                <Outlet />
+              </div>
             </div>
+            {showsTopbar ? (
+              <ArtifactsPanel
+                open={artifactsOpen}
+                chatId={chatIdFrom(pathname)}
+              />
+            ) : null}
           </div>
-          {showsTopbar ? (
-            <ArtifactsPanel
-              open={artifactsOpen}
-              chatId={chatIdFrom(pathname)}
-            />
-          ) : null}
-        </div>
-      </SidebarInset>
-    </SidebarProvider>
+        </SidebarInset>
+      </SidebarProvider>
+      {/* The notices: every error and every bit of feedback says itself here
+          rather than on the page it happened on. */}
+      <Toaster />
+    </>
   )
 }

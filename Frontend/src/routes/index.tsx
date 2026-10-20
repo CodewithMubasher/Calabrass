@@ -3,6 +3,7 @@ import { useState, useRef } from "react"
 
 import { PromptInput, type PromptInputRef } from "@/components/prompt-input"
 import { createChat, sendMessage } from "@/lib/chat-store"
+import { notifyError } from "@/lib/toast"
 import { Route as rootRoute } from "@/routes/__root"
 
 export const Route = createRoute({
@@ -13,14 +14,12 @@ export const Route = createRoute({
 
 function HomePage() {
   const navigate = useNavigate()
-  const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const promptInputRef = useRef<PromptInputRef>(null)
 
   const handleSend = (value: string) => {
     if (sending) return
     setSending(true)
-    setError(null)
 
     void (async () => {
       try {
@@ -31,7 +30,10 @@ function HomePage() {
         // renders it from there.
         void sendMessage(chat.id, value)
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Could not start a chat.")
+        notifyError(
+          err instanceof Error ? err.message : "Could not start a chat.",
+          "Could not start the chat"
+        )
       } finally {
         setSending(false)
       }
@@ -45,13 +47,6 @@ function HomePage() {
         onSend={handleSend}
         disabled={sending}
       />
-      {error ? (
-        // On a phone the composer is at the foot of the screen, so the message
-        // goes to the top of it rather than over the input.
-        <p className="absolute inset-x-0 bottom-8 px-4 text-center text-sm text-red-400 max-md:bottom-auto max-md:top-4">
-          {error}
-        </p>
-      ) : null}
     </div>
   )
 }

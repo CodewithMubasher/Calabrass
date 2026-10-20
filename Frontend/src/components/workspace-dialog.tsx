@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { createWorkspace } from "@/lib/workspace-store"
+import { notifyError } from "@/lib/toast"
 
 // The dialogs sit on the same dark panel as the reference project's, with our
 // own popover token standing in for its neutral-900.
@@ -47,7 +48,6 @@ export function NewWorkspaceDialog({
 }) {
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
-  const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   async function submit(event: React.FormEvent) {
@@ -55,7 +55,6 @@ export function NewWorkspaceDialog({
     if (saving || !name.trim()) return
 
     setSaving(true)
-    setError(null)
     try {
       await createWorkspace({
         name: name.trim(),
@@ -63,7 +62,10 @@ export function NewWorkspaceDialog({
       })
       onOpenChange(false)
     } catch (err) {
-      setError(message(err, "Could not create the workspace."))
+      notifyError(
+        message(err, "Could not create the workspace."),
+        "Could not create the workspace"
+      )
     } finally {
       setSaving(false)
     }
@@ -102,7 +104,6 @@ export function NewWorkspaceDialog({
                 />
               </Field>
             </div>
-            {error ? <p className="mt-4 text-sm text-red-400">{error}</p> : null}
           </div>
 
           <DialogFooter className="gap-2">

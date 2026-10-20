@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { createSchedule, deleteSchedule, updateSchedule } from "@/lib/schedule-store"
+import { notifyError } from "@/lib/toast"
 import type { ScheduledTask } from "@/types/chat"
 
 // The dialogs sit on the same dark panel as the reference project's, with our
@@ -52,7 +53,6 @@ export function ScheduleDialog({
   const [prompt, setPrompt] = useState(task?.prompt ?? "")
   const [runAt, setRunAt] = useState(() => toInputValue(task?.runAt ?? defaultRunAt()))
   const [confirming, setConfirming] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   const at = fromInputValue(runAt)
@@ -63,7 +63,6 @@ export function ScheduleDialog({
     if (saving || !ready) return
 
     setSaving(true)
-    setError(null)
     try {
       if (task) {
         await updateSchedule(task.id, { prompt: prompt.trim(), runAt: at })
@@ -72,7 +71,10 @@ export function ScheduleDialog({
       }
       onOpenChange(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save the task.")
+      notifyError(
+        err instanceof Error ? err.message : "Could not save the task.",
+        "Could not save the task"
+      )
     } finally {
       setSaving(false)
     }
@@ -82,12 +84,14 @@ export function ScheduleDialog({
     if (!task || saving) return
 
     setSaving(true)
-    setError(null)
     try {
       await deleteSchedule(task.id)
       onOpenChange(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not remove the task.")
+      notifyError(
+        err instanceof Error ? err.message : "Could not remove the task.",
+        "Could not remove the task"
+      )
     } finally {
       setSaving(false)
     }
@@ -127,7 +131,6 @@ export function ScheduleDialog({
                 className={FIELD}
               />
             </Field>
-            {error ? <p className="mt-4 text-sm text-red-400">{error}</p> : null}
           </div>
 
           <DialogFooter className="gap-2">

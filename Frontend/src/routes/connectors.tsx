@@ -25,12 +25,12 @@ import { Switch } from "@/components/ui/switch"
 import { ConnectorDialog } from "@/components/connector-dialog"
 import { connectorIcon } from "@/lib/connector-icons"
 import {
-  clearConnectorsError,
   deleteConnector,
   loadConnectors,
   setConnectorEnabled,
   useConnectorsState,
 } from "@/lib/connector-store"
+import { notifyError } from "@/lib/toast"
 import type { ConnectorRow } from "@/types/chat"
 import { Route as rootRoute } from "@/routes/__root"
 
@@ -50,10 +50,9 @@ function formatDate(at: number): string {
 }
 
 function ConnectorsPage() {
-  const { connectors, loading, error, pending } = useConnectorsState()
+  const { connectors, loading, pending } = useConnectorsState()
   const [query, setQuery] = useState("")
   const [adding, setAdding] = useState(false)
-  const [actionError, setActionError] = useState<string | null>(null)
 
   useEffect(() => {
     void loadConnectors()
@@ -65,12 +64,12 @@ function ConnectorsPage() {
     : connectors
 
   const remove = async (connector: ConnectorRow) => {
-    setActionError(null)
     try {
       await deleteConnector(connector.id)
     } catch (err) {
-      setActionError(
-        err instanceof Error ? err.message : "Could not remove the connector."
+      notifyError(
+        err instanceof Error ? err.message : "Could not remove the connector.",
+        "Could not remove the connector"
       )
     }
   }
@@ -79,11 +78,6 @@ function ConnectorsPage() {
     <PageShell
       title="Connectors"
       subtitle="Connect MCP servers to extend AI capabilities"
-      error={actionError ?? error}
-      onDismissError={() => {
-        setActionError(null)
-        clearConnectorsError()
-      }}
       actions={
         <>
           <SearchInput

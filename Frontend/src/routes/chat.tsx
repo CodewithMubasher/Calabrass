@@ -13,7 +13,6 @@ import {
   stopStream,
   updateChatMode,
   useChat,
-  useChatError,
   useChatMessages,
   useHydrated,
   useIsStreaming,
@@ -35,7 +34,6 @@ function ChatPage() {
   const messages = useChatMessages(chatId)
   const streaming = useIsStreaming(chatId)
   const inFlight = useStreamingMessage(chatId)
-  const error = useChatError(chatId)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -118,11 +116,6 @@ function ChatPage() {
           )}
         </MessageGroup>
       </div>
-      {error ? (
-        <p className="mx-auto w-full max-w-[780px] shrink-0 px-6 pb-1 text-sm text-red-400">
-          {error}
-        </p>
-      ) : null}
       {questions ? (
         <div className="shrink-0">
           <QuestionnairePanel

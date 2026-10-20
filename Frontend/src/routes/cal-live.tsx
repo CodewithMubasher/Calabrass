@@ -19,7 +19,7 @@ function CalLivePage() {
   // The microphone is open as soon as the stage is, so there is nothing to
   // click to start talking. The orb is the one control left: it pauses the
   // session, and clicking again carries on.
-  const { phase, caption, turn, error, supported, toggle } = useVoice(GREETING)
+  const { phase, caption, turn, supported, toggle } = useVoice(GREETING)
   const hostRef = useRef<HTMLDivElement | null>(null)
   const logRef = useRef<HTMLDivElement | null>(null)
 
@@ -100,8 +100,6 @@ function CalLivePage() {
             <p className="text-xs leading-5 text-white/45 italic">{caption}</p>
           ) : null}
         </div>
-
-        {error ? <p className="mt-2 text-xs text-red-400">{error}</p> : null}
       </div>
     </div>
   )

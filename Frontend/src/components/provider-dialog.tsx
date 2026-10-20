@@ -17,6 +17,7 @@ import {
   deleteProvider,
   saveProvider,
 } from "@/lib/provider-store"
+import { notifyError } from "@/lib/toast"
 import type { ProviderRow } from "@/types/chat"
 
 // The dialogs sit on the same dark panel as the reference project's, with our
@@ -102,7 +103,6 @@ export function AddProviderDialog({
   const [baseUrl, setBaseUrl] = useState("")
   const [apiKey, setApiKey] = useState("")
   const [revealed, setRevealed] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   const ready = name.trim() !== "" && baseUrl.trim() !== ""
@@ -112,7 +112,6 @@ export function AddProviderDialog({
     if (saving || !ready) return
 
     setSaving(true)
-    setError(null)
     try {
       await createProvider({
         name: name.trim(),
@@ -121,7 +120,10 @@ export function AddProviderDialog({
       })
       onOpenChange(false)
     } catch (err) {
-      setError(message(err, "Could not add the provider."))
+      notifyError(
+        message(err, "Could not add the provider."),
+        "Could not add the provider"
+      )
     } finally {
       setSaving(false)
     }
@@ -170,8 +172,6 @@ export function AddProviderDialog({
             />
           </div>
 
-          {error ? <p className="text-sm text-red-400">{error}</p> : null}
-
           <DialogFooter>
             <Button
               type="button"
@@ -207,7 +207,6 @@ export function ProviderDetailDialog({
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl)
   const [apiKey, setApiKey] = useState(provider.apiKey)
   const [revealed, setRevealed] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   const ready = name.trim() !== "" && baseUrl.trim() !== ""
@@ -217,7 +216,6 @@ export function ProviderDetailDialog({
     if (saving || !ready) return
 
     setSaving(true)
-    setError(null)
     try {
       await saveProvider(provider.id, {
         apiKey: apiKey.trim(),
@@ -226,7 +224,10 @@ export function ProviderDetailDialog({
       })
       onOpenChange(false)
     } catch (err) {
-      setError(message(err, "Could not save the provider."))
+      notifyError(
+        message(err, "Could not save the provider."),
+        "Could not save the provider"
+      )
     } finally {
       setSaving(false)
     }
@@ -236,12 +237,14 @@ export function ProviderDetailDialog({
     if (saving) return
 
     setSaving(true)
-    setError(null)
     try {
       await deleteProvider(provider.id)
       onOpenChange(false)
     } catch (err) {
-      setError(message(err, "Could not remove the provider."))
+      notifyError(
+        message(err, "Could not remove the provider."),
+        "Could not remove the provider"
+      )
     } finally {
       setSaving(false)
     }
@@ -283,8 +286,6 @@ export function ProviderDetailDialog({
               onReveal={() => setRevealed((shown) => !shown)}
             />
           </div>
-
-          {error ? <p className="text-sm text-red-400">{error}</p> : null}
 
           <DialogFooter className="sm:justify-between">
             <Button

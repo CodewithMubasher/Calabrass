@@ -21,11 +21,11 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { NewWorkspaceDialog } from "@/components/workspace-dialog"
 import {
-  clearWorkspacesError,
   deleteWorkspace,
   loadWorkspaces,
   useWorkspacesState,
 } from "@/lib/workspace-store"
+import { notifyError } from "@/lib/toast"
 import type { WorkspaceRow } from "@/types/chat"
 import { Route as rootRoute } from "@/routes/__root"
 
@@ -46,10 +46,9 @@ function formatDate(at: number): string {
 
 function WorkspacesPage() {
   const navigate = useNavigate()
-  const { workspaces, loading, error } = useWorkspacesState()
+  const { workspaces, loading } = useWorkspacesState()
   const [query, setQuery] = useState("")
   const [adding, setAdding] = useState(false)
-  const [actionError, setActionError] = useState<string | null>(null)
 
   useEffect(() => {
     void loadWorkspaces()
@@ -61,12 +60,12 @@ function WorkspacesPage() {
     : workspaces
 
   const remove = async (workspace: WorkspaceRow) => {
-    setActionError(null)
     try {
       await deleteWorkspace(workspace.id)
     } catch (err) {
-      setActionError(
-        err instanceof Error ? err.message : "Could not remove the workspace."
+      notifyError(
+        err instanceof Error ? err.message : "Could not remove the workspace.",
+        "Could not remove the workspace"
       )
     }
   }
@@ -75,11 +74,6 @@ function WorkspacesPage() {
     <PageShell
       title="Workspaces"
       subtitle="Create, organize and manage your projects"
-      error={actionError ?? error}
-      onDismissError={() => {
-        setActionError(null)
-        clearWorkspacesError()
-      }}
       actions={
         <>
           <SearchInput

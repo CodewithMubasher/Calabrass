@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { rememberChat } from "@/lib/chat-store"
+import { notifyError } from "@/lib/toast"
 import {
   canRecord,
   openMicrophone,
@@ -29,7 +30,6 @@ export interface VoiceState {
    * whole conversation lives in the chat the session created.
    */
   turn: VoiceTurn
-  error: string | null
   /** Whether the socket to the backend is open. */
   live: boolean
   supported: boolean
@@ -52,7 +52,6 @@ export function useVoice(greeting: string): VoiceState {
       ? "Tap the orb once — a browser will not let Cal listen until the page has been touched."
       : "Voice needs a browser with microphone access."
   )
-  const [error, setError] = useState<string | null>(null)
   const [live, setLive] = useState(false)
   const [turn, setTurn] = useState<VoiceTurn>({ user: "", assistant: "" })
 
@@ -152,7 +151,7 @@ export function useVoice(greeting: string): VoiceState {
           break
         case "error":
           console.warn("[voice] " + event.message)
-          setError(event.message)
+          notifyError(event.message, "Cal Live could not continue")
           setPhase("listening")
           break
       }
@@ -207,7 +206,6 @@ export function useVoice(greeting: string): VoiceState {
 
     stopMic()
     vadRef.current = new VoiceActivityDetector()
-    setError(null)
 
     // Anything audible is sent, not only what the detector calls speech: the
     // detector decides where a turn ends, and waiting for it before sending
@@ -287,7 +285,6 @@ export function useVoice(greeting: string): VoiceState {
         // The question clears the stage: one exchange at a time, and the words
         // being heard take over as the live line.
         setTurn({ user: "", assistant: "" })
-        setError(null)
         quietSinceRef.current = 0
         console.info("[voice] speech started", level.toFixed(4))
       } else if (result === "end") {
@@ -336,10 +333,11 @@ export function useVoice(greeting: string): VoiceState {
         liveRef.current = false
         setPhase("idle")
         console.error("[voice] the microphone could not be opened", err)
-        setError(
+        notifyError(
           err instanceof DOMException && err.name === "NotAllowedError"
             ? "Microphone blocked — allow access and reload."
-            : "Could not reach the microphone."
+            : "Could not reach the microphone.",
+          "The microphone could not be opened"
         )
       })
   }, [greeting, supported, setPhase, stopMic])
@@ -392,5 +390,5 @@ export function useVoice(greeting: string): VoiceState {
     }
   }, [supported, connectSocket, startMic, stopMic])
 
-  return { phase, caption, turn, error, live, supported, toggle }
+  return { phase, caption, turn, live, supported, toggle }
 }

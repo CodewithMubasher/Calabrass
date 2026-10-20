@@ -6,20 +6,20 @@ import { Button } from "@/components/ui/button"
 import {
   Field,
   FieldDescription,
-  FieldError,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { signIn } from "@/lib/auth"
+import { notifyError } from "@/lib/toast"
 
 /**
  * The login page's form.
  *
  * It posts the email and password to the backend, which checks the stored
- * bcrypt hash and returns a session token. The `FieldError` under the password
- * shows the one message the server gives for both a wrong email and a wrong
- * password. New people follow the link to the sign-up page.
+ * bcrypt hash and returns a session token. The one message the server gives
+ * for both a wrong email and a wrong password is said in a toast. New people
+ * follow the link to the sign-up page.
  */
 export function LoginForm({
   className,
@@ -28,19 +28,17 @@ export function LoginForm({
   const navigate = useNavigate()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-  const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setPending(true)
-    setError(null)
 
     const result = await signIn(email, password)
     setPending(false)
 
     if (!result.ok) {
-      setError(result.error)
+      notifyError(result.error, "Could not sign in")
       return
     }
     void navigate({ to: "/" })
@@ -84,7 +82,6 @@ export function LoginForm({
             onChange={(event) => setPassword(event.target.value)}
             required
           />
-          <FieldError>{error}</FieldError>
         </Field>
 
         <Field>

@@ -6,12 +6,12 @@ import { Button } from "@/components/ui/button"
 import {
   Field,
   FieldDescription,
-  FieldError,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { signUp } from "@/lib/auth"
+import { notifyError, notifySuccess } from "@/lib/toast"
 
 /**
  * The sign-up form. It creates a real account in the local database: the
@@ -32,19 +32,20 @@ export function SignupForm({
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [confirmation, setConfirmation] = useState("")
-  const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    setError(null)
 
     if (password.length < 8) {
-      setError("Use at least 8 characters for your password.")
+      notifyError(
+        "Use at least 8 characters for your password.",
+        "The password is too short"
+      )
       return
     }
     if (password !== confirmation) {
-      setError("Those passwords do not match.")
+      notifyError("Those passwords do not match.", "The passwords do not match")
       return
     }
 
@@ -53,9 +54,10 @@ export function SignupForm({
     setPending(false)
 
     if (!result.ok) {
-      setError(result.error)
+      notifyError(result.error, "Could not create the account")
       return
     }
+    notifySuccess("Your account is ready.", "Welcome to Calabrass")
     void navigate({ to: "/" })
   }
 
@@ -122,7 +124,6 @@ export function SignupForm({
             onChange={(event) => setConfirmation(event.target.value)}
             required
           />
-          <FieldError>{error}</FieldError>
         </Field>
 
         <Field>

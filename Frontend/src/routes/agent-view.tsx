@@ -5,7 +5,6 @@ import {
   Add01Icon,
   ArrowLeftIcon,
   BotIcon,
-  Cancel01Icon,
   CogIcon,
   CopyIcon,
   Edit02Icon,
@@ -15,7 +14,6 @@ import { createRoute } from "@tanstack/react-router"
 
 import { PageEmpty, PageLoading } from "@/components/page-shell"
 import { PromptInput } from "@/components/prompt-input"
-import { Alert, AlertAction } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -30,6 +28,7 @@ import { createChat, sendMessage, useChats } from "@/lib/chat-store"
 import { useAgentsState } from "@/lib/agent-store"
 import { useModelState } from "@/lib/model-store"
 import { useConnectorsState } from "@/lib/connector-store"
+import { notifyError } from "@/lib/toast"
 import type { AgentRow, AgentMode } from "@/types/chat"
 import { Route as rootRoute } from "@/routes/__root"
 import { saveAgent } from "@/lib/agent-store"
@@ -50,12 +49,11 @@ function AgentRoute() {
  *  agent's configuration cards beside them. */
 function AgentView({ agentId }: { agentId: string }) {
   const navigate = useNavigate()
-  const { agents, loading, error: listError } = useAgentsState()
+  const { agents, loading } = useAgentsState()
   const { providers } = useModelState()
   const { connectors } = useConnectorsState()
   const chats = useChats()
 
-  const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [editing, setEditing] = useState<AgentRow | null>(null)
 
@@ -81,16 +79,16 @@ function AgentView({ agentId }: { agentId: string }) {
     if (!agent || sending) return
 
     setSending(true)
-    setError(null)
     try {
       const chat = await createChat(undefined, agent.id)
       await navigate({ to: "/chat/$chatId", params: { chatId: chat.id } })
       void sendMessage(chat.id, message)
     } catch (err) {
-      setError(
+      notifyError(
         err instanceof Error
           ? err.message
-          : "Could not start a chat with this agent."
+          : "Could not start a chat with this agent.",
+        "Could not start the chat"
       )
     } finally {
       setSending(false)
@@ -138,15 +136,6 @@ function AgentView({ agentId }: { agentId: string }) {
           </div>
         </div>
       </div>
-
-      {error || listError ? (
-        <Alert variant="destructive" className="mx-14 mt-4 shrink-0">
-          <AlertAction onClick={() => setError(null)} aria-label="Dismiss">
-            <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-          </AlertAction>
-          {error ?? listError}
-        </Alert>
-      ) : null}
 
       {!agent ? (
         <div className="flex-1">
@@ -351,10 +340,7 @@ function AgentDialog({
   const [altModel, setAltModel] = useState(
     agent.altProvider && agent.altModel ? `${agent.altProvider}::${agent.altModel}` : ""
   )
-  const { error: modelStoreError } = useModelState()
-  const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-
   const { connectors } = useConnectorsState()
 
   // Load data on mount
@@ -410,12 +396,14 @@ function AgentDialog({
     }
 
     setSaving(true)
-    setError(null)
     try {
       await saveAgent(agent.id, input)
       onOpenChange(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save the agent.")
+      notifyError(
+        err instanceof Error ? err.message : "Could not save the agent.",
+        "Could not save the agent"
+      )
     } finally {
       setSaving(false)
     }
@@ -512,7 +500,6 @@ function AgentDialog({
                   onChange={(e) => setModel(e.target.value)}
                   className="w-full h-9 border-white/10 bg-white/5 px-3 text-white/80 rounded-lg outline-none focus:border-white/20"
                 >
-                  {modelStoreError && <option value="">Models unavailable</option>}
                   {modelOptions.map((opt) => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
@@ -532,9 +519,6 @@ function AgentDialog({
               </label>
             </div>
           </div>
-
-          {modelStoreError && <p className="text-xs text-white/40">{modelStoreError}</p>}
-          {error && <p className="text-sm text-red-400">{error}</p>}
 
           <DialogFooter className="sm:justify-between">
             <div className="flex flex-col-reverse gap-2 sm:flex-row">

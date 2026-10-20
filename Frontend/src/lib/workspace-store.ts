@@ -1,12 +1,12 @@
 import { useSyncExternalStore } from "react"
 
 import { api } from "@/lib/api"
+import { clearNotice, notifyError, notifySuccess, reasonFor } from "@/lib/toast"
 import type { WorkspaceInput, WorkspaceRow } from "@/types/chat"
 
 interface WorkspaceState {
   workspaces: WorkspaceRow[]
   loading: boolean
-  error: string | null
   /** Workspace ids with a change in flight. */
   pending: string[]
 }
@@ -14,7 +14,6 @@ interface WorkspaceState {
 let state: WorkspaceState = {
   workspaces: [],
   loading: false,
-  error: null,
   pending: [],
 }
 
@@ -41,33 +40,27 @@ export function useWorkspacesState() {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-function reason(err: unknown, fallback: string) {
-  return err instanceof Error ? err.message : fallback
-}
-
 let inFlight = false
 
 /** Fetch the folders the agent may work in. */
 export async function loadWorkspaces() {
   if (inFlight) return
   inFlight = true
-  setState({ loading: true, error: null })
+  setState({ loading: true })
 
   try {
     setState({ workspaces: await api.listWorkspaces(), loading: false })
+    clearNotice("workspaces-load")
   } catch (err) {
-    setState({
-      loading: false,
-      error: reason(err, "Could not load workspaces."),
-    })
+    setState({ loading: false })
+    notifyError(
+      reasonFor(err, "Could not load workspaces."),
+      "Could not load workspaces",
+      "workspaces-load"
+    )
   } finally {
     inFlight = false
   }
-}
-
-/** Dismiss the error banner on the workspaces page. */
-export function clearWorkspacesError() {
-  setState({ error: null })
 }
 
 /**
@@ -76,16 +69,21 @@ export function clearWorkspacesError() {
  * dialog can show it next to the form.
  */
 export async function createWorkspace(input: WorkspaceInput) {
-  setState({ workspaces: await api.createWorkspace(input), error: null })
+  setState({ workspaces: await api.createWorkspace(input) })
+  notifySuccess(`${input.name} was added.`, "Workspace added")
 }
 
 /** Forget a workspace. Its files stay on disk. Throws on failure. */
 export async function deleteWorkspace(workspaceId: string) {
   if (state.pending.includes(workspaceId)) return
-  setState({ pending: [...state.pending, workspaceId], error: null })
+  const name =
+    state.workspaces.find((workspace) => workspace.id === workspaceId)?.name ??
+    "The workspace"
+  setState({ pending: [...state.pending, workspaceId] })
 
   try {
     setState({ workspaces: await api.deleteWorkspace(workspaceId) })
+    notifySuccess(`${name} was removed.`, "Workspace removed")
   } finally {
     setState({ pending: state.pending.filter((id) => id !== workspaceId) })
   }

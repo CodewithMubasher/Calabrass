@@ -11,7 +11,7 @@ import {
   SearchInput,
 } from "@/components/page-shell"
 import { Button } from "@/components/ui/button"
-import { clearAgentsError, loadAgents, useAgentsState } from "@/lib/agent-store"
+import { loadAgents, useAgentsState } from "@/lib/agent-store"
 import { loadConnectors, useConnectorsState } from "@/lib/connector-store"
 import type { AgentRow } from "@/types/chat"
 import { Route as rootRoute } from "@/routes/__root"
@@ -91,7 +91,7 @@ function AgentCard({
 }
 
 function AgentsPage() {
-  const { agents, loading, error } = useAgentsState()
+  const { agents, loading } = useAgentsState()
   const { connectors } = useConnectorsState()
   const [query, setQuery] = useState("")
   const [adding, setAdding] = useState(false)
@@ -115,8 +115,6 @@ function AgentsPage() {
     <PageShell
       title="Agents"
       subtitle="Give the assistant roles of its own"
-      error={error}
-      onDismissError={clearAgentsError}
       actions={
         <>
           <SearchInput

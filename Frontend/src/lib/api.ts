@@ -23,6 +23,7 @@ import type {
 import { getToken, type AuthSession, type AuthUser } from "@/lib/session"
 import { clearSession } from "@/lib/session"
 import { navigate } from "@/lib/navigation"
+import { notifyWarning } from "@/lib/toast"
 
 const BASE = import.meta.env.VITE_API_BASE || "/api"
 
@@ -66,6 +67,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     if (res.status === 401 && !isHandling401) {
       isHandling401 = true
       clearSession()
+      notifyWarning(
+        "Your session has expired. Sign in again to carry on.",
+        "Signed out"
+      )
       // Use a small delay to let the current render complete, then navigate.
       setTimeout(() => {
         navigate({ to: "/login", replace: true })

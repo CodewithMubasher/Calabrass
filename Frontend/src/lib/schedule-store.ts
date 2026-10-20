@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react"
 
 import { api } from "@/lib/api"
+import { clearNotice, notifyError, notifySuccess, reasonFor } from "@/lib/toast"
 import type { ScheduledTask, ScheduledTaskInput, ScheduledTaskPatch } from "@/types/chat"
 
 /**
@@ -13,12 +14,11 @@ import type { ScheduledTask, ScheduledTaskInput, ScheduledTaskPatch } from "@/ty
  */
 interface ScheduleState {
   tasks: ScheduledTask[]
-  error: string | null
   /** Task ids with a change in flight. */
   pending: string[]
 }
 
-let state: ScheduleState = { tasks: [], error: null, pending: [] }
+let state: ScheduleState = { tasks: [], pending: [] }
 
 const listeners = new Set<() => void>()
 
@@ -43,10 +43,6 @@ export function useSchedulesState() {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-function reason(err: unknown, fallback: string) {
-  return err instanceof Error ? err.message : fallback
-}
-
 /**
  * Follow the task list for as long as the page is open. Returns the function
  * that closes the connection, which is what a `useEffect` hands back.
@@ -59,7 +55,8 @@ export function watchSchedules(): () => void {
       const payload = JSON.parse((event as MessageEvent).data as string) as {
         tasks?: ScheduledTask[]
       }
-      setState({ tasks: payload.tasks ?? [], error: null })
+      setState({ tasks: payload.tasks ?? [] })
+      clearNotice("schedules-stream")
     } catch {
       // A frame we cannot read is not worth dropping the connection over: the
       // next snapshot will put the list right.
@@ -73,7 +70,11 @@ export function watchSchedules(): () => void {
     if (typeof data !== "string" || data === "") return
     try {
       const payload = JSON.parse(data) as { message?: string }
-      setState({ error: payload.message ?? "The task list could not be read." })
+      notifyError(
+        payload.message ?? "The task list could not be read.",
+        "Could not read the task list",
+        "schedules-stream"
+      )
     } catch {
       // Ignore it; the next snapshot is the authority.
     }
@@ -82,19 +83,16 @@ export function watchSchedules(): () => void {
   return () => source.close()
 }
 
-/** Dismiss the error banner on the Schedules page. */
-export function clearSchedulesError() {
-  setState({ error: null })
-}
-
 /** Book a task. Throws with the server's message so the dialog can show it. */
 export async function createSchedule(input: ScheduledTaskInput) {
-  setState({ tasks: await api.createSchedule(input), error: null })
+  setState({ tasks: await api.createSchedule(input) })
+  notifySuccess("The task was booked.", "Task booked")
 }
 
 /** Change a task's prompt, its time, or whether it is armed. */
 export async function updateSchedule(taskId: string, patch: ScheduledTaskPatch) {
-  setState({ tasks: await api.updateSchedule(taskId, patch), error: null })
+  setState({ tasks: await api.updateSchedule(taskId, patch) })
+  notifySuccess("The task was updated.", "Task updated")
 }
 
 /** Turn a task on or off, which is the switch on its card. */
@@ -107,16 +105,18 @@ export async function setScheduleEnabled(taskId: string, enabled: boolean) {
       task.id === taskId ? { ...task, enabled } : task
     ),
     pending: [...state.pending, taskId],
-    error: null,
   })
 
   try {
     setState({ tasks: await api.updateSchedule(taskId, { enabled }) })
+    clearNotice("schedule-update")
   } catch (err) {
-    setState({
-      tasks: previous,
-      error: reason(err, "Could not update the task."),
-    })
+    setState({ tasks: previous })
+    notifyError(
+      reasonFor(err, "Could not update the task."),
+      "Could not update the task",
+      "schedule-update"
+    )
   } finally {
     setState({ pending: state.pending.filter((id) => id !== taskId) })
   }
@@ -124,5 +124,6 @@ export async function setScheduleEnabled(taskId: string, enabled: boolean) {
 
 /** Remove a task. Throws on failure. */
 export async function deleteSchedule(taskId: string) {
-  setState({ tasks: await api.deleteSchedule(taskId), error: null })
+  setState({ tasks: await api.deleteSchedule(taskId) })
+  notifySuccess("The task was removed.", "Task removed")
 }

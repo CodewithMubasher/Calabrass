@@ -2,12 +2,12 @@ import { useSyncExternalStore } from "react"
 
 import { api, ApiError } from "@/lib/api"
 import { loadModels } from "@/lib/model-store"
+import { clearNotice, notifyError, notifySuccess, reasonFor } from "@/lib/toast"
 import type { ProviderInput, ProviderRow } from "@/types/chat"
 
 interface ProviderState {
   providers: ProviderRow[]
   loading: boolean
-  error: string | null
   /** Provider ids with a toggle in flight. */
   pending: string[]
 }
@@ -15,7 +15,6 @@ interface ProviderState {
 let state: ProviderState = {
   providers: [],
   loading: false,
-  error: null,
   pending: [],
 }
 
@@ -42,10 +41,6 @@ export function useProvidersState() {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-function reason(err: unknown, fallback: string) {
-  return err instanceof Error ? err.message : fallback
-}
-
 function is401(err: unknown): err is ApiError {
   return err instanceof ApiError && err.status === 401
 }
@@ -56,16 +51,19 @@ let inFlight = false
 export async function loadProviders(force = false) {
   if (!force && inFlight) return
   inFlight = true
-  setState({ loading: true, error: null })
+  setState({ loading: true })
 
   try {
     setState({ providers: await api.listProviders(), loading: false })
+    clearNotice("providers-load")
   } catch (err) {
     if (is401(err)) throw err
-    setState({
-      loading: false,
-      error: reason(err, "Could not load providers."),
-    })
+    setState({ loading: false })
+    notifyError(
+      reasonFor(err, "Could not load providers."),
+      "Could not load providers",
+      "providers-load"
+    )
   } finally {
     inFlight = false
   }
@@ -85,26 +83,23 @@ export async function setProviderEnabled(providerID: string, enabled: boolean) {
       p.id === providerID ? { ...p, enabled } : p
     ),
     pending: [...state.pending, providerID],
-    error: null,
   })
 
   try {
     setState({ providers: await api.updateProvider(providerID, { enabled }) })
+    clearNotice("provider-update")
   } catch (err) {
     if (is401(err)) throw err
-    setState({
-      providers: previous,
-      error: reason(err, "Could not update the provider."),
-    })
+    setState({ providers: previous })
+    notifyError(
+      reasonFor(err, "Could not update the provider."),
+      "Could not update the provider",
+      "provider-update"
+    )
   } finally {
     setState({ pending: state.pending.filter((id) => id !== providerID) })
     await loadModels()
   }
-}
-
-/** Dismiss the error banner on the providers page. */
-export function clearProvidersError() {
-  setState({ error: null })
 }
 
 /**
@@ -113,32 +108,38 @@ export function clearProvidersError() {
  */
 export async function createProvider(input: ProviderInput) {
   try {
-    setState({ providers: await api.createProvider(input), error: null })
+    setState({ providers: await api.createProvider(input) })
   } catch (err) {
     if (is401(err)) throw err
     throw err
   }
+  notifySuccess(`${input.name ?? "The provider"} was added.`, "Provider added")
   await loadModels()
 }
 
 /** Save edits to a provider. Throws on failure. */
 export async function saveProvider(providerID: string, input: ProviderInput) {
   try {
-    setState({ providers: await api.updateProvider(providerID, input), error: null })
+    setState({ providers: await api.updateProvider(providerID, input) })
   } catch (err) {
     if (is401(err)) throw err
     throw err
   }
+  notifySuccess("The provider was saved.", "Provider saved")
   await loadModels()
 }
 
 /** Remove a custom provider. Throws on failure. */
 export async function deleteProvider(providerID: string) {
+  const name =
+    state.providers.find((provider) => provider.id === providerID)?.name ??
+    "The provider"
   try {
-    setState({ providers: await api.deleteProvider(providerID), error: null })
+    setState({ providers: await api.deleteProvider(providerID) })
   } catch (err) {
     if (is401(err)) throw err
     throw err
   }
+  notifySuccess(`${name} was removed.`, "Provider removed")
   await loadModels()
 }
