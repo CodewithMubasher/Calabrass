@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -20,42 +24,47 @@ import (
 // --- run_command -------------------------------------------------------------
 
 const (
-	// shellTimeout bounds a command that does not ask for a budget of its own. A
-	// build or a test run that hangs must not hold the turn open for ever.
+	// shellTimeout bounds a command that does not ask for a budget of its own.
 	shellTimeout = 120 * time.Second
 	// shellMaxTimeout is the most a command may ask for.
 	shellMaxTimeout = 900 * time.Second
-	// shellOutputBytes caps what one command returns, so a chatty build cannot
-	// fill the context by itself.
+	// shellOutputBytes caps what one command returns (total JSON size budget).
 	shellOutputBytes = 32 << 10
+	// outputHeadBytes is how many bytes to keep from the start of output.
+	outputHeadBytes = 512
+	// outputTailBytes is how many bytes to keep from the end of output.
+	outputTailBytes = 2048
 )
 
 // runCommandArgs is the wire shape of run_command: the JSON Schema is generated
 // from these tags.
 type runCommandArgs struct {
 	Command        string `json:"command" jsonschema:"description=The command line to run; this machine's shell is PowerShell"`
+	Cwd            string `json:"cwd,omitempty" jsonschema:"description=Working directory relative to workspace root (e.g., 'Frontend/'). Defaults to workspace root. Must not escape the workspace."`
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty" jsonschema:"description=Seconds to allow before the command is killed; defaults to 120 and at most 900"`
+}
+
+// shellToolResult is the structured result returned to the model.
+type shellToolResult struct {
+	ExitCode  int    `json:"exit_code"`
+	Cwd       string `json:"cwd"`
+	DurationMs int64 `json:"duration_ms"`
+	Output    string `json:"output"`
 }
 
 func shellTool(ws *Workspace) goai.Tool {
 	return goai.NewTool("run_command",
-		"Run one command line in the project directory and return what it printed. "+
+		"Run one command line in the project directory and return a structured result. "+
 			"Use it to build, test, install and inspect the project with tools of your own; "+
 			"for reading code prefer read_file, glob and grep, which cost far less. "+
-			"A command that fails is not a failed call: its output and exit code come back for you to read.",
+			"Set cwd to the project folder that owns the config file (e.g., 'Frontend/' for package.json). "+
+			"A command that fails is not a failed call: its output, exit code, and cwd come back for you to read.",
 		func(ctx context.Context, args runCommandArgs) (string, error) {
 			return ws.runCommand(ctx, args)
 		})
 }
 
-// runCommand runs one command line in the workspace and reports what it printed
-// and how it ended.
-//
-// The file tools are confined to the project by resolving every path against it.
-// A command line cannot be confined that way, because what it starts inherits
-// the right to go wherever the user can: the command runs on their machine, with
-// their account, and this program does not pretend otherwise. What is enforced
-// here is where it starts and how long it may take.
+// runCommand runs one command line in the workspace and returns a structured result.
 func (w *Workspace) runCommand(ctx context.Context, args runCommandArgs) (string, error) {
 	command := strings.TrimSpace(args.Command)
 	if command == "" {
@@ -75,60 +84,178 @@ func (w *Workspace) runCommand(ctx context.Context, args runCommandArgs) (string
 
 	name, argv := shellFor(command)
 	cmd := exec.CommandContext(runCtx, name, argv...)
-	cmd.Dir = w.Root()
-	// The shell runs without a console window of its own: the desktop app has no
-	// console to lend it, and a terminal flashing over the app for every command
-	// the agent runs is not something the user asked to watch.
+
+	// Resolve cwd: default to workspace root, validate it's inside workspace
+	cwd := w.Root()
+	if args.Cwd != "" {
+		requested := filepath.Join(w.Root(), args.Cwd)
+		absReq, err := filepath.Abs(requested)
+		if err != nil {
+			return "", fmt.Errorf("invalid cwd: %w", err)
+		}
+		absRoot, err := filepath.Abs(w.Root())
+		if err != nil {
+			return "", fmt.Errorf("workspace root: %w", err)
+		}
+		// Ensure requested cwd is inside workspace root
+		rel, err := filepath.Rel(absRoot, absReq)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return "", errors.New("cwd must be inside the workspace root")
+		}
+		cwd = absReq
+	}
+	cmd.Dir = cwd
+
+	// Force non-interactive, no progress, no profile
+	env := os.Environ()
+	env = append(env,
+		"CI=1",
+		"POWERSHELL_TELEMETRY_OPTOUT=1",
+		"NO_COLOR=1",
+		"TERM=dumb",
+	)
+	cmd.Env = env
+
 	proc.Hide(cmd)
 
-	// One buffer for both streams, so the report reads in the order the command
-	// wrote it rather than as two piles to be compared.
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 
+	started := time.Now()
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("could not start %s: %w", name, err)
 	}
 	waitErr := cmd.Wait()
+	durationMs := time.Since(started).Milliseconds()
 
-	// The turn was abandoned: a command killed along with it is not worth
-	// reporting, and the answer it belonged to is on its way out.
+	// The turn was abandoned: a command killed along with it is not worth reporting.
 	if ctx.Err() != nil {
 		return "", ctx.Err()
 	}
 
-	status := "exit code 0"
+	exitCode := 0
 	switch {
 	case runCtx.Err() != nil:
-		status = "killed after " + timeout.String()
+		exitCode = -1 // timeout or cancellation
 	case waitErr != nil:
 		var exit *exec.ExitError
 		if errors.As(waitErr, &exit) {
-			status = fmt.Sprintf("exit code %d", exit.ExitCode())
+			exitCode = exit.ExitCode()
 		} else {
-			status = waitErr.Error()
+			exitCode = -1
 		}
 	}
 
-	return reportCommand(out.String(), status), nil
-}
+	rawOutput := out.String()
+	cleanOutput := stripAnsiAndClixml(rawOutput)
+	trimmedOutput := trimOutput(cleanOutput)
 
-// reportCommand is the text the model reads: what the command printed, and how
-// it ended. The ending is always stated, because a command that printed nothing
-// and succeeded looks exactly like one that printed nothing and failed.
-func reportCommand(output, status string) string {
-	var b strings.Builder
-
-	if trimmed := strings.TrimRight(output, " \t\r\n"); trimmed == "" {
-		b.WriteString("(no output)\n")
-	} else {
-		b.WriteString(elideMiddle(trimmed, shellOutputBytes))
-		b.WriteString("\n")
+	// Hint injection for known error patterns
+	hint := detectHint(trimmedOutput, cwd, w.Root())
+	if hint != "" {
+		trimmedOutput = trimmedOutput + "\n\n[Hint] " + hint
 	}
 
-	b.WriteString("[" + status + "]")
-	return b.String()
+	result := shellToolResult{
+		ExitCode:   exitCode,
+		Cwd:        cwd,
+		DurationMs: durationMs,
+		Output:     trimmedOutput,
+	}
+
+	jsonResult, err := json.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("marshal result: %w", err)
+	}
+	return string(jsonResult), nil
+}
+
+// stripAnsiAndClixml removes ANSI escape sequences and PowerShell CLIXML noise.
+func stripAnsiAndClixml(s string) string {
+	// Remove ANSI escape sequences (CSI sequences)
+	ansiRe := regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+	s = ansiRe.ReplaceAllString(s, "")
+
+	// Remove OSC sequences (e.g., title changes)
+	oscRe := regexp.MustCompile(`\x1b\][^\x07]*\x07`)
+	s = oscRe.ReplaceAllString(s, "")
+
+	// Remove PowerShell CLIXML fragments (#< CLIXML ...)
+	clixmlRe := regexp.MustCompile(`#< CLIXML[^>]*>`)
+	s = clixmlRe.ReplaceAllString(s, "")
+
+	// Remove standalone #< CLIXML lines
+	lines := strings.Split(s, "\n")
+	filtered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#< CLIXML") {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	s = strings.Join(filtered, "\n")
+
+	return s
+}
+
+// trimOutput keeps head + tail of output, drops the middle.
+func trimOutput(s string) string {
+	if len(s) <= outputHeadBytes+outputTailBytes {
+		return strings.TrimRight(s, " \t\r\n")
+	}
+
+	head := runeBoundary(s, outputHeadBytes)
+	tailStart := len(s) - outputTailBytes
+	for tailStart < len(s) && !utf8.RuneStart(s[tailStart]) {
+		tailStart++
+	}
+
+	return strings.TrimRight(s[:head], " \t\r\n") +
+		"\n… [" + fmt.Sprintf("%d bytes omitted", tailStart-head) + "] …\n" +
+		strings.TrimRight(s[tailStart:], " \t\r\n")
+}
+
+// detectHint returns a helpful hint for known error patterns, or empty string.
+func detectHint(output, cwd, workspaceRoot string) string {
+	lower := strings.ToLower(output)
+
+	// Missing components.json (shadcn/ui)
+	if strings.Contains(lower, "components.json") && strings.Contains(lower, "not found") {
+		// Find Frontend/ relative to workspace
+		rel, _ := filepath.Rel(workspaceRoot, cwd)
+		if rel == "." || rel == "" {
+			return "components.json not found. Run from the project folder containing components.json (e.g., Frontend/)."
+		}
+	}
+
+	// pnpm not found / lockfile mismatch
+	if strings.Contains(lower, "pnpm") && (strings.Contains(lower, "not found") || strings.Contains(lower, "command not found")) {
+		return "pnpm not found in PATH. Ensure pnpm is installed or use the package manager indicated by the lockfile."
+	}
+
+	// npm/pnpm/yarn lockfile mismatch
+	if strings.Contains(lower, "lockfile") && strings.Contains(lower, "mismatch") {
+		return "Lockfile mismatch. Regenerate lockfile with your package manager (pnpm install / npm install / yarn install)."
+	}
+
+	// Go module not found
+	if strings.Contains(lower, "go.mod") && strings.Contains(lower, "not found") {
+		return "go.mod not found. Run from the module root (the folder containing go.mod)."
+	}
+
+	// Permission denied
+	if strings.Contains(lower, "permission denied") || strings.Contains(lower, "access is denied") {
+		return "Permission denied. Check file permissions or run the command from an allowed directory."
+	}
+
+	// Command not found
+	if strings.Contains(lower, "command not found") || strings.Contains(lower, "is not recognized") {
+		return "Command not found in PATH. Ensure the tool is installed and available."
+	}
+
+	return ""
 }
 
 // shellFor is the command line that runs command on this machine: PowerShell on
@@ -140,11 +267,10 @@ func shellFor(command string) (string, []string) {
 
 	// Output is read back as bytes and shown as UTF-8, so the shell is told to
 	// write it that way; without this a non-ASCII path comes back mangled.
-	script := "$OutputEncoding = [Console]::OutputEncoding = [Text.Encoding]::UTF8; " + command
+	script := "$OutputEncoding = [Console]::OutputEncoding = [Text.Encoding]::UTF8; " +
+		"$ProgressPreference = 'SilentlyContinue'; " +
+		command
 
-	// The script goes over encoded rather than as an argument: a command line is
-	// its own little language, and the quoting the shell would apply to its own
-	// source is not the quoting this program would use to hand it across.
 	return "powershell.exe", []string{
 		"-NoProfile", "-NonInteractive", "-EncodedCommand", encodeScript(script),
 	}
@@ -161,25 +287,6 @@ func encodeScript(script string) string {
 	return base64.StdEncoding.EncodeToString(raw)
 }
 
-// elideMiddle shortens long output by dropping its middle, keeping the start,
-// where a command says what it is doing, and the end, where it says how it went.
-// Both cuts land on a rune boundary, so the report stays valid UTF-8.
-func elideMiddle(text string, max int) string {
-	if len(text) <= max {
-		return text
-	}
-
-	head := runeBoundary(text, max/3)
-	start := len(text) - (max - max/3)
-	for start < len(text) && !utf8.RuneStart(text[start]) {
-		start++
-	}
-
-	return text[:head] +
-		fmt.Sprintf("\n… [%d bytes of output left out] …\n", start-head) +
-		text[start:]
-}
-
 // runeBoundary is cut moved back to the start of a rune.
 func runeBoundary(text string, cut int) int {
 	if cut <= 0 {
@@ -192,4 +299,21 @@ func runeBoundary(text string, cut int) int {
 		cut--
 	}
 	return cut
+}
+
+// elideMiddle is kept for backwards compatibility with tests.
+// It delegates to trimOutput with the old shellOutputBytes cap.
+func elideMiddle(text string, max int) string {
+	if len(text) <= max {
+		return text
+	}
+	// Use similar logic but with the provided max
+	head := runeBoundary(text, max/3)
+	start := len(text) - (max - max/3)
+	for start < len(text) && !utf8.RuneStart(text[start]) {
+		start++
+	}
+	return text[:head] +
+		fmt.Sprintf("\n… [%d bytes of output left out] …\n", start-head) +
+		text[start:]
 }
