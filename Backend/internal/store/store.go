@@ -65,6 +65,9 @@ type Message struct {
 	// replay its tool calls. It is an implementation detail and never sent to
 	// the frontend.
 	Replay    json.RawMessage `json:"-"`
+	// Compacted indicates whether this message's trace/replay has been replaced
+	// with a one-line summary to save context space.
+	Compacted bool `json:"compacted,omitempty"`
 	CreatedAt int64           `json:"createdAt"`
 }
 
@@ -270,6 +273,7 @@ CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_events(provider_id, creat
 		{"messages", "duration_ms", "duration_ms INTEGER NOT NULL DEFAULT 0"},
 		{"messages", "trace", "trace TEXT NOT NULL DEFAULT ''"},
 		{"messages", "replay", "replay TEXT NOT NULL DEFAULT ''"},
+		{"messages", "compacted", "compacted INTEGER NOT NULL DEFAULT 0"},
 		{"providers", "name", "name TEXT NOT NULL DEFAULT ''"},
 		{"providers", "base_url", "base_url TEXT NOT NULL DEFAULT ''"},
 		{"providers", "api_key", "api_key TEXT NOT NULL DEFAULT ''"},
@@ -554,7 +558,7 @@ func (s *Store) GetChat(ctx context.Context, id string, userID ...string) (ChatD
 func (s *Store) ListMessages(ctx context.Context, chatID string) ([]Message, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, chat_id, role, content, reasoning, thinking_ms,
-		       output_tokens, duration_ms, trace, replay, created_at
+		       output_tokens, duration_ms, trace, replay, compacted, created_at
 		FROM messages
 		WHERE chat_id = ?
 		ORDER BY created_at ASC, rowid ASC`, chatID)
@@ -566,19 +570,21 @@ func (s *Store) ListMessages(ctx context.Context, chatID string) ([]Message, err
 	messages := []Message{}
 	for rows.Next() {
 		var (
-			m      Message
-			trace  string
-			replay string
+			m       Message
+			trace   string
+			replay  string
+			compacted int
 		)
 		if err := rows.Scan(
 			&m.ID, &m.ChatID, &m.Role, &m.Content,
 			&m.Reasoning, &m.ThinkingMs,
-			&m.OutputTokens, &m.DurationMs, &trace, &replay, &m.CreatedAt,
+			&m.OutputTokens, &m.DurationMs, &trace, &replay, &compacted, &m.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("store: scan message: %w", err)
 		}
 		m.Trace = rawJSON(trace)
 		m.Replay = rawJSON(replay)
+		m.Compacted = compacted != 0
 		messages = append(messages, m)
 	}
 	return messages, rows.Err()
@@ -628,6 +634,110 @@ func (s *Store) AddMessage(ctx context.Context, msg Message, userID ...string) (
 		return Message{}, fmt.Errorf("store: commit: %w", err)
 	}
 	return msg, nil
+}
+
+// CompactMessages replaces the trace/replay of old messages with a one-line
+// summary, to reduce context size. It compacts messages that:
+// - are not already compacted
+// - have a trace with tool calls
+// - are older than the most recent keepCount messages
+// Returns the number of messages compacted.
+func (s *Store) CompactMessages(ctx context.Context, chatID string, keepCount int) (int, error) {
+	// First, find the cutoff created_at: the created_at of the keepCount-th most recent message
+	var cutoff int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT created_at FROM messages
+		WHERE chat_id = ? AND compacted = 0
+		ORDER BY created_at DESC
+		LIMIT 1 OFFSET ?`, chatID, keepCount).Scan(&cutoff)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0, nil // fewer than keepCount messages
+		}
+		return 0, fmt.Errorf("store: find cutoff: %w", err)
+	}
+
+	// Find messages to compact: not compacted, have trace with steps, older than cutoff
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, trace FROM messages
+		WHERE chat_id = ? AND compacted = 0 AND created_at < ? AND trace != '' AND trace != '[]'
+		ORDER BY created_at ASC`, chatID, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("store: find messages to compact: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	type msgToCompact struct {
+		id    string
+		trace string
+	}
+	var toCompact []msgToCompact
+	for rows.Next() {
+		var id, trace string
+		if err := rows.Scan(&id, &trace); err != nil {
+			return 0, fmt.Errorf("store: scan message to compact: %w", err)
+		}
+		toCompact = append(toCompact, msgToCompact{id: id, trace: trace})
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("store: iterate messages: %w", err)
+	}
+
+	if len(toCompact) == 0 {
+		return 0, nil
+	}
+
+	compacted := 0
+	for _, m := range toCompact {
+		summary := summarizeTrace(m.trace)
+		if summary == "" {
+			continue
+		}
+		_, err := s.db.ExecContext(ctx, `
+			UPDATE messages SET trace = ?, replay = ?, compacted = 1 WHERE id = ?`,
+			`["summary": "` + summary + `"]`, `["summary": "` + summary + `"]`, m.id)
+		if err != nil {
+			return compacted, fmt.Errorf("store: compact message %s: %w", m.id, err)
+		}
+		compacted++
+	}
+	return compacted, nil
+}
+
+type msgToCompact struct {
+	id    string
+	trace string
+}
+
+// summarizeTrace extracts a one-line summary from a trace JSON.
+func summarizeTrace(traceJSON string) string {
+	var trace struct {
+		Steps []struct {
+			Parts []struct {
+				Kind   string `json:"kind"`
+				Name   string `json:"name"`
+				Output string `json:"output"`
+			} `json:"parts"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal([]byte(traceJSON), &trace); err != nil {
+		return ""
+	}
+	var parts []string
+	for _, step := range trace.Steps {
+		for _, part := range step.Parts {
+			if part.Kind == "tool" && part.Name != "" {
+				parts = append(parts, part.Name)
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	if len(parts) <= 3 {
+		return "Tools: " + strings.Join(parts, ", ")
+	}
+	return fmt.Sprintf("Tools: %s, and %d more", strings.Join(parts[:3], ", "), len(parts)-3)
 }
 
 // DeleteMessage removes one message from a chat the account owns.

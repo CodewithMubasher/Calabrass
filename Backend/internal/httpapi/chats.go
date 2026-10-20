@@ -473,6 +473,12 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 				Steps:          reply.Steps,
 				StepsExhausted: reply.StepsExhausted,
 			})
+
+			// Compact old messages to keep context size bounded.
+			// Keep the 10 most recent messages uncompressed.
+			if _, err := s.store.CompactMessages(ctx, chatID, 10); err != nil {
+				s.log.Warn("could not compact messages", "chat", chatID, "error", err)
+			}
 		}
 	}
 
