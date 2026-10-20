@@ -12,11 +12,10 @@ import (
 // turnSetup is what a turn takes from the harness: the prompt to think with, and
 // the tools it may call.
 type turnSetup struct {
-	system string
-	tools  []goai.Tool
-	// origins maps a tool name to the connector that offers it. The trace reads
-	// it to say which MCP server a tool call belongs to.
-	origins map[string]string
+	system    string
+	tools     []goai.Tool
+	origins   map[string]string
+	runState  *agent.RunState // budget / loop guard state
 }
 
 // setupTurn builds a turn for the shipped admin account. Handlers use
@@ -70,12 +69,23 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 		mode = agentMode
 	}
 
+	// Budget / loop guard for this run
+	budget := agent.DefaultBudget(mode)
+	runState := agent.NewRunState(budget)
+
 	// Select tools based on mode
 	if mode == "plan" {
 		tools = agent.ReadTools(workspace)
 	} else {
 		tools = agent.Tools(workspace)
 	}
+
+	// Wrap all tools with budget middleware for loop guard
+	wrappedTools := make([]goai.Tool, len(tools))
+	for i, t := range tools {
+		wrappedTools[i] = agent.BudgetMiddleware(t, runState)
+	}
+	tools = wrappedTools
 
 	// Start with workspace tools (or read-only tools for plan mode)
 	if s.connectors != nil {
@@ -99,6 +109,13 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 			s.log.Warn("a connector tool was skipped: the name is already taken", "tool", name)
 		}
 
+		// Wrap connector tools too
+		wrappedTools = make([]goai.Tool, len(tools))
+		for i, t := range tools {
+			wrappedTools[i] = agent.BudgetMiddleware(t, runState)
+		}
+		tools = wrappedTools
+
 		origins = make(map[string]string)
 		for _, brief := range briefs {
 			kept := without(brief.Tools, skipped)
@@ -118,7 +135,7 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 	// project. It needs a store to write that row to, which is what keeps it out
 	// of the tests that build a server for its workspace alone.
 	if s.store != nil && mode != "plan" {
-		tools = append(tools, s.scheduleTool(chatID, userID))
+		tools = append(tools, agent.BudgetMiddleware(s.scheduleTool(chatID, userID), runState))
 	}
 
 	// Determine the system prompt to use
@@ -131,11 +148,11 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 	// With no project and nothing acting on the machine, there is no harness to
 	// explain: the turn is a plain completion with the system prompt.
 	if workspace == nil && len(described) == 0 {
-		return turnSetup{system: systemPrompt, tools: tools, origins: origins}
+		return turnSetup{system: systemPrompt, tools: tools, origins: origins, runState: runState}
 	}
 	// Scan project map fresh each run (depth 2)
 	projectMap := agent.ScanProjectMap(ctx, workspace.Root()).ProjectMapString()
-	return turnSetup{system: agent.SystemPrompt(workspace, systemPrompt, described, mode, projectMap), tools: tools, origins: origins}
+	return turnSetup{system: agent.SystemPrompt(workspace, systemPrompt, described, mode, projectMap), tools: tools, origins: origins, runState: runState}
 }
 
 // mergeTools adds what the connectors offer to a turn's tools, leaving out the

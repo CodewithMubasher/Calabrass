@@ -12,7 +12,8 @@ import (
 
 // DefaultMaxSteps bounds how many model turns one request may take before the
 // loop stops. A step is one model call plus whatever tools it asked for.
-const DefaultMaxSteps = 12
+// Build mode uses 40; Plan mode overrides to a lower value in the handler.
+const DefaultMaxSteps = 40
 
 const (
 	// readFileLines is how many lines read_file returns when the model does not
