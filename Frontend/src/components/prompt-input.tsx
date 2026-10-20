@@ -14,6 +14,7 @@ import { cn } from "cn"
 import "./prompt-input.css"
 import {
   ArrowUp01Icon,
+  BorderAll02Icon,
   BotIcon,
   ChevronDownIcon,
   PlusSignIcon,
@@ -75,12 +76,15 @@ export interface PromptInputRef {
 
 interface PromptInputProps {
   onSend?: (message: string) => void
+  onStop?: () => void
   heading?: string
   compact?: boolean
   /** Bottom-docked composer used inside a chat thread. */
   isInChat?: boolean
   /** Blocks input while a reply is still streaming. */
   disabled?: boolean
+  /** Whether a reply is currently streaming. */
+  isStreaming?: boolean
   /** Current chat mode. */
   mode?: Mode
   /** Called when mode changes. */
@@ -91,12 +95,14 @@ const PromptInput = forwardRef<PromptInputRef, PromptInputProps>(
   (
     {
       onSend,
+      onStop,
       heading,
       compact = false,
       isInChat = false,
       disabled = false,
       mode = "build",
       onModeChange,
+      isStreaming = false,
     },
     ref
   ) => {
@@ -437,13 +443,26 @@ const PromptInput = forwardRef<PromptInputRef, PromptInputProps>(
               </div>
             )}
           </div>
-          <button
-            onClick={handleSend}
-            disabled={!canSend}
-            className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <HugeiconsIcon icon={ArrowUp01Icon} strokeWidth={2} className="size-5" />
-          </button>
+          {isStreaming ? (
+            <button
+              onClick={onStop}
+              disabled={!onStop}
+              className={cn(
+                "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-opacity disabled:cursor-not-allowed disabled:opacity-50",
+                activeMode.text
+              )}
+            >
+              <HugeiconsIcon icon={BorderAll02Icon} strokeWidth={2} className="size-5" />
+            </button>
+          ) : (
+            <button
+              onClick={handleSend}
+              disabled={!canSend}
+              className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <HugeiconsIcon icon={ArrowUp01Icon} strokeWidth={2} className="size-5" />
+            </button>
+          )}
         </div>
       </div>
     )

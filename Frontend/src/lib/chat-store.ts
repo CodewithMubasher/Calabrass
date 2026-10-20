@@ -53,6 +53,8 @@ interface ChatState {
   errors: Record<string, string>
   backendError: string | null
   hydrated: boolean
+  /** Abort controllers for in-flight streaming requests, keyed by chatId. */
+  abortControllers: Record<string, AbortController>
 }
 
 let state: ChatState = {
@@ -64,6 +66,7 @@ let state: ChatState = {
   errors: {},
   backendError: null,
   hydrated: false,
+  abortControllers: {},
 }
 
 const listeners = new Set<() => void>()
@@ -408,6 +411,10 @@ export function rememberChat(chat: Chat) {
 async function runStream(chatId: string, content: string, regenerate = false) {
   const selection = getSelectedModel()
 
+  // Create abort controller for this stream
+  const controller = new AbortController()
+  setState({ abortControllers: { ...state.abortControllers, [chatId]: controller } })
+
   try {
     await streamMessage(
       chatId,
@@ -457,6 +464,7 @@ async function runStream(chatId: string, content: string, regenerate = false) {
             streaming: without(state.streaming, chatId),
             reasoning: without(state.reasoning, chatId),
             traces: without(state.traces, chatId),
+            abortControllers: without(state.abortControllers, chatId),
             errors: notice
               ? { ...state.errors, [chatId]: notice }
               : without(state.errors, chatId),
@@ -468,17 +476,33 @@ async function runStream(chatId: string, content: string, regenerate = false) {
             streaming: without(state.streaming, chatId),
             reasoning: without(state.reasoning, chatId),
             traces: without(state.traces, chatId),
+            abortControllers: without(state.abortControllers, chatId),
             errors: { ...state.errors, [chatId]: message },
           }),
-      }
+      },
+      controller.signal
     )
   } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      // Stream was aborted by user - this is expected, don't treat as error
+      return
+    }
     setState({
       streaming: without(state.streaming, chatId),
       reasoning: without(state.reasoning, chatId),
       traces: without(state.traces, chatId),
+      abortControllers: without(state.abortControllers, chatId),
       errors: { ...state.errors, [chatId]: errorMessage(err) },
     })
+  }
+}
+
+/** Abort the in-flight stream for a chat. */
+export function stopStream(chatId: string) {
+  const controller = state.abortControllers[chatId]
+  if (controller) {
+    controller.abort()
+    setState({ abortControllers: without(state.abortControllers, chatId) })
   }
 }
 

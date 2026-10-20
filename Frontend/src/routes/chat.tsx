@@ -9,6 +9,7 @@ import {
   ensureChatLoaded,
   retryReply,
   sendMessage,
+  stopStream,
   updateChatMode,
   useChat,
   useChatError,
@@ -120,6 +121,8 @@ function ChatPage() {
         <PromptInput
           isInChat
           disabled={streaming}
+          isStreaming={streaming}
+          onStop={() => void stopStream(chatId)}
           mode={chat?.mode ?? "build"}
           onModeChange={(newMode) => void updateChatMode(chatId, newMode)}
           onSend={(value) => void sendMessage(chat.id, value)}
