@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -46,20 +48,24 @@ func TestUsageEndpoint(t *testing.T) {
 		t.Fatalf("load quotas: %v", err)
 	}
 
-	now := time.Now()
-	yesterday := now.AddDate(0, 0, -1)
-	events := []store.UsageEvent{
-		{ProviderID: "google", ModelID: "gemini-2.5-flash", InputTokens: 100, OutputTokens: 50, CreatedAt: now.UnixMilli()},
-		{ProviderID: "google", ModelID: "gemini-2.5-flash", InputTokens: 200, OutputTokens: 100, CreatedAt: now.UnixMilli()},
-		{ProviderID: "groq", ModelID: "gpt-oss-120b", InputTokens: 10, OutputTokens: 5, CreatedAt: yesterday.UnixMilli()},
-	}
-	for _, event := range events {
-		if err := st.RecordUsage(t.Context(), event); err != nil {
-			t.Fatalf("record usage: %v", err)
+	registry := ai.NewRegistry(func(ctx context.Context, userID string) ([]ai.ProviderRecord, error) {
+		rows, err := st.ListProviders(ctx, userID)
+		if err != nil {
+			return nil, err
 		}
-	}
+		records := make([]ai.ProviderRecord, 0, len(rows))
+		for _, row := range rows {
+			records = append(records, ai.ProviderRecord{
+				ID:      row.ID,
+				Name:    row.Name,
+				BaseURL: row.BaseURL,
+				APIKey:  row.APIKey,
+				Enabled: row.Enabled,
+			})
+		}
+		return records, nil
+	})
 
-	registry := ai.NewRegistry(nil)
 	server := httptest.NewServer(NewServer(Deps{
 		Store:    st,
 		Registry: registry,
@@ -68,7 +74,82 @@ func TestUsageEndpoint(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	res, err := server.Client().Get(server.URL + "/api/usage")
+	// Sign up a test user and get a token for authenticated requests
+	// Also get the user ID to add providers for that user
+	type signupResponse struct {
+		Token string `json:"token"`
+		User  struct {
+			ID string `json:"id"`
+		} `json:"user"`
+	}
+	var signupResp signupResponse
+	{
+		signUp := map[string]string{
+			"name":     "Test User",
+			"email":    "test@example.com",
+			"password": "a long enough password",
+		}
+		var body bytes.Buffer
+		if err := json.NewEncoder(&body).Encode(signUp); err != nil {
+			t.Fatalf("encode sign up: %v", err)
+		}
+		req, err := http.NewRequest(http.MethodPost, server.URL+"/api/auth/signup", &body)
+		if err != nil {
+			t.Fatalf("build signup request: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("signup request: %v", err)
+		}
+		defer func() { _ = res.Body.Close() }()
+		if res.StatusCode != http.StatusCreated {
+			t.Fatalf("signup status = %d, want 201", res.StatusCode)
+		}
+		if err := json.NewDecoder(res.Body).Decode(&signupResp); err != nil {
+			t.Fatalf("decode signup response: %v", err)
+		}
+	}
+	token := signupResp.Token
+	userID := signupResp.User.ID
+
+	// Add providers to the database for the signed-up user
+	_ = st.UpsertProvider(t.Context(), store.ProviderRecord{
+		ID:      "google",
+		Name:    "Google",
+		BaseURL: "https://generativelanguage.googleapis.com",
+		APIKey:  "test-key",
+		Enabled: true,
+	}, userID)
+	_ = st.UpsertProvider(t.Context(), store.ProviderRecord{
+		ID:      "groq",
+		Name:    "Groq",
+		BaseURL: "https://api.groq.com/openai/v1",
+		APIKey:  "test-key",
+		Enabled: true,
+	}, userID)
+
+	// Record usage events for the signed-up user
+	now := time.Now()
+	yesterday := now.AddDate(0, 0, -1)
+	events := []store.UsageEvent{
+		{UserID: userID, ProviderID: "google", ModelID: "gemini-2.5-flash", InputTokens: 100, OutputTokens: 50, CreatedAt: now.UnixMilli()},
+		{UserID: userID, ProviderID: "google", ModelID: "gemini-2.5-flash", InputTokens: 200, OutputTokens: 100, CreatedAt: now.UnixMilli()},
+		{UserID: userID, ProviderID: "groq", ModelID: "gpt-oss-120b", InputTokens: 10, OutputTokens: 5, CreatedAt: yesterday.UnixMilli()},
+	}
+	for _, event := range events {
+		if err := st.RecordUsage(t.Context(), event); err != nil {
+			t.Fatalf("record usage: %v", err)
+		}
+	}
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/api/usage", nil)
+	if err != nil {
+		t.Fatalf("build GET /api/usage: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET /api/usage: %v", err)
 	}

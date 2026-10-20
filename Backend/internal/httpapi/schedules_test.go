@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -14,6 +15,49 @@ import (
 
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
 )
+
+// signUpAndGetToken creates a test user and returns their auth token.
+func signUpAndGetToken(t *testing.T, server *httptest.Server) string {
+	t.Helper()
+
+	signUp := map[string]string{
+		"name":     "Test User",
+		"email":    "test@example.com",
+		"password": "a long enough password",
+	}
+
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(signUp); err != nil {
+		t.Fatalf("encode sign up: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/api/auth/signup", &body)
+	if err != nil {
+		t.Fatalf("build signup request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("signup request: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("signup status = %d, want 201", res.StatusCode)
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode signup response: %v", err)
+	}
+
+	token, ok := payload["token"].(string)
+	if !ok || token == "" {
+		t.Fatal("signup returned no token")
+	}
+	return token
+}
 
 // A delay is the plainest reading of "in ten minutes", and it does not depend on
 // the clock the test runs on.
@@ -74,7 +118,7 @@ func TestScheduleToolBooksATask(t *testing.T) {
 
 	s := &Server{store: st}
 
-	answer, err := s.scheduleFromTool(ctx, "", "chat-1", scheduleTaskArgs{
+	answer, err := s.scheduleFromTool(ctx, "chat-1", "", scheduleTaskArgs{
 		Prompt:       "Shut the laptop down",
 		AfterMinutes: 10,
 	})
@@ -195,8 +239,11 @@ func TestScheduleEndpoints(t *testing.T) {
 	server := httptest.NewServer(NewServer(Deps{Store: st, Logger: slog.Default()}))
 	t.Cleanup(server.Close)
 
+	// Sign up a test user and get a token for authenticated requests
+	token := signUpAndGetToken(t, server)
+
 	due := time.Now().Add(time.Minute).UnixMilli()
-	tasks := callSchedules(t, server, http.MethodPost, "/api/schedules",
+	tasks := callSchedules(t, server, token, http.MethodPost, "/api/schedules",
 		`{"prompt":"Shut the laptop down","runAt":`+strconv.FormatInt(due, 10)+`}`)
 	if len(tasks) != 1 {
 		t.Fatalf("booking a task answered with %d of them", len(tasks))
@@ -206,25 +253,25 @@ func TestScheduleEndpoints(t *testing.T) {
 		t.Fatalf("the task came back as %+v", task)
 	}
 
-	tasks = callSchedules(t, server, http.MethodGet, "/api/schedules", "")
+	tasks = callSchedules(t, server, token, http.MethodGet, "/api/schedules", "")
 	if len(tasks) != 1 {
 		t.Fatalf("the list has %d tasks", len(tasks))
 	}
 
-	tasks = callSchedules(t, server, http.MethodPatch, "/api/schedules/"+task.ID, `{"enabled":false}`)
+	tasks = callSchedules(t, server, token, http.MethodPatch, "/api/schedules/"+task.ID, `{"enabled":false}`)
 	if len(tasks) != 1 || tasks[0].Enabled {
 		t.Fatalf("pausing it answered with %+v", tasks)
 	}
 
 	// A new time arms it again, and the run that already happened stops
 	// describing it.
-	tasks = callSchedules(t, server, http.MethodPatch, "/api/schedules/"+task.ID,
+	tasks = callSchedules(t, server, token, http.MethodPatch, "/api/schedules/"+task.ID,
 		`{"runAt":`+strconv.FormatInt(due+60_000, 10)+`}`)
 	if len(tasks) != 1 || tasks[0].RunAt != due+60_000 {
 		t.Fatalf("re-timing it answered with %+v", tasks)
 	}
 
-	tasks = callSchedules(t, server, http.MethodDelete, "/api/schedules/"+task.ID, "")
+	tasks = callSchedules(t, server, token, http.MethodDelete, "/api/schedules/"+task.ID, "")
 	if len(tasks) != 0 {
 		t.Fatalf("after removing it the list has %d tasks", len(tasks))
 	}
@@ -252,7 +299,7 @@ func TestAChatTurnIsOfferedTheScheduleTool(t *testing.T) {
 }
 
 // callSchedules makes one request and returns the list it answers with.
-func callSchedules(t *testing.T, server *httptest.Server, method, path, body string) []store.ScheduledTask {
+func callSchedules(t *testing.T, server *httptest.Server, token, method, path, body string) []store.ScheduledTask {
 	t.Helper()
 
 	req, err := http.NewRequest(method, server.URL+path, strings.NewReader(body))
@@ -260,6 +307,9 @@ func callSchedules(t *testing.T, server *httptest.Server, method, path, body str
 		t.Fatalf("build %s %s: %v", method, path, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	res, err := server.Client().Do(req)
 	if err != nil {

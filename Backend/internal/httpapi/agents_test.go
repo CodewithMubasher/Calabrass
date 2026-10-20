@@ -24,7 +24,10 @@ func TestAgentEndpoints(t *testing.T) {
 	server := httptest.NewServer(NewServer(Deps{Store: st, Logger: slog.Default()}))
 	t.Cleanup(server.Close)
 
-	agents := callAgents(t, server, http.MethodPost, "/api/agents",
+	// Sign up a test user and get a token for authenticated requests
+	token := signUpAndGetToken(t, server)
+
+	agents := callAgents(t, server, token, http.MethodPost, "/api/agents",
 		`{"name":"Researcher","prompt":"Find the primary sources.","mode":"plan",
 		  "connectorId":"c1","provider":"google","model":"gemini-2.5-pro",
 		  "altProvider":"groq","altModel":"llama-3.3-70b"}`)
@@ -42,12 +45,12 @@ func TestAgentEndpoints(t *testing.T) {
 		t.Errorf("the agent has no timestamps: %+v", agent)
 	}
 
-	agents = callAgents(t, server, http.MethodGet, "/api/agents", "")
+	agents = callAgents(t, server, token, http.MethodGet, "/api/agents", "")
 	if len(agents) != 1 {
 		t.Fatalf("the list has %d agents", len(agents))
 	}
 
-	agents = callAgents(t, server, http.MethodPut, "/api/agents/"+agent.ID,
+	agents = callAgents(t, server, token, http.MethodPut, "/api/agents/"+agent.ID,
 		`{"name":"Researcher","prompt":"Find and cite.","mode":"build"}`)
 	if len(agents) != 1 {
 		t.Fatalf("saving it answered with %d of them", len(agents))
@@ -61,7 +64,7 @@ func TestAgentEndpoints(t *testing.T) {
 		t.Errorf("a field left out of the save survived: %+v", agents[0])
 	}
 
-	agents = callAgents(t, server, http.MethodDelete, "/api/agents/"+agent.ID, "")
+	agents = callAgents(t, server, token, http.MethodDelete, "/api/agents/"+agent.ID, "")
 	if len(agents) != 0 {
 		t.Fatalf("after removing it the list has %d agents", len(agents))
 	}
@@ -90,7 +93,7 @@ func TestAgentRequestValidation(t *testing.T) {
 }
 
 // callAgents makes one request and returns the list it answers with.
-func callAgents(t *testing.T, server *httptest.Server, method, path, body string) []store.AgentRecord {
+func callAgents(t *testing.T, server *httptest.Server, token, method, path, body string) []store.AgentRecord {
 	t.Helper()
 
 	req, err := http.NewRequest(method, server.URL+path, strings.NewReader(body))
@@ -98,6 +101,9 @@ func callAgents(t *testing.T, server *httptest.Server, method, path, body string
 		t.Fatalf("build %s %s: %v", method, path, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	res, err := server.Client().Do(req)
 	if err != nil {
