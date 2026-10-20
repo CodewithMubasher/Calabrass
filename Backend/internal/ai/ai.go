@@ -145,6 +145,8 @@ func (r *Registry) providers(ctx context.Context) []resolvedProvider {
 			p.defaults = geminiPreferredModels
 		case endpointGroq:
 			p.defaults = groqPreferredModels
+		case endpointCloudflare:
+			p.defaults = cloudflarePreferredModels
 		}
 		p.fetch = func(ctx context.Context, defaults []string) ([]ModelInfo, error) {
 			switch endpointKind(p.BaseURL) {
@@ -152,6 +154,8 @@ func (r *Registry) providers(ctx context.Context) []resolvedProvider {
 				return fetchGoogleModels(ctx, p.ID, p.APIKey, defaults)
 			case endpointGroq:
 				return fetchGroqModels(ctx, p.ID, p.APIKey, defaults)
+			case endpointCloudflare:
+				return fetchCloudflareModels(ctx, p.ID, p.BaseURL, p.APIKey, defaults)
 			}
 			return fetchCompatModels(ctx, p.ID, p.BaseURL, p.APIKey, defaults)
 		}
@@ -245,6 +249,9 @@ func (r *Registry) resolve(ctx context.Context, providerID, model string) (provi
 			return nil, fmt.Errorf("ai: %s is turned off", p.ID)
 		}
 
+		baseURL := p.BaseURL
+		apiKey := p.APIKey
+
 		switch endpointKind(p.BaseURL) {
 		case endpointGemini:
 			// Gemini speaks its own protocol rather than the OpenAI one.
@@ -262,16 +269,37 @@ func (r *Registry) resolve(ctx context.Context, providerID, model string) (provi
 				compat.WithAPIKey(p.APIKey),
 				compat.WithMaxCompletionTokens(true),
 			), nil
+		case endpointCloudflare:
+			// Cloudflare Workers AI uses OpenAI-compatible API but requires
+			// account_id in the base URL. The API key format is "account_id:api_token".
+			accountID := ""
+			token := p.APIKey
+			if strings.Contains(p.APIKey, ":") {
+				parts := strings.SplitN(p.APIKey, ":", 2)
+				accountID = parts[0]
+				token = parts[1]
+			}
+			if accountID != "" {
+				baseURL = strings.Replace(baseURL, "{account_id}", accountID, 1)
+			}
+			opts := []compat.Option{
+				compat.WithBaseURL(baseURL),
+				compat.WithProviderID(p.ID),
+			}
+			if token != "" {
+				opts = append(opts, compat.WithAPIKey(token))
+			}
+			return compat.Chat(model, opts...), nil
 		}
 
 		opts := []compat.Option{
-			compat.WithBaseURL(p.BaseURL),
+			compat.WithBaseURL(baseURL),
 			compat.WithProviderID(p.ID),
 		}
 		// A provider may legitimately take no key, in which case the
 		// Authorization header is left off entirely.
-		if p.APIKey != "" {
-			opts = append(opts, compat.WithAPIKey(p.APIKey))
+		if apiKey != "" {
+			opts = append(opts, compat.WithAPIKey(apiKey))
 		}
 		return compat.Chat(model, opts...), nil
 	}
@@ -286,9 +314,10 @@ const (
 	endpointCompat endpoint = iota
 	endpointGemini
 	endpointGroq
+	endpointCloudflare
 )
 
-// endpointKind recognises the two vendors that do not speak the plain OpenAI
+// endpointKind recognises the vendors that do not speak the plain OpenAI
 // protocol. It matches on the endpoint rather than on a name, because a provider
 // exists only because the person added it: where it points decides how to talk
 // to it.
@@ -307,6 +336,8 @@ func endpointKind(raw string) endpoint {
 		return endpointGemini
 	case strings.EqualFold(u.Host, "api.groq.com"):
 		return endpointGroq
+	case strings.EqualFold(u.Host, "api.cloudflare.com"):
+		return endpointCloudflare
 	}
 	return endpointCompat
 }

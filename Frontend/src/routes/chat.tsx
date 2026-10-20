@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react"
 
 import { MessageBubble } from "@/components/message-bubble"
 import { PromptInput } from "@/components/prompt-input"
+import { QuestionnairePanel } from "@/components/questionnaire-panel"
 import { MessageGroup } from "@/components/ui/message"
 import {
   deleteReply,
@@ -18,6 +19,7 @@ import {
   useIsStreaming,
   useStreamingMessage,
 } from "@/lib/chat-store"
+import { findPendingQuestionnaire, formatAnswers } from "@/lib/questionnaire"
 import { Route as rootRoute } from "@/routes/__root"
 
 export const Route = createRoute({
@@ -41,6 +43,10 @@ function ChatPage() {
   }, [chatId])
 
   const messageCount = messages?.length ?? 0
+
+  // The questions the model asked and has not been answered yet. They are shown
+  // above the composer, because the answers go back as the next message.
+  const questions = findPendingQuestionnaire(messages ?? [], inFlight)
 
   // Anything that grows the conversation: a message, a token, a thought, or a
   // step's worth of tool calls.
@@ -117,9 +123,21 @@ function ChatPage() {
           {error}
         </p>
       ) : null}
+      {questions ? (
+        <div className="shrink-0">
+          <QuestionnairePanel
+            questions={questions}
+            disabled={streaming}
+            onSubmit={(answers) =>
+              void sendMessage(chatId, formatAnswers(questions, answers))
+            }
+          />
+        </div>
+      ) : null}
       <div className="shrink-0">
         <PromptInput
           isInChat
+          attached={questions !== null}
           disabled={streaming}
           isStreaming={streaming}
           onStop={() => void stopStream(chatId)}

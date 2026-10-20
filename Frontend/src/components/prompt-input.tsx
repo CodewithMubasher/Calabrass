@@ -89,6 +89,11 @@ interface PromptInputProps {
   mode?: Mode
   /** Called when mode changes. */
   onModeChange?: (mode: Mode) => void
+  /**
+   * Another surface sits directly on top of the composer, so the gap that is
+   * usually above it is not wanted.
+   */
+  attached?: boolean
 }
 
 const PromptInput = forwardRef<PromptInputRef, PromptInputProps>(
@@ -103,6 +108,7 @@ const PromptInput = forwardRef<PromptInputRef, PromptInputProps>(
       mode = "build",
       onModeChange,
       isStreaming = false,
+      attached = false,
     },
     ref
   ) => {
@@ -447,13 +453,16 @@ const PromptInput = forwardRef<PromptInputRef, PromptInputProps>(
             <button
               onClick={onStop}
               disabled={!onStop}
+              // Explicitly prevent parent disabled state from affecting this button
               className={cn(
                 "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-opacity disabled:cursor-not-allowed disabled:opacity-50",
                 activeMode.text,
-                // Ensure stop button is never disabled by parent's disabled prop
-                "pointer-events-auto"
+                // Force enable: never inherit disabled from parent
+                "pointer-events-auto",
+                "[&:disabled]:pointer-events-auto",
+                "[&:disabled]:opacity-100"
               )}
-              style={{ pointerEvents: 'auto' }}
+              style={{ pointerEvents: 'auto', zIndex: 10 }}
             >
               <HugeiconsIcon icon={BorderAll02Icon} strokeWidth={2} className="size-5" />
             </button>
@@ -539,7 +548,7 @@ const PromptInput = forwardRef<PromptInputRef, PromptInputProps>(
 
     if (isInChat) {
       return (
-        <div className="w-full p-4">
+        <div className={cn("w-full p-4", attached && "pt-0")}>
           <div className="mx-auto w-full max-w-[780px]">{renderComposer()}</div>
         </div>
       )

@@ -9,7 +9,7 @@ import { Route as workspaceViewRoute } from "@/routes/workspace-view"
 import { Route as connectorsRoute } from "@/routes/connectors"
 import { Route as agentsRoute } from "@/routes/agents"
 import { Route as schedulesRoute } from "@/routes/schedules"
-import { Route as settingsRoute } from "@/routes/settings"
+import { Route as autonomousRoute } from "@/routes/autonomous"
 import { Route as providersRoute } from "@/routes/providers"
 import { Route as usageRoute } from "@/routes/usage"
 import { Route as calLiveRoute } from "@/routes/cal-live"
@@ -28,7 +28,7 @@ const routeTree = rootRoute.addChildren([
   schedulesRoute,
   providersRoute,
   usageRoute,
-  settingsRoute,
+  autonomousRoute,
 ])
 
 export const router = createRouter({

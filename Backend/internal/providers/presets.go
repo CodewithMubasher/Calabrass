@@ -86,7 +86,7 @@ var ProviderPresets = []Preset{
 		BaseURL:      "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1",
 		DefaultModel: "@cf/meta/llama-3.1-8b-instruct",
 		Icon:         "cloudflare",
-		Special:      true, // Needs account_id substitution
+		Special:      true, // Needs account_id substitution (API key format: account_id:api_token)
 	},
 	{
 		ID:           "ollama",

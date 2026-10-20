@@ -105,6 +105,20 @@ func SystemPrompt(ws *Workspace, base string, connectors []Connector, mode strin
 	return b.String()
 }
 
+// AskQuestionsSection is the rule that says how to ask the user for
+// something. It stands on its own because it applies to every turn that
+// carries the ask_questions tool — including the ones with no project and
+// nothing else to explain, where the rest of the harness rules are not worth
+// writing.
+func AskQuestionsSection() string {
+	return strings.Join([]string{
+		"Asking the user:",
+		"- When you need ANYTHING from the user — a requirement you cannot read from the project, a choice between approaches, a missing path, a credential, a preference, a confirmation — you MUST call the ask_questions tool. You must never ask a question in your own text: a question asked in plain text is one the user cannot answer in the form, and the form is the only way their answer comes back to you.",
+		"- ask_questions takes a list of questions. Each question is an object with a question and, when the answer is one of a fixed set, an options list. It looks like this: {\"questions\":[{\"question\":\"Which database should I use?\",\"options\":[\"Postgres\",\"SQLite\"]},{\"question\":\"What should the app be called?\"}]}. Leave options out when the answer is free text, and set multiple to true when more than one option may be picked.",
+		"- Ask everything you need in ONE ask_questions call, then stop the turn and wait: the answers arrive in the user's next message. Do not carry on with the task before they do, and do not ask the same thing twice.",
+	}, "\n")
+}
+
 // machineSection describes the connectors that reach the user's own computer.
 // It is empty when there are none, because then there is nothing to say: the
 // tools really are all about the project.

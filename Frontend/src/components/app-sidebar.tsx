@@ -3,11 +3,11 @@ import { Link } from "@tanstack/react-router"
 import {
   AddCircleHalfDotIcon,
   AiSpeechIcon,
+  AlignSelectionIcon,
   BotIcon,
   ChartRelationshipIcon,
   Folder01Icon,
   PieChartIcon,
-  Settings02Icon,
   ThreeDScaleIcon,
   TimeScheduleIcon,
 } from "@hugeicons/core-free-icons"
@@ -40,6 +40,11 @@ const data = {
       badge: "Beta",
     },
     {
+      title: "Autonomous",
+      to: "/autonomous",
+      icon: AlignSelectionIcon,
+    },
+    {
       title: "Workspaces",
       to: "/workspaces",
       icon: Folder01Icon,
@@ -68,11 +73,6 @@ const data = {
       title: "Usage",
       to: "/usage",
       icon: PieChartIcon,
-    },
-    {
-      title: "Settings",
-      to: "/settings",
-      icon: Settings02Icon,
     },
   ] as NavItem[],
 }

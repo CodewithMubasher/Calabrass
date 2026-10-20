@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"strings"
 
 	goai "github.com/zendev-sh/goai"
 
@@ -69,10 +70,6 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 		mode = agentMode
 	}
 
-	// Budget / loop guard for this run
-	budget := agent.DefaultBudget(mode)
-	runState := agent.NewRunState(budget)
-
 	// Select tools based on mode
 	if mode == "plan" {
 		tools = agent.ReadTools(workspace)
@@ -80,14 +77,7 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 		tools = agent.Tools(workspace)
 	}
 
-	// Wrap all tools with budget middleware for loop guard
-	wrappedTools := make([]goai.Tool, len(tools))
-	for i, t := range tools {
-		wrappedTools[i] = agent.BudgetMiddleware(t, runState)
-	}
-	tools = wrappedTools
-
-	// Start with workspace tools (or read-only tools for plan mode)
+	// Add connector tools
 	if s.connectors != nil {
 		briefs, offered := s.connectors.Turn(ctx, userID)
 		var skipped []string
@@ -109,13 +99,6 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 			s.log.Warn("a connector tool was skipped: the name is already taken", "tool", name)
 		}
 
-		// Wrap connector tools too
-		wrappedTools = make([]goai.Tool, len(tools))
-		for i, t := range tools {
-			wrappedTools[i] = agent.BudgetMiddleware(t, runState)
-		}
-		tools = wrappedTools
-
 		origins = make(map[string]string)
 		for _, brief := range briefs {
 			kept := without(brief.Tools, skipped)
@@ -130,19 +113,42 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 		}
 	}
 
+	// The model can ask the user for what it cannot work out for itself in
+	// either mode: a question is not a change to the project, and a plan is
+	// exactly the sort of work that runs into something only the user knows.
+	tools = append(tools, s.askQuestionsTool())
+
 	// The scheduler is the server's own tool rather than the workspace's: a task
 	// is a row in the database and a turn of its own, not something done to the
 	// project. It needs a store to write that row to, which is what keeps it out
 	// of the tests that build a server for its workspace alone.
 	if s.store != nil && mode != "plan" {
-		tools = append(tools, agent.BudgetMiddleware(s.scheduleTool(chatID, userID), runState))
+		tools = append(tools, s.scheduleTool(chatID, userID))
 	}
+
+	// Wrap ALL tools with budget middleware for loop guard (once, after merging)
+	budget := agent.DefaultBudget(mode)
+	runState := agent.NewRunState(budget)
+	wrappedTools := make([]goai.Tool, len(tools))
+	for i, t := range tools {
+		wrappedTools[i] = agent.BudgetMiddleware(t, runState)
+	}
+	tools = wrappedTools
 
 	// Determine the system prompt to use
 	systemPrompt := s.system
 	if agentSystemPrompt != "" {
 		// Agent's system prompt REPLACES the global system prompt entirely
 		systemPrompt = agentSystemPrompt
+	}
+
+	// The rule that says how to ask the user for something is in every turn
+	// that carries the ask_questions tool, whether or not there is a project
+	// to explain.
+	if trimmed := strings.TrimSpace(systemPrompt); trimmed != "" {
+		systemPrompt = trimmed + "\n\n" + agent.AskQuestionsSection()
+	} else {
+		systemPrompt = agent.AskQuestionsSection()
 	}
 
 	// With no project and nothing acting on the machine, there is no harness to

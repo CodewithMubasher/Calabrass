@@ -2,8 +2,8 @@ import {
   createRootRoute,
   Outlet,
   redirect,
-  useLocation,
   useNavigate,
+  useRouterState,
 } from "@tanstack/react-router"
 import { useEffect } from "react"
 import { HugeiconsIcon } from "@hugeicons/react"
@@ -30,6 +30,11 @@ import { loadModels } from "@/lib/model-store"
 import { toggleArtifacts, usePanelState } from "@/lib/panel-store"
 import { isStandalone, hasTopbar, chatIdFrom } from "@/lib/routes"
 
+// Whether this run of the app has already asked the server about the stored
+// token. Module scope on purpose: it is a property of the app's lifetime, not
+// of any one render.
+let sessionChecked = false
+
 export const Route = createRootRoute({
   /**
    * The door, checked on every navigation: nothing but the login and sign-up
@@ -39,19 +44,43 @@ export const Route = createRootRoute({
    * still open on loopback, so this decides what the app shows rather than what
    * the machine allows.
    */
-  beforeLoad: ({ location }) => {
+  beforeLoad: async ({ location }) => {
     const signedIn = session() !== null
     if (isStandalone(location.pathname)) {
       if (signedIn) throw redirect({ to: "/" })
       return
     }
     if (!signedIn) throw redirect({ to: "/login" })
+
+    // Validate the token against the server once per run of the app, not on
+    // every link click. This is a network call, and a navigation that waits on
+    // it leaves the previous page on screen long enough to see. Later visits
+    // rely on the stored session; the layout below sends an expired one back
+    // here if the server rejects it.
+    if (!sessionChecked) {
+      const current = await refreshSession()
+      if (!current) {
+        throw redirect({ to: "/login", replace: true })
+      }
+      sessionChecked = true
+    }
   },
   component: RootLayout,
 })
 
 function RootLayout() {
-  const { pathname } = useLocation()
+  // The path the outlet is actually showing, not the one the router is still
+  // moving to. `useLocation` reports the target the moment a link is clicked,
+  // while the outlet keeps the previous page until the new match commits — so
+  // asking it here used to draw the bar and the artifacts rail over the old
+  // page for a frame on the way to the home screen. Committed matches move in
+  // step with the outlet, so the shell and the page always agree.
+  const pathname = useRouterState({
+    select: (state) =>
+      state.matches.length > 0
+        ? state.matches[state.matches.length - 1].pathname
+        : state.location.pathname,
+  })
   const navigate = useNavigate()
   // The home screen and a chat carry the bar across the top: every other page is
   // its own full-height surface, the way the reference project lays them out.

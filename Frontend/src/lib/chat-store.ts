@@ -2,7 +2,20 @@ import { useSyncExternalStore } from "react"
 
 import { api, streamMessage, ApiError } from "@/lib/api"
 import { getSelectedModel } from "@/lib/model-store"
+import {
+  ASK_QUESTIONS_TOOL,
+  ASK_TEST_QUESTIONS,
+} from "@/lib/questionnaire"
 import type { Chat, ChatMessage, TurnTrace } from "@/types/chat"
+
+/**
+ * The test command. It shows the questionnaire without asking a model, so the
+ * form can be tried on its own.
+ */
+function isAskTestCommand(text: string): boolean {
+  const trimmed = text.trim().toLowerCase()
+  return trimmed === "/ask" || trimmed.startsWith("/ask ")
+}
 
 /** Detect if a message is an image generation request */
 function isImageGenerationRequest(text: string): boolean {
@@ -55,6 +68,11 @@ interface ChatState {
   hydrated: boolean
   /** Abort controllers for in-flight streaming requests, keyed by chatId. */
   abortControllers: Record<string, AbortController>
+  /**
+   * Chats whose pending questionnaire came from the /ask test command. The
+   * answers to one of those are kept here rather than sent to a model.
+   */
+  askTests: Record<string, boolean>
 }
 
 let state: ChatState = {
@@ -67,6 +85,7 @@ let state: ChatState = {
   backendError: null,
   hydrated: false,
   abortControllers: {},
+  askTests: {},
 }
 
 const listeners = new Set<() => void>()
@@ -227,6 +246,76 @@ export async function createChat(workspaceId?: string, agentId?: string, mode?: 
 export async function sendMessage(chatId: string, content: string) {
   const text = content.trim()
   if (!text) return
+
+  // The test command asks for no model at all: the questionnaire is put
+  // together here and shown above the composer.
+  if (isAskTestCommand(text)) {
+    const now = Date.now()
+    const asked: ChatMessage = {
+      id: `local-${now}`,
+      chatId,
+      role: "user",
+      content: text,
+      createdAt: now,
+      pending: true,
+    }
+    const questionnaire: ChatMessage = {
+      id: `local-${now}-ask`,
+      chatId,
+      role: "assistant",
+      content: "Before I start, a few things I need to know:",
+      trace: {
+        steps: [
+          {
+            number: 1,
+            parts: [
+              {
+                kind: "tool",
+                callId: `local-${now}-ask`,
+                name: ASK_QUESTIONS_TOOL,
+                input: JSON.stringify({ questions: ASK_TEST_QUESTIONS }),
+                status: "ok",
+              },
+            ],
+          },
+        ],
+      },
+      createdAt: now,
+      pending: true,
+    }
+
+    setState({
+      messages: {
+        ...state.messages,
+        [chatId]: [...(state.messages[chatId] ?? []), asked, questionnaire],
+      },
+      errors: without(state.errors, chatId),
+      askTests: { ...state.askTests, [chatId]: true },
+    })
+    return
+  }
+
+  // The answers to a test questionnaire are kept here: the test asks no model
+  // anything, and neither do the answers to it.
+  if (state.askTests[chatId]) {
+    const answered: ChatMessage = {
+      id: `local-${Date.now()}`,
+      chatId,
+      role: "user",
+      content: text,
+      createdAt: Date.now(),
+      pending: true,
+    }
+    setState({
+      messages: {
+        ...state.messages,
+        [chatId]: [...(state.messages[chatId] ?? []), answered],
+      },
+      errors: without(state.errors, chatId),
+      askTests: without(state.askTests, chatId),
+    })
+    return
+  }
 
   // Check if this is an image generation request
   if (isImageGenerationRequest(text)) {
@@ -484,7 +573,7 @@ async function runStream(chatId: string, content: string, regenerate = false) {
     )
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
-      // Stream was aborted by user - this is expected, don't treat as error
+      // Stream was aborted by user - state already cleaned up in stopStream()
       return
     }
     setState({
@@ -502,7 +591,13 @@ export function stopStream(chatId: string) {
   const controller = state.abortControllers[chatId]
   if (controller) {
     controller.abort()
-    setState({ abortControllers: without(state.abortControllers, chatId) })
+    // Immediately clean up all streaming state so UI resets (send button, enabled input, spinner stops)
+    setState({
+      streaming: without(state.streaming, chatId),
+      reasoning: without(state.reasoning, chatId),
+      traces: without(state.traces, chatId),
+      abortControllers: without(state.abortControllers, chatId),
+    })
   }
 }
 
@@ -514,6 +609,7 @@ export async function deleteChat(chatId: string) {
     streaming: without(state.streaming, chatId),
     reasoning: without(state.reasoning, chatId),
     traces: without(state.traces, chatId),
+    askTests: without(state.askTests, chatId),
   })
 
   try {

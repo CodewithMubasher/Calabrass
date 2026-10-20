@@ -2,11 +2,10 @@ import { HugeiconsIcon } from "@hugeicons/react"
 import {
   LogOutIcon,
   More01Icon,
-  Settings02Icon,
   SparklesIcon,
   UserCircleIcon,
 } from "@hugeicons/core-free-icons"
-import { Link, useNavigate } from "@tanstack/react-router"
+import { useNavigate } from "@tanstack/react-router"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
@@ -112,14 +111,6 @@ export function NavUser() {
                 <HugeiconsIcon icon={UserCircleIcon} strokeWidth={2} />
                 Profile
               </DropdownMenuItem>
-              <DropdownMenuItem
-                render={
-                  <Link to="/settings">
-                    <HugeiconsIcon icon={Settings02Icon} strokeWidth={2} />
-                    Settings
-                  </Link>
-                }
-              />
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleSignOut}>

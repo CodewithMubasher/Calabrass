@@ -255,3 +255,38 @@
     opacity: 0.2;
   }
 }
+
+/* The line that joins an open card to the mark of the app. Its colour runs
+   along the line towards the mark, and the line breathes while it does. */
+@keyframes autonomous-flow {
+  0% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -28;
+  }
+}
+
+@keyframes autonomous-pulse {
+  0%,
+  100% {
+    stroke-opacity: 0.5;
+  }
+  50% {
+    stroke-opacity: 1;
+  }
+}
+
+.autonomous-flow {
+  stroke-dasharray: 6 8;
+  animation:
+    autonomous-flow 1.1s linear infinite,
+    autonomous-pulse 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .autonomous-flow {
+    animation: none;
+    stroke-dasharray: none;
+  }
+}

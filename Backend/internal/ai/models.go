@@ -101,7 +101,7 @@ const groqBaseURL = "https://api.groq.com/openai/v1"
 // protocol rather than the OpenAI one, which is why it gets its own adapter.
 const geminiBaseURL = "https://generativelanguage.googleapis.com"
 
-// The preferred model order for the two vendors whose API is not plain
+// The preferred model order for the vendors whose API is not plain
 // OpenAI-compatible. The first id the live catalog actually offers wins, so the
 // picker opens on a sensible model without hard-coding the only choice. These
 // are also what a fallback shows when the live listing cannot be fetched.
@@ -118,6 +118,12 @@ var (
 		"qwen/qwen3.8-27b",
 		"llama-3.3-70b-versatile",
 		"llama-3.1-8b-instant",
+	}
+	cloudflarePreferredModels = []string{
+		"@cf/meta/llama-3.1-8b-instruct",
+		"@cf/meta/llama-3.2-11b-vision-instruct",
+		"@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+		"@cf/mistral/mistral-7b-instruct-v0.2",
 	}
 )
 
@@ -342,6 +348,65 @@ func fetchCompatModels(
 			continue
 		}
 		models = append(models, ModelInfo{ID: m.ID, Label: Prettify(m.ID), Provider: providerID})
+	}
+	sortModels(models, defaults)
+	return models, nil
+}
+
+// fetchCloudflareModels lists the chat models of Cloudflare Workers AI.
+// The baseURL should already have the account_id substituted.
+func fetchCloudflareModels(
+	ctx context.Context,
+	providerID, baseURL, apiKey string,
+	defaults []string,
+) ([]ModelInfo, error) {
+	if baseURL == "" {
+		return nil, errors.New("ai: base URL is not set")
+	}
+
+	// Cloudflare Workers AI models endpoint
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	var payload struct {
+		Result []struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+		} `json:"result"`
+		Success bool `json:"success"`
+		Errors  []struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"errors"`
+		Messages []struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"messages"`
+	}
+	if err := doJSON(req, &payload); err != nil {
+		return nil, err
+	}
+
+	if !payload.Success && len(payload.Errors) > 0 {
+		return nil, fmt.Errorf("cloudflare: %s", payload.Errors[0].Message)
+	}
+
+	models := []ModelInfo{}
+	for _, m := range payload.Result {
+		if m.Name == "" || isNonChatModel(m.Name) {
+			continue
+		}
+		label := strings.TrimSpace(m.Description)
+		if label == "" {
+			label = Prettify(m.Name)
+		}
+		models = append(models, ModelInfo{ID: m.Name, Label: label, Provider: providerID})
 	}
 	sortModels(models, defaults)
 	return models, nil

@@ -392,7 +392,15 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	turns := make([]ai.Message, 0, len(history)+1)
-	for _, m := range history {
+	// Limit history to last 20 messages to prevent context window overflow.
+	// Compacted messages have small summaries, but uncompressed ones with tool
+	// replays can be very large.
+	const maxHistoryMessages = 20
+	start := 0
+	if len(history) > maxHistoryMessages {
+		start = len(history) - maxHistoryMessages
+	}
+	for _, m := range history[start:] {
 		turns = append(turns, ai.Message{Role: m.Role, Content: m.Content, Replay: m.Replay})
 	}
 	if !req.Regenerate {

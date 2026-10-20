@@ -5,6 +5,7 @@ import {
   FileEditIcon,
   Folder01Icon,
   FolderAddIcon,
+  MessageQuestionIcon,
   Search01Icon,
   TerminalIcon,
   Wrench01Icon,
@@ -128,6 +129,18 @@ const toolRenderers: Record<string, ToolRenderer> = {
     label: "Ran command",
     getLabel: (part) => (isCallLive(part) ? "Running command" : "Ran command"),
     getFileName: (part) => str(args(part).command),
+  },
+  ask_questions: {
+    icon: MessageQuestionIcon,
+    label: "Asked questions",
+    getLabel: (part) =>
+      isCallLive(part) ? "Asking questions" : "Asked questions",
+    getFileName: (part) => {
+      const asked = args(part).questions
+      if (!Array.isArray(asked)) return undefined
+      const count = asked.length
+      return count === 1 ? "1 question" : `${count} questions`
+    },
   },
 }
 

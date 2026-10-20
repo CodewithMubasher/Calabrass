@@ -224,11 +224,11 @@ function TotalRequestsCard({
   className?: string
 }) {
   return (
-    <UsageCard className={cn("min-h-40", className)}>
+    <UsageCard className={cn("min-h-40 max-h-96 overflow-y-auto", className)}>
       <h2 className="shrink-0 text-sm font-medium text-white/80">
         Overall usage
       </h2>
-      <ul className="mt-3 flex flex-col gap-1">
+      <ul className="mt-3 flex flex-col gap-1 max-h-[320px] overflow-y-auto pr-1">
         {providers.map((provider) => (
           <RequestRow key={provider.id} provider={provider} />
         ))}
