@@ -443,7 +443,7 @@ const PromptInput = forwardRef<PromptInputRef, PromptInputProps>(
           ) : internalMode === "crew" ? (
             // Crew hands the task to the agent team, so there is no model to pick:
             // a single fixed name stands in for the menu.
-            <span className="px-2.5 text-xs text-white/70">Crew</span>
+            <span className="px-2.5 text-xs text-white/70">Orchestrator</span>
           ) : (
             <div ref={modelRef} className="relative">
               <button

@@ -349,8 +349,6 @@ function AgentDialog({
   const [name, setName] = useState(agent.name)
   const [prompt, setPrompt] = useState(agent.prompt)
   const [systemPrompt, setSystemPrompt] = useState(agent.systemPrompt)
-  const [mode, setMode] = useState<AgentMode>(agent.mode)
-  const [connectorIds, setConnectorIds] = useState<string[]>(agent.connectorIds ?? [])
   const [model, setModel] = useState(
     `${agent.provider}::${agent.model}`
   )
@@ -358,24 +356,14 @@ function AgentDialog({
     agent.altProvider && agent.altModel ? `${agent.altProvider}::${agent.altModel}` : ""
   )
   const [saving, setSaving] = useState(false)
-  const { connectors } = useConnectorsState()
 
   // Load data on mount
   useEffect(() => {
     void (async () => {
       const { loadModels } = await import("@/lib/model-store")
-      const { loadConnectors } = await import("@/lib/connector-store")
       loadModels()
-      loadConnectors()
     })()
   }, [])
-
-  const connectorOptions = useMemo(() => {
-    return connectors.map((connector) => ({
-      value: connector.id,
-      label: connector.name,
-    }))
-  }, [connectors])
 
   // Build model options from providers
   const modelOptions = useMemo(() => {
@@ -404,8 +392,11 @@ function AgentDialog({
       name: name.trim(),
       prompt: prompt.trim(),
       systemPrompt: systemPrompt.trim(),
-      mode,
-      connectorIds,
+      // The mode and the connectors are not asked for here any more: a worker
+      // is given them by the crew that runs it. What it already has is sent
+      // back untouched, so saving never quietly clears them.
+      mode: agent.mode,
+      connectorIds: agent.connectorIds ?? [],
       provider: provider || "",
       model: modelId || "",
       altProvider: altProvider || "",
@@ -431,9 +422,9 @@ function AgentDialog({
       <DialogContent className="sm:max-w-2xl bg-popover border border-white/10">
         <form onSubmit={submit} className="grid gap-5">
           <DialogHeader>
-            <DialogTitle className="text-white/90">Edit Agent</DialogTitle>
+            <DialogTitle className="text-white/90">Edit worker</DialogTitle>
             <DialogDescription className="text-white/50">
-              Change what this agent is for, and how it works.
+              Change what this worker is for, and how it works.
             </DialogDescription>
           </DialogHeader>
 
@@ -468,46 +459,6 @@ function AgentDialog({
                 rows={4}
               />
             </label>
-
-            <div className="grid grid-cols-2 gap-4">
-              <label className="block">
-                <span className="mb-2 block text-sm text-white/60">Mode</span>
-                <select
-                  value={mode}
-                  onChange={(e) => setMode(e.target.value as AgentMode)}
-                  className="w-full h-9 border-white/10 bg-white/5 px-3 text-white/80 rounded-lg outline-none focus:border-white/20"
-                >
-                  <option value="chat">Chat</option>
-                  <option value="crew">Crew</option>
-                </select>
-              </label>
-              <label className="block">
-                <span className="mb-2 block text-sm text-white/60">MCP</span>
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {connectorOptions.map((option) => (
-                    <label
-                      key={option.value}
-                      className="flex items-center gap-2 cursor-pointer p-2 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-colors"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={connectorIds.includes(option.value)}
-                        onChange={() => setConnectorIds((prev) =>
-                          prev.includes(option.value)
-                            ? prev.filter((x) => x !== option.value)
-                            : [...prev, option.value]
-                        )}
-                        className="size-4 accent-primary"
-                      />
-                      <span className="text-sm text-white/80">{option.label}</span>
-                    </label>
-                  ))}
-                  {connectors.length === 0 && (
-                    <p className="text-xs text-white/40">No connectors available</p>
-                  )}
-                </div>
-              </label>
-            </div>
 
             <div className="grid grid-cols-2 gap-4">
               <label className="block">

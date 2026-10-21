@@ -113,14 +113,14 @@ function AgentsPage() {
 
   return (
     <PageShell
-      title="Agents"
-      subtitle="Give the assistant roles of its own"
+      title="Crew work"
+      subtitle="The workers the crew is made of"
       actions={
         <>
           <SearchInput
             value={query}
             onChange={setQuery}
-            placeholder="Search agents..."
+            placeholder="Search workers..."
           />
           <Button
             variant="default"
@@ -132,7 +132,7 @@ function AgentsPage() {
               strokeWidth={2}
               className="size-4"
             />
-            <span>New agent</span>
+            <span>New worker</span>
           </Button>
         </>
       }
@@ -142,11 +142,11 @@ function AgentsPage() {
       ) : visible.length === 0 ? (
         <PageEmpty
           icon={BotIcon}
-          title={needle ? "No agents match your search" : "No agents yet"}
+          title={needle ? "No workers match your search" : "No workers yet"}
           hint={
             needle
               ? undefined
-              : "Create one to give the assistant a role of its own"
+              : "Create one to give the crew another pair of hands"
           }
         />
       ) : (

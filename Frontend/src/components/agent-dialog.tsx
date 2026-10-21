@@ -23,26 +23,19 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { createAgent, deleteAgent, saveAgent } from "@/lib/agent-store"
 import { api } from "@/lib/api"
-import { loadConnectors, useConnectorsState } from "@/lib/connector-store"
 import { notifyError } from "@/lib/toast"
 import type {
   AgentInput,
-  AgentMode,
   AgentRow,
   ProviderInfo,
 } from "@/types/chat"
 
 // The dialogs sit on the same dark panel as the reference project's, with our
 // own popover token standing in for its neutral-900. This one is wide because
-// the four pickers sit two to a row.
+// the two pickers sit side by side.
 const SURFACE = "sm:max-w-2xl bg-popover border border-white/10"
 
 type Option = { value: string; label: string }
-
-const MODES: Option[] = [
-  { value: "chat", label: "Chat" },
-  { value: "crew", label: "Crew" },
-]
 
 /**
  * A model is chosen by provider and id, so the two are packed into one value
@@ -152,8 +145,6 @@ export function AgentDialog({
 }) {
   const [name, setName] = useState(agent?.name ?? "")
   const [prompt, setPrompt] = useState(agent?.prompt ?? "")
-  const [mode, setMode] = useState<AgentMode>(agent?.mode ?? "chat")
-  const [connectorIds, setConnectorIds] = useState<string[]>(agent?.connectorIds ?? [])
   const [model, setModel] = useState(
     encodeModel(agent?.provider ?? "", agent?.model ?? "")
   )
@@ -163,11 +154,7 @@ export function AgentDialog({
   const [providers, setProviders] = useState<ProviderInfo[]>([])
   const [saving, setSaving] = useState(false)
 
-  const { connectors } = useConnectorsState()
-
   useEffect(() => {
-    void loadConnectors()
-
     let live = true
     api
       .listModels()
@@ -185,16 +172,6 @@ export function AgentDialog({
       live = false
     }
   }, [])
-
-  const connectorOptions = useMemo<Option[]>(() => {
-    return [
-      { value: "__ALL__", label: "All MCPs" },
-      ...connectors.map((connector) => ({
-        value: connector.id,
-        label: connector.name,
-      })),
-    ]
-  }, [connectors])
 
   // The catalog can be long — every model of every connected provider — which
   // is exactly what the Select's scrollable list is for.
@@ -233,19 +210,16 @@ export function AgentDialog({
 
     const preferred = decodeModel(model)
     const fallback = decodeModel(altModel)
-    
-    // Handle "All MCPs" selection
-    const selectedConnectorIds = connectorIds.length === 1 && connectorIds[0] === "__ALL__"
-      ? connectors.map((c) => c.id)
-      : connectorIds
 
-    // Single prompt field becomes the system prompt (replaces global)
+    // The mode and the connectors are not asked for here any more: a worker
+    // is given them by the crew that runs it. What it already has is sent
+    // back untouched, so saving a worker never quietly clears them.
     const input: AgentInput = {
       name: name.trim(),
       prompt: prompt.trim(),
       systemPrompt: prompt.trim(), // Agent prompt IS the system prompt
-      mode,
-      connectorIds: selectedConnectorIds,
+      mode: agent?.mode ?? "chat",
+      connectorIds: agent?.connectorIds ?? [],
       provider: preferred.provider,
       model: preferred.model,
       altProvider: fallback.provider,
@@ -293,12 +267,12 @@ export function AgentDialog({
         <form onSubmit={submit} className="grid gap-5">
           <DialogHeader>
             <DialogTitle className="text-white/90">
-              {agent ? "Edit agent" : "New agent"}
+              {agent ? "Edit worker" : "New worker"}
             </DialogTitle>
             <DialogDescription className="text-white/50">
               {agent
-                ? "Change what this agent is for, and how it works."
-                : "Give the agent a role: what it is asked, where it works, and which model it thinks with."}
+                ? "Change what this worker is for, and how it works."
+                : "Give a worker a role: what it is asked, and which model it thinks with."}
             </DialogDescription>
           </DialogHeader>
 
@@ -321,29 +295,6 @@ export function AgentDialog({
                 rows={6}
               />
             </Field>
-
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Mode">
-                <Picker
-                  label="Mode"
-                  value={mode}
-                  onChange={(next) =>
-                    setMode(next === "crew" ? "crew" : "chat")
-                  }
-                  options={MODES}
-                  placeholder="Choose a mode"
-                />
-              </Field>
-              <Field label="MCP">
-                <Picker
-                  label="MCP"
-                  value={connectorIds.length > 0 ? connectorIds[0] : ""}
-                  onChange={(val) => setConnectorIds(val ? [val] : [])}
-                  options={connectorOptions}
-                  placeholder="Choose MCP(s)"
-                />
-              </Field>
-            </div>
 
             <div className="grid grid-cols-2 gap-4">
               <Field label="Default model">

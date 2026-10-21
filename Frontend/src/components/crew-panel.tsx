@@ -1,13 +1,10 @@
 import { useRef, useState, type PointerEvent } from "react"
-import { Link } from "@tanstack/react-router"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { ApertureIcon } from "@hugeicons/core-free-icons"
 
 import { cn } from "cn"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { useChats } from "@/lib/chat-store"
 import { setCrewOpen } from "@/lib/panel-store"
-import type { Chat } from "@/types/chat"
 
 /**
  * The Crew work rail: a right-hand panel that *pushes* the page instead of
@@ -18,13 +15,10 @@ import type { Chat } from "@/types/chat"
  * outer element reserves the space while the panel inside keeps its full size
  * and is revealed by that width, so its contents never squash mid-transition.
  *
- * What it lists is the crew runs themselves — the conversations that were
- * started in crew mode, newest first. Each one is a link to the run, so the
- * rail is a way back into work that is already going rather than a place to
- * start it.
+ * It is empty for now. The work it is meant to gather has not been built yet,
+ * and the panel is here so the place exists before anything fills it.
  */
 export function CrewPanel({ open }: { open: boolean }) {
-  const chats = useChats()
   const isMobile = useIsMobile()
   const sheetRef = useRef<HTMLElement>(null)
 
@@ -118,9 +112,6 @@ export function CrewPanel({ open }: { open: boolean }) {
     setSlideX(null)
   }
 
-  // The runs the rail lists: the conversations that were started in crew mode.
-  const runs = chats.filter((chat) => chat.mode === "crew")
-
   return (
     <>
       {/* The app behind the sheet, dimmed on a phone only, and tappable: a
@@ -193,48 +184,12 @@ export function CrewPanel({ open }: { open: boolean }) {
             <span className="text-sm font-medium text-white">Crew work</span>
           </header>
 
-          <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-3">
-            {runs.length === 0 ? (
-              <div className="flex h-full items-center justify-center px-6 text-center">
-                <p className="text-xs text-white/40">
-                  No crew runs yet. Turn the composer to Crew and send a task.
-                </p>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2">
-                {runs.map((run) => (
-                  <CrewRunCard key={run.id} run={run} />
-                ))}
-              </div>
-            )}
-          </div>
+          {/* The rail is empty for now: the crew work it is meant to gather
+              has not been built yet, and a list of placeholders would only
+              say something the empty space does not. */}
+          <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto" />
         </div>
       </aside>
     </>
-  )
-}
-
-/** One crew run in the list: its name, and when it was last used. */
-function CrewRunCard({ run }: { run: Chat }) {
-  return (
-    <Link
-      to="/crew/$chatId"
-      params={{ chatId: run.id }}
-      className="flex cursor-pointer flex-col gap-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 transition-colors hover:border-white/20 hover:bg-white/10"
-    >
-      <span className="flex items-center gap-2">
-        <HugeiconsIcon
-          icon={ApertureIcon}
-          strokeWidth={2}
-          className="size-3.5 shrink-0 text-[#9D79FF]"
-        />
-        <span className="min-w-0 flex-1 truncate text-sm text-white/90">
-          {run.title}
-        </span>
-      </span>
-      <span className="text-[11px] text-white/35">
-        {run.model || run.provider || "No model"}
-      </span>
-    </Link>
   )
 }

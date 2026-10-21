@@ -4,7 +4,7 @@ import {
   AddCircleHalfDotIcon,
   AiSpeechIcon,
   AlignSelectionIcon,
-  BotIcon,
+  ApertureIcon,
   ChartRelationshipIcon,
   Folder01Icon,
   PieChartIcon,
@@ -50,9 +50,9 @@ const data = {
       icon: Folder01Icon,
     },
     {
-      title: "Agents",
+      title: "Crew work",
       to: "/agents",
-      icon: BotIcon,
+      icon: ApertureIcon,
     },
     {
       title: "Connectors",
