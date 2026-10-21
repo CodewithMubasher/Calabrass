@@ -56,14 +56,21 @@ export interface ChatMessage {
   pending?: boolean
 }
 
-export type ChatMode = "build" | "plan"
+/**
+ * The operating mode a conversation runs in.
+ *
+ * Chat is the ordinary one: an assistant that talks and works. Crew is for
+ * long and complex work, and lives under its own address — `/crew/:id` rather
+ * than `/chat/:id` — so the two kinds of conversation are told apart.
+ */
+export type ChatMode = "chat" | "crew"
 
 export interface Chat {
   id: string
   title: string
   provider: string
   model: string
-  /** The chat's operating mode: "build" (full tools) or "plan" (read-only). */
+  /** The chat's operating mode: "chat" (ordinary) or "crew" (long-horizon). */
   mode: ChatMode
   /** The workspace folder this chat works in. Empty means the default. */
   workspaceDir: string
@@ -198,7 +205,7 @@ export interface ConnectorInput {
 }
 
 /** The mode a sub-agent runs in, matching the composer's switch. */
-export type AgentMode = "build" | "plan"
+export type AgentMode = "chat" | "crew"
 
 /**
  * A sub-agent: a named instruction the user can hand work to, with the mode,

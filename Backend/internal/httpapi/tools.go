@@ -52,30 +52,29 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 				agentSystemPrompt = agentRec.Prompt
 			}
 			agentConnectorID = agentRec.ConnectorID
-			agentMode = agentRec.Mode
+			agentMode = agent.NormalMode(agentRec.Mode)
 		}
 	}
 
-	// Get chat mode (from chat or agent)
-	mode := "build"
+	// The chat's own mode decides how the turn runs: the address it lives at
+	// says which mode it is in, and that is what the turn obeys. The agent's
+	// mode is the default a chat starts with, so it stands in only when the
+	// chat itself does not say.
+	mode := agent.ModeChat
 	if chatID != "" {
 		if chatDetail, err := s.store.GetChat(ctx, chatID, userID); err == nil {
-			if chatDetail.Mode != "" {
-				mode = chatDetail.Mode
+			if normalised := agent.NormalMode(chatDetail.Mode); normalised != "" {
+				mode = normalised
 			}
 		}
 	}
-	// Agent mode overrides chat mode if set
-	if agentMode != "" {
+	if mode == agent.ModeChat && agentMode != "" {
 		mode = agentMode
 	}
 
-	// Select tools based on mode
-	if mode == "plan" {
-		tools = agent.ReadTools(workspace)
-	} else {
-		tools = agent.Tools(workspace)
-	}
+	// Both modes have the same tools: chat is for ordinary work, crew is for
+	// long work, and neither of them is held back from the project.
+	tools = agent.Tools(workspace)
 
 	// Add connector tools
 	if s.connectors != nil {
@@ -122,7 +121,7 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 	// is a row in the database and a turn of its own, not something done to the
 	// project. It needs a store to write that row to, which is what keeps it out
 	// of the tests that build a server for its workspace alone.
-	if s.store != nil && mode != "plan" {
+	if s.store != nil {
 		tools = append(tools, s.scheduleTool(chatID, userID))
 	}
 

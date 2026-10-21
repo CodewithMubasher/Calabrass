@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/breadcrumb"
 import { createChat, sendMessage, useChats } from "@/lib/chat-store"
 import { api } from "@/lib/api"
+import { setComposerMode, useComposerMode } from "@/lib/mode-store"
 import { useWorkspacesState } from "@/lib/workspace-store"
 import { notifyError } from "@/lib/toast"
 import type { WorkspaceGitInfo } from "@/types/chat"
@@ -121,6 +122,8 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
   const [cmdDraft, setCmdDraft] = useState("")
   const [cmdExitCode, setCmdExitCode] = useState<number | null>(null)
   const [cmdRunning, setCmdRunning] = useState(false)
+  // The mode the composer is in: a crew run opens under its own address.
+  const mode = useComposerMode()
   const [contextFiles, setContextFiles] = useState<ContextFile[]>(() =>
     readJson<ContextFile[]>(`calabrass-context-${workspaceId}`, [])
   )
@@ -258,8 +261,11 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
                   if (!workspace || sending) return
                   setSending(true)
                   try {
-                    const chat = await createChat(workspace.id)
-                    await navigate({ to: "/chat/$chatId", params: { chatId: chat.id } })
+                    const chat = await createChat(workspace.id, undefined, mode)
+                    await navigate({
+                      to: mode === "crew" ? "/crew/$chatId" : "/chat/$chatId",
+                      params: { chatId: chat.id },
+                    })
                     void sendMessage(chat.id, message)
                   } catch (err) {
                     notifyError(
@@ -275,6 +281,8 @@ function WorkspaceView({ workspaceId }: { workspaceId: string }) {
                 heading={`Ready to work on ${title}`}
                 compact
                 disabled={sending}
+                mode={mode}
+                onModeChange={setComposerMode}
               />
             </div>
 

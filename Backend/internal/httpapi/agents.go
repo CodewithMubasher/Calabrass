@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
 )
 
@@ -38,7 +39,7 @@ type agentRequest struct {
 }
 
 // record validates the request and turns it into a stored row. Only the name is
-// required, and the mode falls back to "build" — the same default the composer
+// required, and the mode falls back to "chat" — the same default the composer
 // starts on — so a half-filled form still saves something usable.
 func (a agentRequest) record() (store.AgentRecord, error) {
 	name := strings.TrimSpace(a.Name)
@@ -46,13 +47,12 @@ func (a agentRequest) record() (store.AgentRecord, error) {
 		return store.AgentRecord{}, errors.New("a name is required")
 	}
 
-	mode := strings.TrimSpace(a.Mode)
-	switch mode {
-	case "":
-		mode = "build"
-	case "build", "plan":
-	default:
-		return store.AgentRecord{}, errors.New(`mode must be "build" or "plan"`)
+	mode := agent.NormalMode(a.Mode)
+	if mode == "" {
+		if strings.TrimSpace(a.Mode) != "" {
+			return store.AgentRecord{}, errors.New(`mode must be "chat" or "crew"`)
+		}
+		mode = agent.ModeChat
 	}
 
 	systemPrompt := strings.TrimSpace(a.SystemPrompt)

@@ -60,7 +60,7 @@ function AgentCard({
           </span>
         </span>
         <span className="shrink-0 rounded-full border border-white/10 px-2 py-0.5 text-[11px] text-white/50">
-          {agent.mode === "plan" ? "Plan" : "Build"}
+          {agent.mode === "crew" ? "Crew" : "Chat"}
         </span>
       </span>
 

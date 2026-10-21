@@ -28,7 +28,7 @@ func (s *Server) voiceChat(ctx context.Context, userID, chatID string) (store.Ch
 	}
 
 	providerID, modelID := s.resolveModelFor(ctx, userID, "", "")
-	chat, err := s.store.CreateChat(ctx, providerID, modelID, "", "", "build", userID)
+	chat, err := s.store.CreateChat(ctx, providerID, modelID, "", "", store.ModeChat, userID)
 	if err != nil {
 		return store.ChatDetail{}, err
 	}

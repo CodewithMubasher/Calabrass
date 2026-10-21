@@ -14,10 +14,12 @@ import { Route as providersRoute } from "@/routes/providers"
 import { Route as usageRoute } from "@/routes/usage"
 import { Route as calLiveRoute } from "@/routes/cal-live"
 import { Route as chatRoute } from "@/routes/chat"
+import { Route as crewRoute } from "@/routes/crew"
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
   chatRoute,
+  crewRoute,
   loginRoute,
   signupRoute,
   calLiveRoute,

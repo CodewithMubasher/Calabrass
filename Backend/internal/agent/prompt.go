@@ -24,7 +24,8 @@ type Connector struct {
 // SystemPrompt builds the harness instructions: which project the model may
 // work on, what the tools are for, and the rules that keep its answers and its
 // trace readable. base is the application's own prompt, kept in front.
-// mode is the chat's operating mode: "build" (full tools) or "plan" (read-only).
+// mode is the chat's operating mode: "chat" (the ordinary one) or "crew" (the
+// long-horizon one).
 // projectMap is an optional pre-scanned project map injected into the prompt.
 func SystemPrompt(ws *Workspace, base string, connectors []Connector, mode string, projectMap string) string {
 	var b strings.Builder
@@ -55,26 +56,21 @@ func SystemPrompt(ws *Workspace, base string, connectors []Connector, mode strin
 	}
 
 	// Mode-specific instructions
-	if mode == "plan" {
+	if mode == ModeCrew {
 		b.WriteString(strings.Join([]string{
-			"OPERATING MODE: PLAN (Read-only)",
-			"- You are in PLANNING MODE. Your tools are LIMITED TO READ-ONLY operations.",
-			"- You CAN: read files, list directories, search with glob/grep, read code.",
-			"- You CANNOT: write files",
-			"- You CANNOT: edit files",
-			"- You CANNOT: create directories",
-			"- You CANNOT: run shell commands",
-			"- You CANNOT: use MCP connectors that modify state",
-			"- Your goal is to ANALYZE, RESEARCH, and CREATE A DETAILED PLAN when given a specific task or request.",
-			"- If the user provides a greeting, casual chat, or general question, respond conversationally FIRST. DO NOT call any workspace tools (like listing directories or reading files) unless the user asks you to inspect the workspace or gives you a specific problem to analyze.",
-			"- When the user wants to execute the plan, they will switch to BUILD mode.",
-			"- Always output your plan as a clear, structured Markdown document.",
+			"OPERATING MODE: CREW (Long-horizon work)",
+			"- You are in CREW MODE. This is a long, complex job and you have room to do it properly.",
+			"- You CAN: read, write, edit files, create directories, run shell commands, use all MCP connectors.",
+			"- Your goal is to FINISH the whole job, not to sketch it. Work through it step by step until the task is actually done.",
+			"- Break the work into stages yourself and keep going; do not stop half-way to ask whether to continue unless you truly need something only the user can decide.",
+			"- When the user provides a greeting, casual chat, or general question, respond conversationally FIRST. DO NOT call any tools unless the user gives an explicit request, task, or instruction that requires action.",
+			"- Use tools freely when executing a task, but never call tools proactively on greetings or simple conversation.",
 			"",
 		}, "\n"))
 	} else {
 		b.WriteString(strings.Join([]string{
-			"OPERATING MODE: BUILD (Full access)",
-			"- You are in BUILD MODE. You have FULL ACCESS to all tools.",
+			"OPERATING MODE: CHAT (Full access)",
+			"- You are in CHAT MODE. You have FULL ACCESS to all tools.",
 			"- You CAN: read, write, edit files, create directories, run shell commands, use all MCP connectors.",
 			"- Your goal is to IMPLEMENT, BUILD, and EXECUTE tasks requested by the user.",
 			"- If the user provides a greeting, casual chat, or general question, respond conversationally FIRST. DO NOT call any tools unless the user gives an explicit request, task, or instruction that requires action.",

@@ -4,6 +4,7 @@ import type {
   Chat,
   ChatDetail,
   ChatMessage,
+  ChatMode,
   ConnectorInput,
   ConnectorRow,
   ModelSelection,
@@ -184,7 +185,7 @@ export const api = {
   getChat: (chatId: string) =>
     request<{ chat: ChatDetail }>(`/chats/${chatId}`).then((r) => r.chat),
 
-  createChat: (selection?: ModelSelection | null, workspaceId?: string, agentId?: string, mode?: "build" | "plan") =>
+  createChat: (selection?: ModelSelection | null, workspaceId?: string, agentId?: string, mode?: ChatMode) =>
     request<{ chat: Chat }>("/chats", {
       method: "POST",
       body: JSON.stringify({
@@ -195,7 +196,7 @@ export const api = {
       }),
     }).then((r) => r.chat),
 
-  updateChat: (chatId: string, patch: { title?: string; pinned?: boolean; mode?: "build" | "plan" }) =>
+  updateChat: (chatId: string, patch: { title?: string; pinned?: boolean; mode?: ChatMode }) =>
     request<{ chat: Chat }>(`/chats/${chatId}`, {
       method: "PATCH",
       body: JSON.stringify(patch),

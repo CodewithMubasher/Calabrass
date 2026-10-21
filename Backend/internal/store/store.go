@@ -23,13 +23,21 @@ var ErrNotFound = errors.New("store: not found")
 // is asked to be removed.
 var ErrProtected = errors.New("store: this item is built in and cannot be removed")
 
+// The operating modes a conversation can be in. Chat is the ordinary one;
+// crew is for long and complex work.
+const (
+	ModeChat = "chat"
+	ModeCrew = "crew"
+)
+
 // Chat is a conversation without its messages.
 type Chat struct {
 	ID       string `json:"id"`
 	Title    string `json:"title"`
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
-	// Mode is the chat's operating mode: "build" (full tools) or "plan" (read-only).
+	// Mode is the chat's operating mode: "chat" (the ordinary one) or "crew"
+	// (the long-horizon one).
 	Mode string `json:"mode"`
 	// WorkspaceDir is the workspace folder this chat works in. Empty means the
 	// default workspace.
@@ -121,7 +129,7 @@ CREATE TABLE IF NOT EXISTS chats (
 	title      TEXT NOT NULL,
 	provider   TEXT NOT NULL DEFAULT '',
 	model      TEXT NOT NULL DEFAULT '',
-	mode       TEXT NOT NULL DEFAULT 'build',
+	mode       TEXT NOT NULL DEFAULT 'chat',
 	workspace_dir TEXT NOT NULL DEFAULT '',
 	agent_id   TEXT NOT NULL DEFAULT '',
 	pinned     INTEGER NOT NULL DEFAULT 0,
@@ -214,7 +222,7 @@ CREATE TABLE IF NOT EXISTS agents (
 	name          TEXT NOT NULL,
 	prompt        TEXT NOT NULL DEFAULT '',
 	system_prompt TEXT NOT NULL DEFAULT '',
-	mode          TEXT NOT NULL DEFAULT 'build',
+	mode          TEXT NOT NULL DEFAULT 'chat',
 	connector_id  TEXT NOT NULL DEFAULT '',
 	provider      TEXT NOT NULL DEFAULT '',
 	model         TEXT NOT NULL DEFAULT '',
@@ -281,13 +289,20 @@ CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_events(provider_id, creat
 		{"chats", "pinned", "pinned INTEGER NOT NULL DEFAULT 0"},
 		{"chats", "workspace_dir", "workspace_dir TEXT NOT NULL DEFAULT ''"},
 		{"chats", "agent_id", "agent_id TEXT NOT NULL DEFAULT ''"},
-		{"chats", "mode", "mode TEXT NOT NULL DEFAULT 'build'"},
+		{"chats", "mode", "mode TEXT NOT NULL DEFAULT 'chat'"},
 		{"agents", "system_prompt", "system_prompt TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, col := range added {
 		if err := s.ensureColumn(ctx, col.table, col.column, col.ddl); err != nil {
 			return err
 		}
+	}
+
+	// The two modes used to be "build" and "plan". Plan is gone, and build is
+	// the ordinary chat, so both old names become "chat": a conversation that
+	// was a plan carries on as an ordinary one.
+	if err := s.renameModes(ctx); err != nil {
+		return err
 	}
 
 	// Provider rows became per-account. An older providers table keys only on
@@ -353,6 +368,23 @@ func (s *Store) hasColumn(ctx context.Context, table, column string) (bool, erro
 		return false, fmt.Errorf("store: inspect %s.%s: %w", table, column, err)
 	}
 	return count > 0, nil
+}
+
+// renameModes rewrites the two old mode names onto the ones this build uses.
+//
+// The modes used to be "build" and "plan". Plan is gone — a conversation that
+// was a plan carries on as an ordinary one — and build is the ordinary chat, so
+// both names land on "chat". It is idempotent: a row that already says "chat"
+// is left alone.
+func (s *Store) renameModes(ctx context.Context) error {
+	const rename = `
+UPDATE chats SET mode = 'chat' WHERE mode = 'build' OR mode = 'plan';
+UPDATE agents SET mode = 'chat' WHERE mode = 'build' OR mode = 'plan';
+`
+	if _, err := s.db.ExecContext(ctx, rename); err != nil {
+		return fmt.Errorf("store: rename modes: %w", err)
+	}
+	return nil
 }
 
 // rebuildProviders moves an older single-key providers table onto the
@@ -499,7 +531,7 @@ func (s *Store) ListChats(ctx context.Context, userID ...string) ([]Chat, error)
 func (s *Store) CreateChat(ctx context.Context, providerID, model, workspaceDir, agentID, mode string, userID ...string) (Chat, error) {
 	now := time.Now().UnixMilli()
 	if mode == "" {
-		mode = "build"
+		mode = ModeChat
 	}
 	chat := Chat{
 		ID:           NewID(),
@@ -807,10 +839,10 @@ func (s *Store) SetChatPinned(ctx context.Context, id string, pinned bool, userI
 	return s.getChat(ctx, id, userID...)
 }
 
-// SetChatMode updates the chat's mode (build/plan).
+// SetChatMode updates the chat's mode (chat/crew).
 func (s *Store) SetChatMode(ctx context.Context, id string, mode string, userID ...string) (Chat, error) {
-	if mode != "build" && mode != "plan" {
-		mode = "build"
+	if mode != ModeChat && mode != ModeCrew {
+		mode = ModeChat
 	}
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE chats SET mode = ? WHERE id = ? AND user_id = ?`, mode, id, ownerOf(userID))
@@ -1195,13 +1227,15 @@ func (s *Store) DeleteConnector(ctx context.Context, id string, userID ...string
 // may be given when its default is not available.
 //
 // When used as a primary chat agent, the Prompt field REPLACES the global
-// system prompt entirely, and the agent's connector/model/mode are used.
+// system prompt entirely, and the agent's connector/model are used. Its mode is
+// the default a chat of its own starts in; the address the conversation lives
+// at is what says which mode it is in afterwards.
 type AgentRecord struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
 	Prompt       string `json:"prompt"`       // System prompt replacement when used as primary agent
 	SystemPrompt string `json:"systemPrompt"` // Explicit system prompt (optional, falls back to Prompt)
-	// Mode is "build" or "plan".
+	// Mode is "chat" or "crew".
 	Mode string `json:"mode"`
 	// ConnectorID is the MCP connector the agent may use; empty for none.
 	ConnectorID string `json:"connectorId"`

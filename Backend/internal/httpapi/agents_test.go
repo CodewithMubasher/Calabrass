@@ -28,14 +28,14 @@ func TestAgentEndpoints(t *testing.T) {
 	token := signUpAndGetToken(t, server)
 
 	agents := callAgents(t, server, token, http.MethodPost, "/api/agents",
-		`{"name":"Researcher","prompt":"Find the primary sources.","mode":"plan",
+		`{"name":"Researcher","prompt":"Find the primary sources.","mode":"crew",
 		  "connectorId":"c1","provider":"google","model":"gemini-2.5-pro",
 		  "altProvider":"groq","altModel":"llama-3.3-70b"}`)
 	if len(agents) != 1 {
 		t.Fatalf("creating an agent answered with %d of them", len(agents))
 	}
 	agent := agents[0]
-	if agent.Name != "Researcher" || agent.Mode != "plan" || agent.Model != "gemini-2.5-pro" {
+	if agent.Name != "Researcher" || agent.Mode != "crew" || agent.Model != "gemini-2.5-pro" {
 		t.Fatalf("the agent came back as %+v", agent)
 	}
 	if agent.ConnectorID != "c1" || agent.AltProvider != "groq" || agent.AltModel != "llama-3.3-70b" {
@@ -51,11 +51,11 @@ func TestAgentEndpoints(t *testing.T) {
 	}
 
 	agents = callAgents(t, server, token, http.MethodPut, "/api/agents/"+agent.ID,
-		`{"name":"Researcher","prompt":"Find and cite.","mode":"build"}`)
+		`{"name":"Researcher","prompt":"Find and cite.","mode":"chat"}`)
 	if len(agents) != 1 {
 		t.Fatalf("saving it answered with %d of them", len(agents))
 	}
-	if agents[0].Prompt != "Find and cite." || agents[0].Mode != "build" {
+	if agents[0].Prompt != "Find and cite." || agents[0].Mode != "chat" {
 		t.Fatalf("the save did not take: %+v", agents[0])
 	}
 	// The dialog is one form, so a save writes every field it shows; a model the
@@ -87,8 +87,8 @@ func TestAgentRequestValidation(t *testing.T) {
 	if rec.Name != "Solo" || rec.Prompt != "Keep it short." {
 		t.Errorf("got %+v, want the name and prompt trimmed", rec)
 	}
-	if rec.Mode != "build" {
-		t.Errorf("got mode %q, want the build default", rec.Mode)
+	if rec.Mode != "chat" {
+		t.Errorf("got mode %q, want the chat default", rec.Mode)
 	}
 }
 

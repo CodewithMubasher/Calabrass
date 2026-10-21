@@ -15,10 +15,10 @@ import (
 
 // Budget limits for a single run.
 type Budget struct {
-	MaxToolCalls       int           // 40 in Build mode, lower in Plan
-	MaxConsecutiveFail int           // 3
-	MaxTokensPerRun    int           // 0 = no limit
-	PauseOnCap         bool          // true = pause and ask user to continue
+	MaxToolCalls       int  // 40 in Chat mode, far more in Crew
+	MaxConsecutiveFail int  // 3
+	MaxTokensPerRun    int  // 0 = no limit
+	PauseOnCap         bool // true = pause and ask user to continue
 }
 
 // DefaultBudget returns sensible defaults per mode.
@@ -29,8 +29,10 @@ func DefaultBudget(mode string) Budget {
 		MaxTokensPerRun:    0,
 		PauseOnCap:         true,
 	}
-	if mode == "plan" {
-		b.MaxToolCalls = 15 // fewer calls in plan mode
+	if mode == ModeCrew {
+		// Crew mode is where the long tasks live, so it is given the same
+		// long leash the step budget gives it.
+		b.MaxToolCalls = 120
 	}
 	return b
 }

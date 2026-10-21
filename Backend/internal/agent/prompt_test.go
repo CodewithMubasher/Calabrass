@@ -14,14 +14,14 @@ func TestThePromptNamesTheConnectorsAndWhatTheyReach(t *testing.T) {
 		Name:         "win-control",
 		Instructions: "These tools act on the computer you are running on.",
 		Tools:        []string{"open_app", "play_music"},
-	}}, "build", "")
+	}}, ModeChat, "")
 
 	for _, want := range []string{
 		"win-control",
 		"These tools act on the computer you are running on.",
 		"open_app, play_music",
 		"use them instead of looking through the project",
-		"OPERATING MODE: BUILD",
+		"OPERATING MODE: CHAT",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("the prompt does not mention %q:\n%s", want, prompt)
@@ -29,19 +29,14 @@ func TestThePromptNamesTheConnectorsAndWhatTheyReach(t *testing.T) {
 	}
 }
 
-// TestPlanModePrompt checks that plan mode includes read-only instructions.
-func TestPlanModePrompt(t *testing.T) {
-	prompt := SystemPrompt(nil, "You are a test.", []Connector{{
-		Name:         "win-control",
-		Instructions: "These tools act on the computer you are running on.",
-		Tools:        []string{"open_app", "play_music"},
-	}}, "plan", "")
+// TestCrewModePrompt checks that crew mode says what crew mode is for: a long
+// job to be finished rather than a task to be started.
+func TestCrewModePrompt(t *testing.T) {
+	prompt := SystemPrompt(nil, "You are a test.", nil, ModeCrew, "")
 
 	for _, want := range []string{
-		"OPERATING MODE: PLAN",
-		"READ-ONLY",
-		"CANNOT: write files",
-		"CANNOT: edit files",
+		"OPERATING MODE: CREW",
+		"FINISH the whole job",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("the prompt does not mention %q:\n%s", want, prompt)
@@ -53,7 +48,7 @@ func TestPlanModePrompt(t *testing.T) {
 // tools really are all about the project, and describing a desktop would be
 // describing tools the model does not have.
 func TestThePromptSaysNothingAboutAMachineWithoutConnectors(t *testing.T) {
-	prompt := SystemPrompt(nil, "You are a test.", nil, "build", "")
+	prompt := SystemPrompt(nil, "You are a test.", nil, ModeChat, "")
 	if strings.Contains(prompt, "the connectors below") {
 		t.Errorf("the prompt describes connectors that are not there:\n%s", prompt)
 	}
@@ -62,7 +57,7 @@ func TestThePromptSaysNothingAboutAMachineWithoutConnectors(t *testing.T) {
 // TestTheProjectParagraphNeedsAProject: the machine section stands on its own,
 // so nothing claims a project root that does not exist.
 func TestTheProjectParagraphNeedsAProject(t *testing.T) {
-	prompt := SystemPrompt(nil, "You are a test.", []Connector{{Name: "win-control"}}, "build", "")
+	prompt := SystemPrompt(nil, "You are a test.", []Connector{{Name: "win-control"}}, ModeChat, "")
 	if strings.Contains(prompt, "Project root:") {
 		t.Errorf("the prompt names a project root when there is no project:\n%s", prompt)
 	}
@@ -74,7 +69,7 @@ func TestThePromptStillDescribesTheProject(t *testing.T) {
 		t.Fatalf("workspace: %v", err)
 	}
 
-	prompt := SystemPrompt(ws, "You are a test.", []Connector{{Name: "win-control", Tools: []string{"open_app"}}}, "build", "")
+	prompt := SystemPrompt(ws, "You are a test.", []Connector{{Name: "win-control", Tools: []string{"open_app"}}}, ModeChat, "")
 
 	for _, want := range []string{"Project root: " + ws.Root(), "win-control", "open_app", "Tool use:"} {
 		if !strings.Contains(prompt, want) {
@@ -87,7 +82,7 @@ func TestThePromptStillDescribesTheProject(t *testing.T) {
 // calls before anything else, so the instruction is stated and leads the tool
 // rules.
 func TestThePromptPutsParallelCallsFirst(t *testing.T) {
-	prompt := SystemPrompt(nil, "You are a test.", nil, "build", "")
+	prompt := SystemPrompt(nil, "You are a test.", nil, ModeChat, "")
 
 	parallel := strings.Index(prompt, "Prefer parallel tool calls")
 	if parallel < 0 {

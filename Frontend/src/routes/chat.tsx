@@ -1,25 +1,10 @@
-import { createRoute } from "@tanstack/react-router"
-import { useEffect, useRef } from "react"
+import { createRoute, useNavigate } from "@tanstack/react-router"
+import { useCallback, useEffect } from "react"
 
-import { MessageBubble } from "@/components/message-bubble"
-import { PromptInput } from "@/components/prompt-input"
-import { QuestionnairePanel } from "@/components/questionnaire-panel"
-import { MessageGroup } from "@/components/ui/message"
-import {
-  deleteReply,
-  ensureChatLoaded,
-  retryReply,
-  sendMessage,
-  stopStream,
-  updateChatMode,
-  useChat,
-  useChatMessages,
-  useHydrated,
-  useIsStreaming,
-  useStreamingMessage,
-} from "@/lib/chat-store"
-import { findPendingQuestionnaire, formatAnswers } from "@/lib/questionnaire"
+import { ChatThread } from "@/components/chat-thread"
+import { updateChatMode, useChat } from "@/lib/chat-store"
 import { Route as rootRoute } from "@/routes/__root"
+import type { ChatMode } from "@/types/chat"
 
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
@@ -27,118 +12,42 @@ export const Route = createRoute({
   component: ChatPage,
 })
 
+/**
+ * An ordinary conversation. It lives under /chat, and the composer switch can
+ * move it to /crew — which is what happens when the switch is turned.
+ */
 function ChatPage() {
   const { chatId } = Route.useParams()
-  const hydrated = useHydrated()
+  const navigate = useNavigate()
   const chat = useChat(chatId)
-  const messages = useChatMessages(chatId)
-  const streaming = useIsStreaming(chatId)
-  const inFlight = useStreamingMessage(chatId)
-  const scrollRef = useRef<HTMLDivElement>(null)
 
+  // The address says which mode the conversation is in. A chat that was saved
+  // as a crew run and then opened under /chat is an ordinary chat again, so the
+  // row is brought back into line with the address it was opened at.
   useEffect(() => {
-    void ensureChatLoaded(chatId)
-  }, [chatId])
+    if (chat && chat.mode !== "chat") void updateChatMode(chatId, "chat")
+  }, [chat, chatId])
 
-  const messageCount = messages?.length ?? 0
-
-  // The questions the model asked and has not been answered yet. They are shown
-  // above the composer, because the answers go back as the next message.
-  const questions = findPendingQuestionnaire(messages ?? [], inFlight)
-
-  // Anything that grows the conversation: a message, a token, a thought, or a
-  // step's worth of tool calls.
-  const growth = [
-    messageCount,
-    inFlight?.content.length ?? 0,
-    inFlight?.reasoning?.length ?? 0,
-    (inFlight?.trace?.steps ?? []).reduce(
-      (parts, step) => parts + step.parts.length,
-      0
-    ),
-  ].join(":")
-
-  // Keep the newest message in view while the reply streams in.
-  useEffect(() => {
-    const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [growth])
-
-  if (!hydrated) {
-    return (
-      <div className="flex flex-1 items-center justify-center text-sm text-white/50">
-        Loading…
-      </div>
-    )
-  }
-
-  if (!chat) {
-    return (
-      <div className="flex flex-1 items-center justify-center text-sm text-white/50">
-        Chat not found.
-      </div>
-    )
-  }
+  // Moving the switch hands the conversation over to the other address: the
+  // chat is saved as a crew run before the address changes, so the sidebar
+  // points at where it now lives.
+  const handleModeChange = useCallback(
+    (mode: ChatMode) => {
+      if (mode === "crew") {
+        void updateChatMode(chatId, "crew")
+        void navigate({ to: "/crew/$chatId", params: { chatId } })
+        return
+      }
+      void updateChatMode(chatId, "chat")
+    },
+    [chatId, navigate]
+  )
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div
-        ref={scrollRef}
-        className="scrollbar-thin min-h-0 flex-1 overflow-y-auto"
-      >
-        <MessageGroup className="mx-auto w-full max-w-[780px] gap-4 px-4 py-6">
-          {(messages ?? []).map((message, index) => {
-            const list = messages ?? []
-            const newestReply =
-              message.role === "assistant" &&
-              index === list.length - 1 &&
-              !streaming
-
-            return (
-              <MessageBubble
-                key={message.id}
-                message={message}
-                onRetry={
-                  newestReply
-                    ? () => void retryReply(chatId, message.id)
-                    : undefined
-                }
-                onDelete={
-                  message.role === "assistant"
-                    ? () => void deleteReply(chatId, message.id)
-                    : undefined
-                }
-              />
-            )
-          })}
-          {inFlight && (
-            <MessageBubble key={inFlight.id} message={inFlight} streaming />
-          )}
-        </MessageGroup>
-      </div>
-      {questions ? (
-        <div className="shrink-0">
-          <QuestionnairePanel
-            questions={questions}
-            disabled={streaming}
-            onSubmit={(answers) =>
-              void sendMessage(chatId, formatAnswers(questions, answers))
-            }
-          />
-        </div>
-      ) : null}
-      <div className="shrink-0">
-        <PromptInput
-          isInChat
-          attached={questions !== null}
-          disabled={streaming}
-          isStreaming={streaming}
-          onStop={() => void stopStream(chatId)}
-          mode={chat?.mode ?? "build"}
-          onModeChange={(newMode) => void updateChatMode(chatId, newMode)}
-          onSend={(value) => void sendMessage(chat.id, value)}
-        />
-      </div>
-    </div>
+    <ChatThread
+      chatId={chatId}
+      mode="chat"
+      onModeChange={handleModeChange}
+    />
   )
 }

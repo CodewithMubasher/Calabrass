@@ -51,7 +51,8 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Provider string `json:"provider"`
 		Model    string `json:"model"`
-		// Mode is the chat's operating mode: "build" (full tools) or "plan" (read-only).
+		// Mode is the chat's operating mode: "chat" (the ordinary one) or
+		// "crew" (the long-horizon one).
 		Mode string `json:"mode"`
 		// WorkspaceID binds the chat to one workspace's folder. Empty means the
 		// default workspace.
@@ -83,13 +84,16 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	agentID := strings.TrimSpace(req.AgentID)
 	providerID := strings.TrimSpace(req.Provider)
 	modelID := strings.TrimSpace(req.Model)
-	mode := strings.TrimSpace(req.Mode)
-	if mode == "" {
-		mode = "build"
+	// The mode the request asked for. Empty means the caller did not say, and
+	// the agent's own mode — or the ordinary one — stands in.
+	mode := agent.NormalMode(req.Mode)
+	if mode == "" && strings.TrimSpace(req.Mode) != "" {
+		writeError(w, http.StatusBadRequest, errors.New(`mode must be "chat" or "crew"`))
+		return
 	}
 
 	if agentID != "" {
-		agent, err := s.store.GetAgent(r.Context(), agentID, user.ID)
+		agentRec, err := s.store.GetAgent(r.Context(), agentID, user.ID)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusBadRequest, errors.New("unknown agent"))
 			return
@@ -100,14 +104,14 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 		}
 		// Use agent's provider/model if not explicitly provided
 		if providerID == "" {
-			providerID = agent.Provider
+			providerID = agentRec.Provider
 		}
 		if modelID == "" {
-			modelID = agent.Model
+			modelID = agentRec.Model
 		}
-		// Use agent's mode if not explicitly provided
-		if mode == "build" {
-			mode = agent.Mode
+		// The agent's mode is the default a chat of its own starts in.
+		if mode == "" {
+			mode = agent.NormalMode(agentRec.Mode)
 		}
 		// If still no provider/model, resolve from registry
 		if providerID == "" || modelID == "" {
@@ -115,6 +119,10 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		providerID, modelID = s.resolveModelFor(r.Context(), user.ID, providerID, modelID)
+	}
+
+	if mode == "" {
+		mode = agent.ModeChat
 	}
 
 	if providerID == "" || modelID == "" {
@@ -150,7 +158,7 @@ func (s *Server) handleUpdateChat(w http.ResponseWriter, r *http.Request) {
 		Title    string `json:"title"`
 		Provider string `json:"provider"`
 		Model    string `json:"model"`
-		// Mode is the chat's operating mode: "build" or "plan".
+		// Mode is the chat's operating mode: "chat" or "crew".
 		Mode string `json:"mode"`
 		// Pinned is a pointer so "leave it alone" is different from false.
 		Pinned *bool `json:"pinned"`
@@ -166,7 +174,11 @@ func (s *Server) handleUpdateChat(w http.ResponseWriter, r *http.Request) {
 		chat, err = s.store.SetChatPinned(r.Context(), chatID, *req.Pinned, user.ID)
 	}
 	if err == nil && req.Mode != "" {
-		chat, err = s.store.SetChatMode(r.Context(), chatID, req.Mode, user.ID)
+		if !agent.ValidMode(req.Mode) {
+			writeError(w, http.StatusBadRequest, errors.New(`mode must be "chat" or "crew"`))
+			return
+		}
+		chat, err = s.store.SetChatMode(r.Context(), chatID, agent.NormalMode(req.Mode), user.ID)
 	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, err)
@@ -420,7 +432,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		Messages:    turns,
 		Tools:       setup.tools,
 		ToolOrigins: setup.origins,
-		MaxSteps:    agent.DefaultMaxSteps,
+		MaxSteps:    agent.MaxSteps(chat.Mode),
 	}, ai.Handlers{
 		OnText: func(delta string) error {
 			return stream.event("token", deltaPayload{Text: delta})

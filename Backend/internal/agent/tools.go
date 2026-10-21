@@ -12,8 +12,24 @@ import (
 
 // DefaultMaxSteps bounds how many model turns one request may take before the
 // loop stops. A step is one model call plus whatever tools it asked for.
-// Build mode uses 40; Plan mode overrides to a lower value in the handler.
+//
+// Chat mode is an ordinary conversation, so it gets the ordinary number. Crew
+// mode is for long and complex work, and is given a much longer leash.
 const DefaultMaxSteps = 40
+
+// CrewMaxSteps is how many model turns a crew run may take. Crew mode is
+// where the long tasks live, so the loop is allowed to run much further before
+// it is cut short.
+const CrewMaxSteps = 120
+
+// MaxSteps is how many model turns a run in this mode may take. An unknown
+// mode is treated as the ordinary one.
+func MaxSteps(mode string) int {
+	if mode == ModeCrew {
+		return CrewMaxSteps
+	}
+	return DefaultMaxSteps
+}
 
 const (
 	// readFileLines is how many lines read_file returns when the model does not

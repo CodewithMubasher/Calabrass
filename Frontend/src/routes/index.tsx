@@ -1,8 +1,9 @@
 import { createRoute, useNavigate } from "@tanstack/react-router"
-import { useState, useRef } from "react"
+import { useState } from "react"
 
-import { PromptInput, type PromptInputRef } from "@/components/prompt-input"
+import { PromptInput } from "@/components/prompt-input"
 import { createChat, sendMessage } from "@/lib/chat-store"
+import { setComposerMode, useComposerMode } from "@/lib/mode-store"
 import { notifyError } from "@/lib/toast"
 import { Route as rootRoute } from "@/routes/__root"
 
@@ -15,7 +16,7 @@ export const Route = createRoute({
 function HomePage() {
   const navigate = useNavigate()
   const [sending, setSending] = useState(false)
-  const promptInputRef = useRef<PromptInputRef>(null)
+  const mode = useComposerMode()
 
   const handleSend = (value: string) => {
     if (sending) return
@@ -23,9 +24,14 @@ function HomePage() {
 
     void (async () => {
       try {
-        const mode = promptInputRef.current?.getMode?.() ?? "build"
+        // The mode the composer is in decides the address the conversation
+        // opens at: an ordinary chat lives under /chat, a crew run under
+        // /crew.
         const chat = await createChat(undefined, undefined, mode)
-        await navigate({ to: "/chat/$chatId", params: { chatId: chat.id } })
+        await navigate({
+          to: mode === "crew" ? "/crew/$chatId" : "/chat/$chatId",
+          params: { chatId: chat.id },
+        })
         // Fire and forget: the reply streams into the store and the chat page
         // renders it from there.
         void sendMessage(chat.id, value)
@@ -43,9 +49,10 @@ function HomePage() {
   return (
     <div className="relative flex h-full flex-col">
       <PromptInput
-        ref={promptInputRef}
         onSend={handleSend}
         disabled={sending}
+        mode={mode}
+        onModeChange={setComposerMode}
       />
     </div>
   )

@@ -40,8 +40,8 @@ const SURFACE = "sm:max-w-2xl bg-popover border border-white/10"
 type Option = { value: string; label: string }
 
 const MODES: Option[] = [
-  { value: "build", label: "Build" },
-  { value: "plan", label: "Plan" },
+  { value: "chat", label: "Chat" },
+  { value: "crew", label: "Crew" },
 ]
 
 /**
@@ -152,7 +152,7 @@ export function AgentDialog({
 }) {
   const [name, setName] = useState(agent?.name ?? "")
   const [prompt, setPrompt] = useState(agent?.prompt ?? "")
-  const [mode, setMode] = useState<AgentMode>(agent?.mode ?? "build")
+  const [mode, setMode] = useState<AgentMode>(agent?.mode ?? "chat")
   const [connectorIds, setConnectorIds] = useState<string[]>(agent?.connectorIds ?? [])
   const [model, setModel] = useState(
     encodeModel(agent?.provider ?? "", agent?.model ?? "")
@@ -328,7 +328,7 @@ export function AgentDialog({
                   label="Mode"
                   value={mode}
                   onChange={(next) =>
-                    setMode(next === "plan" ? "plan" : "build")
+                    setMode(next === "crew" ? "crew" : "chat")
                   }
                   options={MODES}
                   placeholder="Choose a mode"

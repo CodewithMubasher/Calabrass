@@ -7,7 +7,7 @@ import {
   ASK_TEST_QUESTIONS,
 } from "@/lib/questionnaire"
 import { notifyError, notifyWarning } from "@/lib/toast"
-import type { Chat, ChatMessage, TurnTrace } from "@/types/chat"
+import type { Chat, ChatMessage, ChatMode, TurnTrace } from "@/types/chat"
 
 /**
  * The test command. It shows the questionnaire without asking a model, so the
@@ -220,9 +220,17 @@ export async function ensureChatLoaded(chatId: string) {
   }
 }
 
-export async function createChat(workspaceId?: string, agentId?: string, mode?: "build" | "plan"): Promise<Chat> {
+export async function createChat(
+  workspaceId?: string,
+  agentId?: string,
+  mode?: ChatMode
+): Promise<Chat> {
   try {
-    const chat = await api.createChat(getSelectedModel(), workspaceId, agentId, mode)
+    // A chat that belongs to an agent runs on the agent's own model, so the
+    // one the composer happened to have selected is left out of the request:
+    // the agent's configuration is what this conversation is.
+    const selection = agentId ? null : getSelectedModel()
+    const chat = await api.createChat(selection, workspaceId, agentId, mode)
     setState({
       chats: upsertChat(state.chats, chat),
       messages: { ...state.messages, [chat.id]: [] },
@@ -455,8 +463,8 @@ export async function togglePinChat(chatId: string, pinned: boolean) {
   }
 }
 
-/** Update the chat's mode (build/plan). */
-export async function updateChatMode(chatId: string, mode: "build" | "plan") {
+/** Update the chat's mode (chat/crew). */
+export async function updateChatMode(chatId: string, mode: ChatMode) {
   const previous = state.chats
   const current = previous.find((chat) => chat.id === chatId)
   if (!current || current.mode === mode) return

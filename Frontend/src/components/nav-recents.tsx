@@ -2,7 +2,7 @@ import { useState } from "react"
 import { Link, useLocation, useNavigate } from "@tanstack/react-router"
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
-  Chat01Icon,
+  ApertureIcon,
   Delete02Icon,
   FolderOpenIcon,
   MoreHorizontalIcon,
@@ -39,7 +39,7 @@ export function NavRecents() {
 
   const handleDelete = (chatId: string) => {
     void deleteChat(chatId)
-    if (pathname === `/chat/${chatId}`) {
+    if (pathname === `/chat/${chatId}` || pathname === `/crew/${chatId}`) {
       void navigate({ to: "/" })
     }
   }
@@ -58,63 +58,75 @@ export function NavRecents() {
             </span>
           </SidebarMenuItem>
         )}
-        {chats.map((chat) => (
-          <SidebarMenuItem key={chat.id}>
-            <SidebarMenuButton
-              tooltip={chat.title}
-              isActive={pathname === `/chat/${chat.id}`}
-              render={<Link to="/chat/$chatId" params={{ chatId: chat.id }} />}
-            >
-              <HugeiconsIcon
-                icon={chat.pinned ? PinIcon : Chat01Icon}
-                strokeWidth={2}
-                className="shrink-0"
-              />
-              <span className="truncate">{chat.title}</span>
-            </SidebarMenuButton>
-            <DropdownMenu>
-              <DropdownMenuTrigger
+        {chats.map((chat) => {
+          // A crew run lives under its own address, so the list points at
+          // where the conversation actually is.
+          const crew = chat.mode === "crew"
+          const href = crew ? `/crew/${chat.id}` : `/chat/${chat.id}`
+          return (
+            <SidebarMenuItem key={chat.id}>
+              <SidebarMenuButton
+                tooltip={chat.title}
+                isActive={pathname === href}
                 render={
-                  <SidebarMenuAction showOnHover>
-                    <HugeiconsIcon
-                      icon={MoreHorizontalIcon}
-                      strokeWidth={2}
-                      className="size-4"
-                    />
-                    <span className="sr-only">More</span>
-                  </SidebarMenuAction>
+                  crew ? (
+                    <Link to="/crew/$chatId" params={{ chatId: chat.id }} />
+                  ) : (
+                    <Link to="/chat/$chatId" params={{ chatId: chat.id }} />
+                  )
                 }
-              />
-              <DropdownMenuContent align="end" sideOffset={4}>
-                <DropdownMenuItem onClick={() => setRenaming(chat)}>
-                  <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
-                  <span>Rename</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => void togglePinChat(chat.id, !chat.pinned)}
-                >
-                  <HugeiconsIcon
-                    icon={chat.pinned ? PinOffIcon : PinIcon}
-                    strokeWidth={2}
-                  />
-                  <span>{chat.pinned ? "Unpin chat" : "Pin chat"}</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem>
-                  <HugeiconsIcon icon={FolderOpenIcon} strokeWidth={2} />
-                  <span>Add to project</span>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  variant="destructive"
-                  onClick={() => handleDelete(chat.id)}
-                >
-                  <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-                  <span>Delete chat</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </SidebarMenuItem>
-        ))}
+              >
+                <HugeiconsIcon
+                  icon={chat.pinned ? PinIcon : ApertureIcon}
+                  strokeWidth={2}
+                  className="shrink-0"
+                />
+                <span className="truncate">{chat.title}</span>
+              </SidebarMenuButton>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <SidebarMenuAction showOnHover>
+                      <HugeiconsIcon
+                        icon={MoreHorizontalIcon}
+                        strokeWidth={2}
+                        className="size-4"
+                      />
+                      <span className="sr-only">More</span>
+                    </SidebarMenuAction>
+                  }
+                />
+                <DropdownMenuContent align="end" sideOffset={4}>
+                  <DropdownMenuItem onClick={() => setRenaming(chat)}>
+                    <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
+                    <span>Rename</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => void togglePinChat(chat.id, !chat.pinned)}
+                  >
+                    <HugeiconsIcon
+                      icon={chat.pinned ? PinOffIcon : PinIcon}
+                      strokeWidth={2}
+                    />
+                    <span>{chat.pinned ? "Unpin chat" : "Pin chat"}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem>
+                    <HugeiconsIcon icon={FolderOpenIcon} strokeWidth={2} />
+                    <span>Add to project</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={() => handleDelete(chat.id)}
+                  >
+                    <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
+                    <span>Delete chat</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </SidebarMenuItem>
+          )
+        })}
       </SidebarMenu>
 
       {renaming ? (

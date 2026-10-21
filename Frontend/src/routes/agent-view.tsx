@@ -29,7 +29,7 @@ import { useAgentsState } from "@/lib/agent-store"
 import { useModelState } from "@/lib/model-store"
 import { useConnectorsState } from "@/lib/connector-store"
 import { notifyError } from "@/lib/toast"
-import type { AgentRow, AgentMode } from "@/types/chat"
+import type { AgentRow, AgentMode, ChatMode } from "@/types/chat"
 import { Route as rootRoute } from "@/routes/__root"
 import { saveAgent } from "@/lib/agent-store"
 import { cn } from "cn"
@@ -56,11 +56,16 @@ function AgentView({ agentId }: { agentId: string }) {
 
   const [sending, setSending] = useState(false)
   const [editing, setEditing] = useState<AgentRow | null>(null)
+  // The mode the conversation starts in: the agent's own mode, unless the
+  // switch has been moved.
+  const [chosen, setChosen] = useState<ChatMode | null>(null)
 
   const agent = useMemo(
     () => agents.find((item) => item.id === agentId),
     [agents, agentId]
   )
+
+  const mode: ChatMode = chosen ?? agent?.mode ?? "chat"
 
   const connector = useMemo(
     () => connectors.find((c) => agent?.connectorIds?.includes(c.id)),
@@ -80,8 +85,13 @@ function AgentView({ agentId }: { agentId: string }) {
 
     setSending(true)
     try {
-      const chat = await createChat(undefined, agent.id)
-      await navigate({ to: "/chat/$chatId", params: { chatId: chat.id } })
+      const chat = await createChat(undefined, agent.id, mode)
+      // The mode the conversation opens in decides the address it lives at: a
+      // crew run under /crew, an ordinary one under /chat.
+      await navigate({
+        to: chat.mode === "crew" ? "/crew/$chatId" : "/chat/$chatId",
+        params: { chatId: chat.id },
+      })
       void sendMessage(chat.id, message)
     } catch (err) {
       notifyError(
@@ -105,11 +115,11 @@ function AgentView({ agentId }: { agentId: string }) {
   }
 
   function getModeLabel(mode: AgentMode): string {
-    return mode === "plan" ? "Plan" : "Build"
+    return mode === "crew" ? "Crew" : "Chat"
   }
 
   function getModeColor(mode: AgentMode): string {
-    return mode === "plan" ? "border-[#FF8FB8]/40 bg-[#FF8FB8]/15 text-[#FF8FB8]" : "border-[#5B7FFF]/40 bg-[#5B7FFF]/15 text-[#5B7FFF]"
+    return mode === "crew" ? "border-[#9D79FF]/40 bg-[#9D79FF]/15 text-[#9D79FF]" : "border-[#5B7FFF]/40 bg-[#5B7FFF]/15 text-[#5B7FFF]"
   }
 
   if (loading && !agent) {
@@ -153,6 +163,8 @@ function AgentView({ agentId }: { agentId: string }) {
               heading={`Chat with ${agent.name}`}
               compact
               disabled={sending}
+              mode={mode}
+              onModeChange={setChosen}
             />
 
             <div className="mt-8">
@@ -169,7 +181,12 @@ function AgentView({ agentId }: { agentId: string }) {
                       type="button"
                       onClick={() =>
                         navigate({
-                          to: "/chat/$chatId",
+                          // The conversation lives at the address its mode
+                          // gives it: a crew run under /crew.
+                          to:
+                            chat.mode === "crew"
+                              ? "/crew/$chatId"
+                              : "/chat/$chatId",
                           params: { chatId: chat.id },
                         })
                       }
@@ -460,8 +477,8 @@ function AgentDialog({
                   onChange={(e) => setMode(e.target.value as AgentMode)}
                   className="w-full h-9 border-white/10 bg-white/5 px-3 text-white/80 rounded-lg outline-none focus:border-white/20"
                 >
-                  <option value="build">Build</option>
-                  <option value="plan">Plan</option>
+                  <option value="chat">Chat</option>
+                  <option value="crew">Crew</option>
                 </select>
               </label>
               <label className="block">
