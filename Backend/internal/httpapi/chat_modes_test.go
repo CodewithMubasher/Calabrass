@@ -132,8 +132,9 @@ func TestChatModeIsKept(t *testing.T) {
 	}
 }
 
-// A chat with no mode at all is an ordinary one: the old names are gone, and
-// anything this build does not know is refused rather than stored.
+// A chat with no mode at all is an ordinary one. The two names this build
+// replaced are still read and both land on "chat", and anything else is
+// refused rather than stored.
 func TestChatModeDefaultsAndRefusesUnknownModes(t *testing.T) {
 	server, token := modeTestServer(t)
 	addProvider(t, server, token)
@@ -146,7 +147,17 @@ func TestChatModeDefaultsAndRefusesUnknownModes(t *testing.T) {
 		t.Fatalf("the chat came back in mode %q, want the chat default", chat.Mode)
 	}
 
-	for _, mode := range []string{"build", "plan", "think"} {
+	for _, mode := range []string{"build", "plan"} {
+		chat, status := createChat(t, server, token, `{"mode":"`+mode+`"}`)
+		if status != http.StatusCreated {
+			t.Fatalf("the mode %q was answered with %d", mode, status)
+		}
+		if chat.Mode != "chat" {
+			t.Errorf("the mode %q was stored as %q, want chat", mode, chat.Mode)
+		}
+	}
+
+	for _, mode := range []string{"think", "orchestrate"} {
 		if _, status := createChat(t, server, token, `{"mode":"`+mode+`"}`); status != http.StatusBadRequest {
 			t.Errorf("the mode %q was answered with %d, want 400", mode, status)
 		}

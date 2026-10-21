@@ -18,9 +18,13 @@ const (
 // NormalMode returns the mode a value stands for, or "" when it is neither of
 // the two. An empty string is what the callers use to mean "not a mode this
 // build knows about".
+//
+// The two names this build replaced — "build" and "plan" — are still read, and
+// both land on "chat": plan mode is gone, and build mode is the ordinary chat
+// under its new name. Nothing stale is ever stored.
 func NormalMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case ModeChat:
+	case ModeChat, "build", "plan":
 		return ModeChat
 	case ModeCrew:
 		return ModeCrew
