@@ -15,6 +15,7 @@ import {
 
 import { AppSidebar } from "@/components/app-sidebar"
 import { ArtifactsPanel } from "@/components/artifacts-panel"
+import { CrewPanel } from "@/components/crew-panel"
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts"
 import WaveBackground from "@/components/wave-background"
 import { Badge } from "@/components/ui/badge"
@@ -25,17 +26,11 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
-import { hydrate, updateChatMode } from "@/lib/chat-store"
+import { hydrate } from "@/lib/chat-store"
 import { refreshSession, session, useSession } from "@/lib/auth"
 import { loadModels } from "@/lib/model-store"
-import { setComposerMode, useComposerMode } from "@/lib/mode-store"
-import { toggleArtifacts, usePanelState } from "@/lib/panel-store"
-import {
-  isStandalone,
-  hasTopbar,
-  chatIdFrom,
-  isCrewPath,
-} from "@/lib/routes"
+import { toggleArtifacts, toggleCrew, usePanelState } from "@/lib/panel-store"
+import { isStandalone, hasTopbar, chatIdFrom } from "@/lib/routes"
 
 // Whether this run of the app has already asked the server about the stored
 // token. Module scope on purpose: it is a property of the app's lifetime, not
@@ -93,34 +88,11 @@ function RootLayout() {
   // its own full-height surface, the way the reference project lays them out.
   // The artifacts rail rides with that bar, which is where its icon is.
   const showsTopbar = hasTopbar(pathname)
-  const { artifactsOpen } = usePanelState()
+  const { artifactsOpen, crewOpen } = usePanelState()
   // Whether anyone is signed in, not who: the session check below rebuilds the
   // account object on every run, so keying on the object itself would re-run the
   // effect forever.
   const signedIn = useSession() !== null
-
-  // The mode the composer is in. On a conversation the address already says
-  // which mode it is in; on the home screen the composer's own switch says so.
-  const composerMode = useComposerMode()
-  const currentChatId = chatIdFrom(pathname)
-  const inCrew = isCrewPath(pathname)
-  const crewMode = currentChatId ? inCrew : composerMode === "crew"
-
-  // The crew mark in the topbar's right corner. On a conversation it moves
-  // that conversation between the two modes, and the address follows it; on
-  // the home screen it turns the composer over to the crew.
-  const enterCrew = () => {
-    if (!currentChatId) {
-      setComposerMode(crewMode ? "chat" : "crew")
-      return
-    }
-    const next = inCrew ? "chat" : "crew"
-    void updateChatMode(currentChatId, next)
-    void navigate({
-      to: next === "crew" ? "/crew/$chatId" : "/chat/$chatId",
-      params: { chatId: currentChatId },
-    })
-  }
 
   // Validate the session, then load the account's data. The login and sign-up
   // pages are reached without a session, so there is nothing to load there and
@@ -212,16 +184,14 @@ function RootLayout() {
                     >
                       <HugeiconsIcon icon={Files01Icon} strokeWidth={2} />
                     </Button>
-                    {/* The crew mark: the way into the mode where the long and
-                        complex work happens. On a conversation it hands that
-                        conversation over to the crew; on the home screen it
-                        turns the composer over to the crew. */}
+                    {/* The crew mark: the way into the Crew work rail, where
+                        the long and complex work is gathered. */}
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      aria-label={crewMode ? "Leave crew mode" : "Enter crew mode"}
-                      aria-pressed={crewMode}
-                      onClick={enterCrew}
+                      aria-label="Crew work"
+                      aria-expanded={crewOpen}
+                      onClick={toggleCrew}
                       className="size-[29px]"
                     >
                       <HugeiconsIcon icon={ApertureIcon} strokeWidth={2} />
@@ -239,6 +209,7 @@ function RootLayout() {
                 chatId={chatIdFrom(pathname)}
               />
             ) : null}
+            {showsTopbar ? <CrewPanel open={crewOpen} /> : null}
           </div>
         </SidebarInset>
       </SidebarProvider>

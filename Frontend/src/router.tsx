@@ -15,11 +15,11 @@ import { Route as usageRoute } from "@/routes/usage"
 import { Route as calLiveRoute } from "@/routes/cal-live"
 import { Route as chatRoute } from "@/routes/chat"
 import { Route as crewRoute } from "@/routes/crew"
+import { Route as conversationRoute } from "@/routes/conversation"
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
-  chatRoute,
-  crewRoute,
+  conversationRoute.addChildren([chatRoute, crewRoute]),
   loginRoute,
   signupRoute,
   calLiveRoute,

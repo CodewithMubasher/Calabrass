@@ -2,7 +2,7 @@ import { useEffect } from "react"
 import { useLocation } from "@tanstack/react-router"
 
 import { useSidebar } from "@/components/ui/sidebar"
-import { toggleArtifacts } from "@/lib/panel-store"
+import { toggleArtifacts, toggleCrew } from "@/lib/panel-store"
 import { hasTopbar } from "@/lib/routes"
 
 /** True when the key event came from somewhere the user is typing. */
@@ -19,10 +19,11 @@ function isEditableTarget(target: EventTarget | null) {
 }
 
 /**
- * The bare-key shortcuts: `s` folds the sidebar, `d` opens the artifacts rail.
- * Modifier combinations belong to the browser and the sidebar's own ctrl+b, so
- * anything with a modifier is left alone, and so is anything typed into the
- * composer — `s` and `d` are ordinary letters in a sentence.
+ * The bare-key shortcuts: `s` folds the sidebar, `d` opens the artifacts rail,
+ * `c` opens the crew rail. Modifier combinations belong to the browser and the
+ * sidebar's own ctrl+b, so anything with a modifier is left alone, and so is
+ * anything typed into the composer — `s`, `d` and `c` are ordinary letters in a
+ * sentence.
  *
  * Rendered inside `SidebarProvider`, which is where the sidebar's toggle comes
  * from.
@@ -44,6 +45,9 @@ export function KeyboardShortcuts() {
           break
         case "d":
           if (railAvailable) toggleArtifacts()
+          break
+        case "c":
+          if (railAvailable) toggleCrew()
           break
       }
     }

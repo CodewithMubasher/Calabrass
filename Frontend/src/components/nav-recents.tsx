@@ -5,6 +5,7 @@ import {
   ApertureIcon,
   Delete02Icon,
   FolderOpenIcon,
+  MessageSquareTextIcon,
   MoreHorizontalIcon,
   PencilEdit02Icon,
   PinIcon,
@@ -77,7 +78,15 @@ export function NavRecents() {
                 }
               >
                 <HugeiconsIcon
-                  icon={chat.pinned ? PinIcon : ApertureIcon}
+                  // A crew run wears the crew mark; an ordinary chat wears the
+                  // message mark. A pinned chat wears the pin either way.
+                  icon={
+                    chat.pinned
+                      ? PinIcon
+                      : crew
+                        ? ApertureIcon
+                        : MessageSquareTextIcon
+                  }
                   strokeWidth={2}
                   className="shrink-0"
                 />
