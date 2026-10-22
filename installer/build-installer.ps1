@@ -4,7 +4,7 @@
     Builds Calabrass from source and packs it into the Windows installer.
 
 .DESCRIPTION
-    Produces installer\out\Calabrass-setup-v1.0.2-x64.exe out of the sources
+    Produces installer\out\Calabrass-setup-v1.0.3-x64.exe out of the sources
     alone, in the same three steps a release needs:
 
         1. the desktop app   — Frontend + Go, through Wails

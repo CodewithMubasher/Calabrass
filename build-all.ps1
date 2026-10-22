@@ -8,7 +8,7 @@
     2. Backend + Wails desktop app (go build via wails)
     3. MCP servers (excel-mcp, win-control-mcp)
     4. Inno Setup installer
-    5. Copies Calabrass-setup-v1.0-x64.exe to Desktop
+    5. Copies Calabrass-setup-v<version>-x64.exe to Desktop
 
 .NOTES
     Run from the repo root:  .\build-all.ps1
@@ -27,7 +27,13 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Get-Location).Path
 $desktop = [Environment]::GetFolderPath("Desktop")
 $outDir = Join-Path $repoRoot "installer\out"
-$setupName = "Calabrass-setup-v1.0-x64.exe"
+$issPath = Join-Path $repoRoot "installer\Calabrass.iss"
+$versionMatch = Select-String -Path $issPath -Pattern '^\s*#define AppVersion "(.+)"' | Select-Object -First 1
+if (-not $versionMatch) {
+    Write-Error "Could not read AppVersion out of $issPath"
+    exit 1
+}
+$setupName = "Calabrass-setup-v$($versionMatch.Matches.Groups[1].Value)-x64.exe"
 $setupSrc = Join-Path $outDir $setupName
 $setupDst = Join-Path $desktop $setupName
 
@@ -109,7 +115,7 @@ if (-not $SkipMcp) {
 
 if (-not $SkipInstaller) {
     Write-Step "Installer: Inno Setup"
-    $iss = Join-Path $repoRoot "installer\Calabrass.iss"
+    $iss = $issPath
     if (-not (Test-Path $iss)) { Write-Error "Missing $iss"; exit 1 }
     & $ISCC $iss
 }
