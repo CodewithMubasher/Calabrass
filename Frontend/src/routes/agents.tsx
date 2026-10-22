@@ -54,7 +54,7 @@ function AgentCard({
               {agent.name}
             </span>
             {agent.builtin && (
-              <span className="shrink-0 rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-white/50">
+              <span className="shrink-0 rounded-full border border-[#9D79FF]/40 bg-[#9D79FF]/15 px-2 py-0.5 text-[10px] text-[#9D79FF]">
                 Built-in
               </span>
             )}
@@ -80,9 +80,11 @@ function AgentCard({
       </span>
 
       <span className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-white/35">
-        <span className="rounded-full bg-white/5 px-2 py-0.5">
-          {connectorName || "No connector"}
-        </span>
+        {!agent.builtin && (
+          <span className="rounded-full bg-white/5 px-2 py-0.5">
+            {connectorName || "No connector"}
+          </span>
+        )}
         {agent.altModel ? (
           <span
             title={`${agent.altProvider} · ${agent.altModel}`}
