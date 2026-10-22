@@ -16,6 +16,7 @@ import { PageEmpty, PageLoading } from "@/components/page-shell"
 import { PromptInput } from "@/components/prompt-input"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { Input } from "@/components/ui/input"
 import {
   Dialog,
   DialogContent,
@@ -348,6 +349,7 @@ function AgentDialog({
 }) {
   const [name, setName] = useState(agent.name)
   const [prompt, setPrompt] = useState(agent.prompt)
+  const [description, setDescription] = useState(agent.description ?? "")
   const [systemPrompt, setSystemPrompt] = useState(agent.systemPrompt)
   const [model, setModel] = useState(
     `${agent.provider}::${agent.model}`
@@ -392,6 +394,7 @@ function AgentDialog({
       name: name.trim(),
       prompt: prompt.trim(),
       systemPrompt: systemPrompt.trim(),
+      description: description.trim(),
       // The mode and the connectors are not asked for here any more: a worker
       // is given them by the crew that runs it. What it already has is sent
       // back untouched, so saving never quietly clears them.
@@ -447,6 +450,16 @@ function AgentDialog({
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder="You research a question, weigh the sources, and answer with citations."
                 rows={5}
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-2 block text-sm text-white/60">What it can do (one line the orchestrator reads)</span>
+              <Input
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="You research a question, weigh the sources, and answer with citations."
+                className="w-full h-9 border-white/10 bg-white/5 px-3 text-white/80 placeholder:text-white/30 rounded-lg outline-none focus:border-white/20"
               />
             </label>
 

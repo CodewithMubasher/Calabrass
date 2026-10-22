@@ -172,10 +172,20 @@ func TestAgentModeIsTheDefaultForItsChats(t *testing.T) {
 
 	agents := callAgents(t, server, token, http.MethodPost, "/api/agents",
 		`{"name":"Builder","prompt":"Do the work.","mode":"crew"}`)
-	if len(agents) != 1 {
+	if len(agents) != 2 {
 		t.Fatalf("creating an agent answered with %d of them", len(agents))
 	}
-	agentID := agents[0].ID
+	var created store.AgentRecord
+	for _, a := range agents {
+		if a.Name == "Builder" {
+			created = a
+			break
+		}
+	}
+	if created.Name == "" {
+		t.Fatalf("the created agent was not in the list")
+	}
+	agentID := created.ID
 
 	chat, status := createChat(t, server, token, `{"agentId":"`+agentID+`"}`)
 	if status != http.StatusCreated {

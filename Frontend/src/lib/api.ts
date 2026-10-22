@@ -247,6 +247,11 @@ export const api = {
       method: "DELETE",
     }).then((r) => r.agents ?? []),
 
+  resetAgent: (agentId: string) =>
+    request<{ agents: AgentRow[] }>(`/agents/${agentId}/reset`, {
+      method: "POST",
+    }).then((r) => r.agents ?? []),
+
   deleteMessage: (chatId: string, messageId: string) =>
     request<{ deleted: boolean }>(`/chats/${chatId}/messages/${messageId}`, {
       method: "DELETE",

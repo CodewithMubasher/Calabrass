@@ -31,41 +31,60 @@ func TestAgentEndpoints(t *testing.T) {
 		`{"name":"Researcher","prompt":"Find the primary sources.","mode":"crew",
 		  "connectorId":"c1","provider":"google","model":"gemini-2.5-pro",
 		  "altProvider":"groq","altModel":"llama-3.3-70b"}`)
-	if len(agents) != 1 {
+	if len(agents) != 2 {
 		t.Fatalf("creating an agent answered with %d of them", len(agents))
 	}
-	agent := agents[0]
-	if agent.Name != "Researcher" || agent.Mode != "crew" || agent.Model != "gemini-2.5-pro" {
-		t.Fatalf("the agent came back as %+v", agent)
+	// The list includes the built-in orchestrator and the one we just created.
+	var created store.AgentRecord
+	for _, a := range agents {
+		if a.Name == "Researcher" {
+			created = a
+			break
+		}
 	}
-	if agent.ConnectorID != "c1" || agent.AltProvider != "groq" || agent.AltModel != "llama-3.3-70b" {
-		t.Fatalf("the connector or fallback model was lost: %+v", agent)
+	if created.Name == "" {
+		t.Fatalf("the created agent was not in the list")
 	}
-	if agent.CreatedAt == 0 || agent.UpdatedAt == 0 {
-		t.Errorf("the agent has no timestamps: %+v", agent)
+	if created.Name != "Researcher" || created.Mode != "crew" || created.Model != "gemini-2.5-pro" {
+		t.Fatalf("the agent came back as %+v", created)
+	}
+	if created.ConnectorID != "c1" || created.AltProvider != "groq" || created.AltModel != "llama-3.3-70b" {
+		t.Fatalf("the connector or fallback model was lost: %+v", created)
+	}
+	if created.CreatedAt == 0 || created.UpdatedAt == 0 {
+		t.Errorf("the agent has no timestamps: %+v", created)
 	}
 
 	agents = callAgents(t, server, token, http.MethodGet, "/api/agents", "")
-	if len(agents) != 1 {
+	if len(agents) != 2 {
 		t.Fatalf("the list has %d agents", len(agents))
 	}
 
-	agents = callAgents(t, server, token, http.MethodPut, "/api/agents/"+agent.ID,
+	agents = callAgents(t, server, token, http.MethodPut, "/api/agents/"+created.ID,
 		`{"name":"Researcher","prompt":"Find and cite.","mode":"chat"}`)
-	if len(agents) != 1 {
+	if len(agents) != 2 {
 		t.Fatalf("saving it answered with %d of them", len(agents))
 	}
-	if agents[0].Prompt != "Find and cite." || agents[0].Mode != "chat" {
-		t.Fatalf("the save did not take: %+v", agents[0])
+	// The saved agent is in the list alongside the built-in.
+	var updated store.AgentRecord
+	for _, a := range agents {
+		if a.ID == created.ID {
+			updated = a
+			break
+		}
+	}
+	if updated.Prompt != "Find and cite." || updated.Mode != "chat" {
+		t.Fatalf("the save did not take: %+v", updated)
 	}
 	// The dialog is one form, so a save writes every field it shows; a model the
 	// request leaves out is cleared rather than kept.
-	if agents[0].Model != "" || agents[0].ConnectorID != "" {
-		t.Errorf("a field left out of the save survived: %+v", agents[0])
+	if updated.Model != "" || updated.ConnectorID != "" {
+		t.Errorf("a field left out of the save survived: %+v", updated)
 	}
 
-	agents = callAgents(t, server, token, http.MethodDelete, "/api/agents/"+agent.ID, "")
-	if len(agents) != 0 {
+	agents = callAgents(t, server, token, http.MethodDelete, "/api/agents/"+created.ID, "")
+	// The built-in remains.
+	if len(agents) != 1 {
 		t.Fatalf("after removing it the list has %d agents", len(agents))
 	}
 }

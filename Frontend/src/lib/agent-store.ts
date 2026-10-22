@@ -83,7 +83,10 @@ export async function deleteAgent(agentId: string) {
   notifySuccess(`${name} was removed.`, "Agent removed")
 }
 
-/** Fetch a single agent by ID. */
-export async function getAgent(agentId: string): Promise<AgentRow> {
-  return api.getAgent(agentId)
+/** Reset a built-in agent to its shipped form. Throws on failure. */
+export async function resetAgent(agentId: string) {
+  const name =
+    state.agents.find((agent) => agent.id === agentId)?.name ?? "The agent"
+  setState({ agents: await api.resetAgent(agentId) })
+  notifySuccess(`${name} was reset to default.`, "Agent reset")
 }

@@ -215,21 +215,29 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_tasks(enabled, last_ru
 
 -- One row per sub-agent: a named instruction, the mode it runs in, the MCP
 -- connector it may use, and the model it prefers with a fallback beside it.
--- system_prompt is the explicit system prompt replacement; when empty, prompt is used.
+-- system_prompt is the explicit system prompt replacement; when empty, prompt is
+-- used. description is the one line that says what the agent is for, which is
+-- what the orchestrator reads to decide whether to hand work to it.
+--
+-- The key is (user_id, id) rather than id alone: the agents the app ships with
+-- have the same id for every account, so two accounts must be able to hold
+-- their own saved version of the same built-in.
 CREATE TABLE IF NOT EXISTS agents (
-	id            TEXT PRIMARY KEY,
+	id            TEXT NOT NULL,
 	user_id       TEXT NOT NULL DEFAULT '',
 	name          TEXT NOT NULL,
 	prompt        TEXT NOT NULL DEFAULT '',
 	system_prompt TEXT NOT NULL DEFAULT '',
 	mode          TEXT NOT NULL DEFAULT 'chat',
+	description   TEXT NOT NULL DEFAULT '',
 	connector_id  TEXT NOT NULL DEFAULT '',
 	provider      TEXT NOT NULL DEFAULT '',
 	model         TEXT NOT NULL DEFAULT '',
 	alt_provider  TEXT NOT NULL DEFAULT '',
 	alt_model     TEXT NOT NULL DEFAULT '',
 	created_at    INTEGER NOT NULL,
-	updated_at    INTEGER NOT NULL
+	updated_at    INTEGER NOT NULL,
+	PRIMARY KEY (user_id, id)
 );
 
 -- One row per local account. Passwords are stored as bcrypt hashes; the desktop
@@ -291,11 +299,19 @@ CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_events(provider_id, creat
 		{"chats", "agent_id", "agent_id TEXT NOT NULL DEFAULT ''"},
 		{"chats", "mode", "mode TEXT NOT NULL DEFAULT 'chat'"},
 		{"agents", "system_prompt", "system_prompt TEXT NOT NULL DEFAULT ''"},
+		{"agents", "description", "description TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, col := range added {
 		if err := s.ensureColumn(ctx, col.table, col.column, col.ddl); err != nil {
 			return err
 		}
+	}
+
+	// The agents table used to key on the id alone. The agents the app ships
+	// with have the same id for every account, so the key has to carry the
+	// account with it.
+	if err := s.rebuildAgents(ctx); err != nil {
+		return err
 	}
 
 	// The two modes used to be "build" and "plan". Plan is gone, and build is
@@ -370,8 +386,43 @@ func (s *Store) hasColumn(ctx context.Context, table, column string) (bool, erro
 	return count > 0, nil
 }
 
-// renameModes rewrites the two old mode names onto the ones this build uses.
-//
+// rebuildAgents rebuilds the agents table onto the (user_id, id) key without
+// losing any saved agents. A row that was left by the build that keyed on the
+// id alone becomes an unowned row (user_id = '') and is assigned to the admin
+// account once it has been seeded.
+func (s *Store) rebuildAgents(ctx context.Context) error {
+	const rebuild = `
+DROP TABLE IF EXISTS agents_user_keyed;
+CREATE TABLE agents_user_keyed (
+	user_id       TEXT NOT NULL DEFAULT '',
+	id            TEXT NOT NULL,
+	name          TEXT NOT NULL,
+	prompt        TEXT NOT NULL DEFAULT '',
+	system_prompt TEXT NOT NULL DEFAULT '',
+	mode          TEXT NOT NULL DEFAULT 'chat',
+	description   TEXT NOT NULL DEFAULT '',
+	connector_id  TEXT NOT NULL DEFAULT '',
+	provider      TEXT NOT NULL DEFAULT '',
+	model         TEXT NOT NULL DEFAULT '',
+	alt_provider  TEXT NOT NULL DEFAULT '',
+	alt_model     TEXT NOT NULL DEFAULT '',
+	created_at    INTEGER NOT NULL,
+	updated_at    INTEGER NOT NULL,
+	PRIMARY KEY (user_id, id)
+);
+INSERT INTO agents_user_keyed (user_id, id, name, prompt, system_prompt, mode, description, connector_id, provider, model, alt_provider, alt_model, created_at, updated_at)
+SELECT '', id, name, prompt, system_prompt, mode, '', connector_id, provider, model, alt_provider, alt_model, created_at, updated_at FROM agents;
+DROP TABLE agents;
+ALTER TABLE agents_user_keyed RENAME TO agents;
+`
+	if _, err := s.db.ExecContext(ctx, rebuild); err != nil {
+		return fmt.Errorf("store: rebuild agents: %w", err)
+	}
+	return nil
+}
+
+// rebuildProviders moves an older single-key providers table onto the
+// per-account (user_id, id) key without losing any configured provider.
 // The modes used to be "build" and "plan". Plan is gone — a conversation that
 // was a plan carries on as an ordinary one — and build is the ordinary chat, so
 // both names land on "chat". It is idempotent: a row that already says "chat"
@@ -1237,6 +1288,8 @@ type AgentRecord struct {
 	SystemPrompt string `json:"systemPrompt"` // Explicit system prompt (optional, falls back to Prompt)
 	// Mode is "chat" or "crew".
 	Mode string `json:"mode"`
+	// Description is what the agent is for, in one line. The orchestrator reads it.
+	Description string `json:"description"`
 	// ConnectorID is the MCP connector the agent may use; empty for none.
 	ConnectorID string `json:"connectorId"`
 	Provider    string `json:"provider"`
@@ -1247,12 +1300,12 @@ type AgentRecord struct {
 	UpdatedAt   int64  `json:"updatedAt"`
 }
 
-const agentColumns = `id, name, prompt, system_prompt, mode, connector_id, provider, model, alt_provider, alt_model, created_at, updated_at`
+const agentColumns = `id, name, prompt, system_prompt, mode, description, connector_id, provider, model, alt_provider, alt_model, created_at, updated_at`
 
 func scanAgent(row interface{ Scan(...any) error }) (AgentRecord, error) {
 	var rec AgentRecord
 	if err := row.Scan(
-		&rec.ID, &rec.Name, &rec.Prompt, &rec.SystemPrompt, &rec.Mode, &rec.ConnectorID,
+		&rec.ID, &rec.Name, &rec.Prompt, &rec.SystemPrompt, &rec.Mode, &rec.Description, &rec.ConnectorID,
 		&rec.Provider, &rec.Model, &rec.AltProvider, &rec.AltModel,
 		&rec.CreatedAt, &rec.UpdatedAt,
 	); err != nil {
@@ -1306,11 +1359,11 @@ func (s *Store) CreateAgent(ctx context.Context, rec AgentRecord, userID ...stri
 
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO agents (
-			id, user_id, name, prompt, system_prompt, mode, connector_id, provider, model,
+			id, user_id, name, prompt, system_prompt, mode, description, connector_id, provider, model,
 			alt_provider, alt_model, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		rec.ID, ownerOf(userID), rec.Name, rec.Prompt, rec.SystemPrompt, rec.Mode, rec.ConnectorID,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		rec.ID, ownerOf(userID), rec.Name, rec.Prompt, rec.SystemPrompt, rec.Mode, rec.Description, rec.ConnectorID,
 		rec.Provider, rec.Model, rec.AltProvider, rec.AltModel,
 		rec.CreatedAt, rec.UpdatedAt,
 	); err != nil {
@@ -1323,11 +1376,11 @@ func (s *Store) CreateAgent(ctx context.Context, rec AgentRecord, userID ...stri
 func (s *Store) UpdateAgent(ctx context.Context, id string, rec AgentRecord, userID ...string) (AgentRecord, error) {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE agents SET
-			name = ?, prompt = ?, system_prompt = ?, mode = ?, connector_id = ?,
+			name = ?, prompt = ?, system_prompt = ?, mode = ?, description = ?, connector_id = ?,
 			provider = ?, model = ?, alt_provider = ?, alt_model = ?,
 			updated_at = ?
 		WHERE id = ? AND user_id = ?`,
-		rec.Name, rec.Prompt, rec.SystemPrompt, rec.Mode, rec.ConnectorID,
+		rec.Name, rec.Prompt, rec.SystemPrompt, rec.Mode, rec.Description, rec.ConnectorID,
 		rec.Provider, rec.Model, rec.AltProvider, rec.AltModel,
 		time.Now().UnixMilli(), id, ownerOf(userID))
 	if err != nil {
@@ -1356,8 +1409,53 @@ func (s *Store) DeleteAgent(ctx context.Context, id string, userID ...string) er
 	return nil
 }
 
+// UpsertAgent writes an agent with a specific id, whether or not it was
+// already in the database. This is how edits to built-ins work: the built-in's
+// fields are used until the account saves an override, and this writes that
+// override without creating a second agent.
+func (s *Store) UpsertAgent(ctx context.Context, id string, rec AgentRecord, userID ...string) (AgentRecord, error) {
+	now := time.Now().UnixMilli()
+	rec.ID = id
+	rec.UpdatedAt = now
+
+	// If it doesn't exist yet, set created_at too.
+	_, err := s.GetAgent(ctx, id, userID...)
+	if errors.Is(err, ErrNotFound) {
+		rec.CreatedAt = now
+		if _, err := s.db.ExecContext(ctx, `
+			INSERT INTO agents (
+				id, user_id, name, prompt, system_prompt, mode, description, connector_id, provider, model,
+				alt_provider, alt_model, created_at, updated_at
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, ownerOf(userID), rec.Name, rec.Prompt, rec.SystemPrompt, rec.Mode, rec.Description, rec.ConnectorID,
+			rec.Provider, rec.Model, rec.AltProvider, rec.AltModel,
+			now, now,
+		); err != nil {
+			return AgentRecord{}, fmt.Errorf("store: upsert agent insert: %w", err)
+		}
+		return rec, nil
+	}
+	if err != nil {
+		return AgentRecord{}, fmt.Errorf("store: upsert agent check: %w", err)
+	}
+
+	// It exists — update it.
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE agents SET
+			name = ?, prompt = ?, system_prompt = ?, mode = ?, description = ?, connector_id = ?,
+			provider = ?, model = ?, alt_provider = ?, alt_model = ?,
+			updated_at = ?
+		WHERE id = ? AND user_id = ?`,
+		rec.Name, rec.Prompt, rec.SystemPrompt, rec.Mode, rec.Description, rec.ConnectorID,
+		rec.Provider, rec.Model, rec.AltProvider, rec.AltModel,
+		now, id, ownerOf(userID)); err != nil {
+		return AgentRecord{}, fmt.Errorf("store: upsert agent update: %w", err)
+	}
+	return rec, nil
+}
+
 // ownerOf reads the optional account id at the end of a store method. It is
-// empty only for migrations and low-level tests; every request passes one.
 func ownerOf(userID []string) string {
 	if len(userID) == 0 {
 		return ""

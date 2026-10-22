@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { Add01Icon, BotIcon } from "@hugeicons/core-free-icons"
+import { Add01Icon, BotIcon, Delete02Icon, RotateCwIcon } from "@hugeicons/core-free-icons"
 import { createRoute } from "@tanstack/react-router"
 
 import { AgentDialog } from "@/components/agent-dialog"
@@ -11,7 +11,7 @@ import {
   SearchInput,
 } from "@/components/page-shell"
 import { Button } from "@/components/ui/button"
-import { loadAgents, useAgentsState } from "@/lib/agent-store"
+import { loadAgents, useAgentsState, deleteAgent, resetAgent } from "@/lib/agent-store"
 import { loadConnectors, useConnectorsState } from "@/lib/connector-store"
 import type { AgentRow } from "@/types/chat"
 import { Route as rootRoute } from "@/routes/__root"
@@ -26,10 +26,14 @@ function AgentCard({
   agent,
   connectorName,
   onClick,
+  onDelete,
+  onReset,
 }: {
   agent: AgentRow
   connectorName: string
   onClick: () => void
+  onDelete: () => void
+  onReset: () => void
 }) {
   return (
     <div
@@ -45,8 +49,15 @@ function AgentCard({
           />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-white/90">
-            {agent.name}
+          <span className="flex items-center gap-2">
+            <span className="block truncate text-sm font-medium text-white/90">
+              {agent.name}
+            </span>
+            {agent.builtin && (
+              <span className="shrink-0 rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-white/50">
+                Built-in
+              </span>
+            )}
           </span>
           <span
             title={
@@ -85,6 +96,27 @@ function AgentCard({
             Custom System Prompt
           </span>
         ) : null}
+        {agent.builtin ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto gap-1 text-[11px] text-white/60 hover:text-white"
+            onClick={(e) => { e.stopPropagation(); onReset(); }}
+          >
+            <HugeiconsIcon icon={RotateCwIcon} strokeWidth={1.8} className="size-3.5" />
+            Reset to default
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto gap-1 text-[11px] text-white/60 hover:text-white hover:text-red-400"
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          >
+            <HugeiconsIcon icon={Delete02Icon} strokeWidth={1.8} className="size-3.5" />
+            Delete
+          </Button>
+        )}
       </span>
     </div>
   )
@@ -157,6 +189,8 @@ function AgentsPage() {
               agent={agent}
               connectorName={connectorNames.get(agent.connectorIds?.[0]) ?? ""}
               onClick={() => setEditing(agent)}
+              onDelete={() => void deleteAgent(agent.id)}
+              onReset={() => void resetAgent(agent.id)}
             />
           ))}
         </div>

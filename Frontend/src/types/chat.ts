@@ -225,6 +225,8 @@ export interface AgentRow {
   /** Explicit system prompt replacement (optional, falls back to prompt) */
   systemPrompt: string
   mode: AgentMode
+  /** What the agent is for, in one line. The orchestrator reads this. */
+  description: string
   /** The MCP connectors it may use; empty for none. */
   connectorIds: string[]
   provider: string
@@ -233,6 +235,8 @@ export interface AgentRow {
   altModel: string
   createdAt: number
   updatedAt: number
+  /** Whether this agent is one the app ships with. Built-ins cannot be deleted. */
+  builtin: boolean
 }
 
 /** The fields the Agents page can write. */
@@ -242,6 +246,8 @@ export interface AgentInput {
   /** Explicit system prompt replacement (optional, falls back to prompt) */
   systemPrompt: string
   mode: AgentMode
+  /** What the agent is for, in one line. The orchestrator reads this. */
+  description: string
   connectorIds: string[]
   provider: string
   model: string

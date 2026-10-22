@@ -145,6 +145,7 @@ export function AgentDialog({
 }) {
   const [name, setName] = useState(agent?.name ?? "")
   const [prompt, setPrompt] = useState(agent?.prompt ?? "")
+  const [description, setDescription] = useState(agent?.description ?? "")
   const [model, setModel] = useState(
     encodeModel(agent?.provider ?? "", agent?.model ?? "")
   )
@@ -219,6 +220,7 @@ export function AgentDialog({
       prompt: prompt.trim(),
       systemPrompt: prompt.trim(), // Agent prompt IS the system prompt
       mode: agent?.mode ?? "chat",
+      description: description.trim(),
       connectorIds: agent?.connectorIds ?? [],
       provider: preferred.provider,
       model: preferred.model,
@@ -296,6 +298,15 @@ export function AgentDialog({
               />
             </Field>
 
+            <Field label="What it can do (one line the orchestrator reads)">
+              <Input
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                placeholder="You research a question, weigh the sources, and answer with citations."
+                className="h-9 border-white/10 bg-white/5 px-3 text-white/80 placeholder:text-white/30"
+              />
+            </Field>
+
             <div className="grid grid-cols-2 gap-4">
               <Field label="Default model">
                 <Picker
@@ -319,7 +330,7 @@ export function AgentDialog({
           </div>
 
           <DialogFooter className="sm:justify-between">
-            {agent ? (
+            {agent && !agent.builtin ? (
               <Button
                 type="button"
                 variant="destructive"
