@@ -10,6 +10,7 @@ import (
 
 	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/ai"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/crew"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
 )
 
@@ -113,6 +114,11 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 		if mode == "" {
 			mode = agent.NormalMode(agentRec.Mode)
 		}
+		// The Orchestrator is the crew, so a chat with it is a crew chat even
+		// when the composer left its mode on chat.
+		if crew.IsOrchestrator(agentID) {
+			mode = agent.ModeCrew
+		}
 		// If still no provider/model, resolve from registry
 		if providerID == "" || modelID == "" {
 			providerID, modelID = s.resolveModelFor(r.Context(), user.ID, providerID, modelID)
@@ -123,6 +129,13 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 
 	if mode == "" {
 		mode = agent.ModeChat
+	}
+
+	// A crew chat that named no agent belongs to the Orchestrator. Crew mode is
+	// how the crew is reached; without this the ordinary coding harness answers
+	// and does the work itself instead of writing a todo and delegating.
+	if agentID == "" && mode == agent.ModeCrew {
+		agentID = crew.BuiltinOrchestratorID
 	}
 
 	if providerID == "" || modelID == "" {

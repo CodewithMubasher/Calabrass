@@ -79,9 +79,20 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 	// tools. Its whole job is to ask what it does not know and to hand work to
 	// a worker; giving it a shell and a text editor would invite it to do the
 	// work itself, which is exactly what its prompt tells it not to do.
-	orchestrator := crew.IsOrchestrator(agentID)
+	//
+	// A crew chat that names no agent is still the Orchestrator's: crew mode is
+	// how the crew is reached, and an empty agent there used to fall through to
+	// the ordinary coding harness and do the task itself.
+	orchestrator := crew.IsOrchestrator(agentID) ||
+		(agentID == "" && mode == agent.ModeCrew)
 	if orchestrator {
-		return s.orchestratorTurn(ctx, userID, workspace, chatID, agentSystemPrompt)
+		prompt := agentSystemPrompt
+		if strings.TrimSpace(prompt) == "" {
+			if builtin, ok := crew.Find(crew.BuiltinOrchestratorID); ok {
+				prompt = builtin.Persona()
+			}
+		}
+		return s.orchestratorTurn(ctx, userID, workspace, chatID, prompt)
 	}
 
 	// Both ordinary modes have the same tools: chat is for ordinary work, crew
