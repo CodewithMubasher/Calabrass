@@ -19,6 +19,10 @@ import (
 const (
 	// CrewDirName is the folder inside a workspace that holds crew work.
 	CrewDirName = ".crew"
+	// ChatsSubdir groups crew work by chat. Two conversations in one workspace
+	// must not overwrite each other's todo or report, so each gets its own
+	// folder beneath this one.
+	ChatsSubdir = "chats"
 	// OrchestratorSubdir holds the todos the Orchestrator writes.
 	OrchestratorSubdir = "orchestrator"
 	// WorkersSubdir holds one folder per worker, each with its report.
@@ -149,11 +153,27 @@ func ReportTaskTool(write func(args ReportTaskArgs) (string, error)) goai.Tool {
 		})
 }
 
-// CrewDirs returns the .crew directories for a workspace: where the todos live
-// and where the worker folders live.
-func CrewDirs(workspace string) (orchestratorDir, workersDir string) {
-	crew := filepath.Join(workspace, CrewDirName)
-	return filepath.Join(crew, OrchestratorSubdir), filepath.Join(crew, WorkersSubdir)
+// CrewRoot is the folder one chat's crew work lives in: .crew/chats/<chat>.
+// Scoping it by chat is what keeps two conversations in the same workspace
+// from sharing a todo or a report.
+func CrewRoot(workspace, chatID string) string {
+	return filepath.Join(workspace, CrewDirName, ChatsSubdir, crewChatKey(chatID))
+}
+
+// CrewDirs returns one chat's crew directories: where the todos live and where
+// the worker folders live.
+func CrewDirs(workspace, chatID string) (orchestratorDir, workersDir string) {
+	root := CrewRoot(workspace, chatID)
+	return filepath.Join(root, OrchestratorSubdir), filepath.Join(root, WorkersSubdir)
+}
+
+// crewChatKey is a chat id that is safe to use as a folder name. An empty id
+// gets a stable name of its own rather than collapsing to the worker default.
+func crewChatKey(chatID string) string {
+	if strings.TrimSpace(chatID) == "" {
+		return "unknown"
+	}
+	return safeName(chatID)
 }
 
 // DelegateTaskTodoPath is where the todo for one worker is written.
@@ -168,13 +188,13 @@ func DelegateTaskReportPath(workersDir, workerID string) string {
 
 // DelegateTaskTodoRel is the todo path as the workspace-relative form the UI
 // and the worker use, always with forward slashes.
-func DelegateTaskTodoRel(workerID string) string {
-	return pathSlash(CrewDirName, OrchestratorSubdir, safeName(workerID)+TodoSuffix)
+func DelegateTaskTodoRel(chatID, workerID string) string {
+	return pathSlash(CrewDirName, ChatsSubdir, crewChatKey(chatID), OrchestratorSubdir, safeName(workerID)+TodoSuffix)
 }
 
 // DelegateTaskReportRel is the report path in workspace-relative form.
-func DelegateTaskReportRel(workerID string) string {
-	return pathSlash(CrewDirName, WorkersSubdir, safeName(workerID), ReportFileName)
+func DelegateTaskReportRel(chatID, workerID string) string {
+	return pathSlash(CrewDirName, ChatsSubdir, crewChatKey(chatID), WorkersSubdir, safeName(workerID), ReportFileName)
 }
 
 // NormalizeReportStatus maps what a model wrote onto the three statuses the

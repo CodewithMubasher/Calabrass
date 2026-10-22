@@ -116,10 +116,10 @@ func newCrewTestServer(t *testing.T) (*Server, *agent.Workspace) {
 }
 
 // readTodo reads the todo delegateTask wrote for one worker.
-func readTodo(t *testing.T, workspaceRoot, workerID string) agent.DelegateTaskTodo {
+func readTodo(t *testing.T, workspaceRoot, chatID, workerID string) agent.DelegateTaskTodo {
 	t.Helper()
 
-	orchestratorDir, _ := agent.CrewDirs(workspaceRoot)
+	orchestratorDir, _ := agent.CrewDirs(workspaceRoot, chatID)
 	data, err := os.ReadFile(agent.DelegateTaskTodoPath(orchestratorDir, workerID))
 	if err != nil {
 		t.Fatalf("read the todo for %s: %v", workerID, err)
@@ -147,7 +147,7 @@ func TestDelegateTaskUsesTheOnlyWorkerWhenTheIDIsMissing(t *testing.T) {
 		t.Fatalf("the report is not for the Frontend Developer:\n%s", report)
 	}
 
-	todo := readTodo(t, ws.Root(), crew.BuiltinFrontendDeveloperID)
+	todo := readTodo(t, ws.Root(), "chat-1", crew.BuiltinFrontendDeveloperID)
 	if todo.WorkerID != crew.BuiltinFrontendDeveloperID {
 		t.Fatalf("the todo went to %q, want the Frontend Developer", todo.WorkerID)
 	}
@@ -170,7 +170,7 @@ func TestDelegateTaskResolvesTheWorkerByName(t *testing.T) {
 				t.Fatalf("delegating to %q: %v", wanted, err)
 			}
 
-			todo := readTodo(t, ws.Root(), crew.BuiltinFrontendDeveloperID)
+			todo := readTodo(t, ws.Root(), "chat-1", crew.BuiltinFrontendDeveloperID)
 			if todo.WorkerID != crew.BuiltinFrontendDeveloperID {
 				t.Fatalf("the todo went to %q", todo.WorkerID)
 			}
@@ -224,10 +224,11 @@ func TestDelegateTaskUnknownIDListsTheWorkers(t *testing.T) {
 
 // Only the crew's JSON work belongs in the rail. The atomic writer leaves a
 // .tmp beside each file for an instant, and the folder may hold notes or diffs
-// a person put there; neither is a todo or a report.
-func TestScanCrewListsOnlyJSONWork(t *testing.T) {
+// a person put there; neither is a todo or a report. Another chat's files are
+// not this chat's work either, even in the same workspace.
+func TestScanCrewListsOnlyThisChatsJSONWork(t *testing.T) {
 	root := t.TempDir()
-	orchestratorDir, workersDir := agent.CrewDirs(root)
+	orchestratorDir, workersDir := agent.CrewDirs(root, "chat-1")
 
 	if err := os.MkdirAll(orchestratorDir, 0o755); err != nil {
 		t.Fatalf("create orchestrator dir: %v", err)
@@ -236,11 +237,17 @@ func TestScanCrewListsOnlyJSONWork(t *testing.T) {
 		t.Fatalf("create worker dir: %v", err)
 	}
 
+	otherOrchestrator, _ := agent.CrewDirs(root, "chat-2")
+	if err := os.MkdirAll(otherOrchestrator, 0o755); err != nil {
+		t.Fatalf("create the other chat's dir: %v", err)
+	}
+
 	files := map[string]string{
 		filepath.Join(orchestratorDir, "builtin-frontend-developer.todo.json"):     `{"task":"Build it"}`,
 		filepath.Join(workersDir, "builtin-frontend-developer", "report.json"):     `{"status":"completed"}`,
 		filepath.Join(orchestratorDir, "builtin-frontend-developer.todo.json.tmp"): "half a write",
 		filepath.Join(orchestratorDir, "notes.txt"):                                "not crew work",
+		filepath.Join(otherOrchestrator, "builtin-frontend-developer.todo.json"):   `{"task":"Another chat"}`,
 	}
 	for path, body := range files {
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
@@ -248,7 +255,7 @@ func TestScanCrewListsOnlyJSONWork(t *testing.T) {
 		}
 	}
 
-	listed, signature := scanCrew(root)
+	listed, signature := scanCrew(root, "chat-1")
 	if len(listed) != 2 {
 		t.Fatalf("scanCrew listed %d files, want the todo and the report: %+v", len(listed), listed)
 	}
@@ -259,15 +266,18 @@ func TestScanCrewListsOnlyJSONWork(t *testing.T) {
 	paths := map[string]bool{}
 	for _, file := range listed {
 		paths[file.Path] = true
-		if !strings.HasPrefix(file.Path, agent.CrewDirName+"/") {
-			t.Errorf("path %q is not relative to the workspace", file.Path)
+		if !strings.HasPrefix(file.Path, agent.CrewDirName+"/"+agent.ChatsSubdir+"/chat-1/") {
+			t.Errorf("path %q is not in this chat's crew folder", file.Path)
 		}
 	}
-	if !paths[".crew/orchestrator/builtin-frontend-developer.todo.json"] {
+	if !paths[".crew/chats/chat-1/orchestrator/builtin-frontend-developer.todo.json"] {
 		t.Errorf("the todo was not listed: %v", paths)
 	}
-	if !paths[".crew/workers/builtin-frontend-developer/report.json"] {
+	if !paths[".crew/chats/chat-1/workers/builtin-frontend-developer/report.json"] {
 		t.Errorf("the report was not listed: %v", paths)
+	}
+	if paths[".crew/chats/chat-2/orchestrator/builtin-frontend-developer.todo.json"] {
+		t.Errorf("another chat's todo was listed: %v", paths)
 	}
 }
 

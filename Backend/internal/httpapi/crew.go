@@ -34,7 +34,8 @@ const crewPollInterval = 400 * time.Millisecond
 // listing whenever anything in it changes. The first snapshot goes out with the
 // connection, so opening the panel has no loading state.
 func (s *Server) handleCrewStream(w http.ResponseWriter, r *http.Request) {
-	ws, _, err := s.artifactsWorkspace(r.Context(), currentUser(r.Context()).ID, r.URL.Query().Get("chatId"))
+	chatID := strings.TrimSpace(r.URL.Query().Get("chatId"))
+	ws, _, err := s.artifactsWorkspace(r.Context(), currentUser(r.Context()).ID, chatID)
 	if err != nil {
 		writeError(w, artifactStatus(err), err)
 		return
@@ -52,7 +53,7 @@ func (s *Server) handleCrewStream(w http.ResponseWriter, r *http.Request) {
 	sent := false
 	var last string
 	for {
-		if files, signature := scanCrew(ws.Root()); !sent || signature != last {
+		if files, signature := scanCrew(ws.Root(), chatID); !sent || signature != last {
 			sent, last = true, signature
 			if err := stream.event("crew", artifactSnapshot{Files: files}); err != nil {
 				return
@@ -67,11 +68,13 @@ func (s *Server) handleCrewStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// scanCrew lists the JSON files under .crew, newest first, and returns a
-// signature of everything the listing shows. Paths stay relative to the
-// workspace root, because that is what the artifact detail reads them by.
-func scanCrew(root string) ([]artifactPayload, string) {
-	crewRoot := filepath.Join(root, agent.CrewDirName)
+// scanCrew lists one chat's JSON crew files, newest first, and returns a
+// signature of everything the listing shows. It reads only .crew/chats/<chat>,
+// so a panel never shows another conversation's todo or report. Paths stay
+// relative to the workspace root, because that is what the artifact detail
+// reads them by.
+func scanCrew(root, chatID string) ([]artifactPayload, string) {
+	crewRoot := agent.CrewRoot(root, chatID)
 	files := make([]artifactPayload, 0, 16)
 	var signature strings.Builder
 
@@ -280,7 +283,7 @@ func (s *Server) delegateTask(ctx context.Context, userID, chatID, workspaceRoot
 	lock.Lock()
 	defer lock.Unlock()
 
-	orchestratorDir, workersDir := agent.CrewDirs(workspaceRoot)
+	orchestratorDir, workersDir := agent.CrewDirs(workspaceRoot, chatID)
 	reportPath := agent.DelegateTaskReportPath(workersDir, worker.ID)
 	if err := os.MkdirAll(orchestratorDir, 0o755); err != nil {
 		return "", fmt.Errorf("create the crew folder: %w", err)
@@ -296,8 +299,8 @@ func (s *Server) delegateTask(ctx context.Context, userID, chatID, workspaceRoot
 		Context:    strings.TrimSpace(args.Context),
 		Workspace:  workspaceRoot,
 		CreatedAt:  agent.NowRFC3339(),
-		TodoPath:   agent.DelegateTaskTodoRel(worker.ID),
-		ReportPath: agent.DelegateTaskReportRel(worker.ID),
+		TodoPath:   agent.DelegateTaskTodoRel(chatID, worker.ID),
+		ReportPath: agent.DelegateTaskReportRel(chatID, worker.ID),
 	}
 	todoBytes, err := agent.MarshalIndentJSON(todo)
 	if err != nil {
