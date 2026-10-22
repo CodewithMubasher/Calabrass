@@ -72,11 +72,11 @@ type Message struct {
 	// Replay is the provider transcript for the turn, kept so a later turn can
 	// replay its tool calls. It is an implementation detail and never sent to
 	// the frontend.
-	Replay    json.RawMessage `json:"-"`
+	Replay json.RawMessage `json:"-"`
 	// Compacted indicates whether this message's trace/replay has been replaced
 	// with a one-line summary to save context space.
-	Compacted bool `json:"compacted,omitempty"`
-	CreatedAt int64           `json:"createdAt"`
+	Compacted bool  `json:"compacted,omitempty"`
+	CreatedAt int64 `json:"createdAt"`
 }
 
 // ChatDetail is a chat together with its messages.
@@ -529,10 +529,13 @@ func jsonText(raw json.RawMessage) string {
 	return string(raw)
 }
 
-// rawJSON turns a stored column back into JSON, treating an empty column as
-// "nothing stored" rather than as an invalid document.
+// rawJSON turns a stored column back into JSON, treating an empty or malformed
+// column as "nothing stored" rather than as an invalid document. Older builds
+// wrote compacted summaries that were not valid JSON; a row like that must not
+// break the chat it belongs to.
 func rawJSON(text string) json.RawMessage {
-	if strings.TrimSpace(text) == "" {
+	text = strings.TrimSpace(text)
+	if text == "" || !json.Valid([]byte(text)) {
 		return nil
 	}
 	return json.RawMessage(text)
@@ -661,9 +664,9 @@ func (s *Store) ListMessages(ctx context.Context, chatID string) ([]Message, err
 	messages := []Message{}
 	for rows.Next() {
 		var (
-			m       Message
-			trace   string
-			replay  string
+			m         Message
+			trace     string
+			replay    string
 			compacted int
 		)
 		if err := rows.Scan(
@@ -784,9 +787,23 @@ func (s *Store) CompactMessages(ctx context.Context, chatID string, keepCount in
 		if summary == "" {
 			continue
 		}
-		_, err := s.db.ExecContext(ctx, `
+
+		// Both columns are JSON the API and the next turn read back, so they
+		// have to stay valid documents. The trace becomes an empty step list —
+		// the reply's text already says what happened — and the replay becomes
+		// one assistant sentence, which is what the model sees in place of the
+		// tool calls it used to have.
+		replay, err := json.Marshal([]map[string]any{{
+			"Role":    "assistant",
+			"Content": []map[string]any{{"Type": "text", "Text": summary}},
+		}})
+		if err != nil {
+			return compacted, fmt.Errorf("store: compact message %s: %w", m.id, err)
+		}
+
+		_, err = s.db.ExecContext(ctx, `
 			UPDATE messages SET trace = ?, replay = ?, compacted = 1 WHERE id = ?`,
-			`["summary": "` + summary + `"]`, `["summary": "` + summary + `"]`, m.id)
+			`{"steps":[]}`, string(replay), m.id)
 		if err != nil {
 			return compacted, fmt.Errorf("store: compact message %s: %w", m.id, err)
 		}
