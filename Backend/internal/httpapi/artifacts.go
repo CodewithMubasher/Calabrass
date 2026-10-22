@@ -57,6 +57,7 @@ var artifactSkipDirs = map[string]bool{
 	".git":         true,
 	".next":        true,
 	".cache":       true,
+	".crew":        true, // crew work has its own rail
 	".venv":        true,
 	"venv":         true,
 	"node_modules": true,

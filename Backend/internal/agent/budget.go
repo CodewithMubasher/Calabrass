@@ -139,6 +139,15 @@ func (rs *RunState) ConsecutiveFail() int {
 	return rs.consecutiveFail
 }
 
+// SetMaxConsecutiveFail changes this run's failure cap. A worker is held to two
+// failures; the ordinary modes keep the default. It is set before the run starts,
+// and the wrapped tools see it because they hold this same state.
+func (rs *RunState) SetMaxConsecutiveFail(n int) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	rs.budget.MaxConsecutiveFail = n
+}
+
 // IsPaused returns whether the run is paused.
 func (rs *RunState) IsPaused() (bool, string) {
 	rs.mu.Lock()

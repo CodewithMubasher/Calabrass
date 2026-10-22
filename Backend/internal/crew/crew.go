@@ -20,6 +20,7 @@ import (
 )
 
 //go:embed prompts/orchestrator.md
+//go:embed prompts/frontend-developer.md
 var promptFS embed.FS
 
 // BuiltinIDPrefix marks the ids of the agents the app ships with. Every
@@ -27,12 +28,29 @@ var promptFS embed.FS
 // one and a built-in can never be mistaken for a custom agent.
 const BuiltinIDPrefix = "builtin-"
 
-// BuiltinOrchestratorID is the one agent the app ships with today.
-const BuiltinOrchestratorID = BuiltinIDPrefix + "orchestrator"
+// The agents the app ships with. The Orchestrator plans; the workers do.
+const (
+	BuiltinOrchestratorID      = BuiltinIDPrefix + "orchestrator"
+	BuiltinFrontendDeveloperID = BuiltinIDPrefix + "frontend-developer"
+)
+
+// The two roles a built-in can have. A built-in is an orchestrator when its id
+// is the Orchestrator's; every other built-in is a worker the crew can hand
+// work to.
+const (
+	RoleOrchestrator = "orchestrator"
+	RoleWorker       = "worker"
+)
 
 // IsBuiltinID reports whether an id names an agent the app ships with.
 func IsBuiltinID(id string) bool {
 	return strings.HasPrefix(strings.TrimSpace(id), BuiltinIDPrefix)
+}
+
+// IsOrchestrator reports whether an id is the Orchestrator's. That id is what
+// decides which tools and which prompt a crew run is given.
+func IsOrchestrator(id string) bool {
+	return strings.TrimSpace(id) == BuiltinOrchestratorID
 }
 
 // Builtin is one agent as the app ships it.
@@ -47,12 +65,16 @@ type Builtin struct {
 	Description string
 	// Mode is the operating mode the agent runs in.
 	Mode string
+	// Role is "orchestrator" or "worker".
+	Role string
 	// PromptName is the embedded document the agent's prompt starts as.
 	PromptName string
+	// Skills are the skill folders a worker must read before it works.
+	Skills []string
 }
 
 // Builtins returns the agents the app ships with, in the order they are
-// shown.
+// shown: the Orchestrator first, then the workers.
 func Builtins() []Builtin {
 	return []Builtin{
 		{
@@ -60,7 +82,17 @@ func Builtins() []Builtin {
 			Name:        "Orchestrator",
 			Description: "Understands what the user needs, plans the work, hands it to the right worker, and reports back.",
 			Mode:        store.ModeCrew,
+			Role:        RoleOrchestrator,
 			PromptName:  "orchestrator.md",
+		},
+		{
+			ID:          BuiltinFrontendDeveloperID,
+			Name:        "Frontend Developer",
+			Description: "Builds and changes user interfaces: layouts, components, styling, responsive behaviour, and accessibility, following the frontend-design skill.",
+			Mode:        store.ModeCrew,
+			Role:        RoleWorker,
+			PromptName:  "frontend-developer.md",
+			Skills:      []string{"frontend-design"},
 		},
 	}
 }
@@ -92,14 +124,15 @@ func (b Builtin) Persona() string {
 // without a model, and the account picks one when it edits the agent.
 func (b Builtin) Default() store.AgentRecord {
 	return store.AgentRecord{
-		ID:          b.ID,
-		Name:        b.Name,
-		Prompt:      b.Persona(),
+		ID:           b.ID,
+		Name:         b.Name,
+		Prompt:       b.Persona(),
 		SystemPrompt: "",
-		Description: b.Description,
-		Mode:        b.Mode,
-		ConnectorID: "",
-		Provider:    "",
-		Model:       "",
+		Description:  b.Description,
+		Mode:         b.Mode,
+		ConnectorID:  "",
+		Provider:     "",
+		Model:        "",
+		Skills:       append([]string(nil), b.Skills...),
 	}
 }

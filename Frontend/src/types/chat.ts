@@ -233,6 +233,8 @@ export interface AgentRow {
   model: string
   altProvider: string
   altModel: string
+  /** The skill folders this worker must read before it starts. */
+  skills: string[]
   createdAt: number
   updatedAt: number
   /** Whether this agent is one the app ships with. Built-ins cannot be deleted. */
@@ -253,6 +255,17 @@ export interface AgentInput {
   model: string
   altProvider: string
   altModel: string
+  /** The skill folders this worker must read before it starts. */
+  skills: string[]
+}
+
+/** One skill installed on this machine: a folder with a SKILL.md inside. */
+export interface SkillInfo {
+  name: string
+  /** The first heading or line of its SKILL.md. */
+  description: string
+  /** The absolute path to the SKILL.md. */
+  path: string
 }
 
 /**

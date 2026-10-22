@@ -80,6 +80,11 @@ type Server struct {
 	registries map[string]*ai.Registry
 	libraryMu  sync.Mutex
 	libraries  map[string]*agent.Library
+	// crewMu guards crewLocks, one mutex per chat. A turn may ask for two
+	// delegations in one step; the lock is what keeps them from running at the
+	// same time, because the crew works one task at a time.
+	crewMu    sync.Mutex
+	crewLocks map[string]*sync.Mutex
 	// handler is the routed and wrapped mux, kept so the server itself can be
 	// handed to http.Server.
 	handler http.Handler
@@ -158,7 +163,10 @@ func NewServer(deps Deps) *Server {
 	mux.HandleFunc("PUT /api/agents/{agentID}/upsert", s.handleUpsertAgent)
 	mux.HandleFunc("DELETE /api/agents/{agentID}", s.handleDeleteAgent)
 	mux.HandleFunc("POST /api/agents/{agentID}/reset", s.handleResetAgent)
+	mux.HandleFunc("GET /api/skills", s.handleListSkills)
 	mux.HandleFunc("GET /api/voice", s.handleVoiceStream)
+	mux.HandleFunc("GET /api/crew/stream", s.handleCrewStream)
+	mux.HandleFunc("POST /api/crew/delegate", s.handleCrewDelegate)
 	mux.HandleFunc("GET /api/artifacts/stream", s.handleArtifactStream)
 	mux.HandleFunc("GET /api/artifacts/content", s.handleArtifactContent)
 	mux.HandleFunc("GET /api/artifacts/file", s.handleArtifactDownload)

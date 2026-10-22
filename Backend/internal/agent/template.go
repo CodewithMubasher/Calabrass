@@ -26,8 +26,11 @@ type ToolSummary struct {
 	Description string
 }
 
-// WorkerSummary is one worker, as a prompt names it.
+// WorkerSummary is one worker, as a prompt names it. The id rides along
+// because delegate_task needs the id, not the label: two workers may share a
+// name, but only one may hold an id.
 type WorkerSummary struct {
+	ID          string
 	Name        string
 	Description string
 }
@@ -113,6 +116,11 @@ func workerSection(workers []WorkerSummary) string {
 		b.WriteString(strconv.Itoa(number))
 		b.WriteString(". ")
 		b.WriteString(name)
+		if id := strings.TrimSpace(worker.ID); id != "" {
+			b.WriteString(" (id: ")
+			b.WriteString(id)
+			b.WriteString(")")
+		}
 		description := strings.TrimSpace(worker.Description)
 		if description == "" {
 			description = "no description given"

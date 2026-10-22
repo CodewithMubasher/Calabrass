@@ -14,6 +14,7 @@ import type {
   ScheduledTask,
   ScheduledTaskInput,
   ScheduledTaskPatch,
+  SkillInfo,
   TurnTrace,
   Usage,
   UsageSnapshot,
@@ -252,6 +253,10 @@ export const api = {
       method: "POST",
     }).then((r) => r.agents ?? []),
 
+  /** The skills installed on this machine, read from ~/.calabrass/skills. */
+  listSkills: () =>
+    request<{ skills: SkillInfo[] }>("/skills").then((r) => r.skills ?? []),
+
   deleteMessage: (chatId: string, messageId: string) =>
     request<{ deleted: boolean }>(`/chats/${chatId}/messages/${messageId}`, {
       method: "DELETE",
@@ -295,6 +300,11 @@ export const api = {
    *  as the folder changes. */
   artifactStreamUrl: (chatId: string) =>
     `${BASE}/artifacts/stream?${artifactQuery(chatId)}`,
+
+  /** The crew work listing, as a stream: todos and reports, complete and again
+   *  as soon as one is written. */
+  crewStreamUrl: (chatId: string) =>
+    `${BASE}/crew/stream?${artifactQuery(chatId)}`,
 
   /** A file's text for the detail view. A binary file answers with
    *  `binary: true` instead of bytes, and a long one is cut short. */

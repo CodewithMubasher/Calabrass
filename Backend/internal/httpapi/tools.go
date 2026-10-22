@@ -2,21 +2,24 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"time"
 
 	goai "github.com/zendev-sh/goai"
 
 	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/connectors"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/crew"
 )
 
 // turnSetup is what a turn takes from the harness: the prompt to think with, and
 // the tools it may call.
 type turnSetup struct {
-	system    string
-	tools     []goai.Tool
-	origins   map[string]string
-	runState  *agent.RunState // budget / loop guard state
+	system   string
+	tools    []goai.Tool
+	origins  map[string]string
+	runState *agent.RunState // budget / loop guard state
 }
 
 // setupTurn builds a turn for the shipped admin account. Handlers use
@@ -35,18 +38,18 @@ func (s *Server) setupTurn(ctx context.Context, workspace *agent.Workspace, chat
 // id means there is no conversation to bind to. userID scopes the connectors and
 // the tasks the turn may see. agentID is the agent this chat is associated with.
 func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *agent.Workspace, chatID, agentID string) turnSetup {
-	var tools []goai.Tool
 	var described []agent.Connector
 	var origins map[string]string
 	var agentSystemPrompt string
 	var agentConnectorID string
 	var agentMode string
 
-	// If this chat is associated with an agent, load its configuration
+	// If this chat is associated with an agent, load its configuration. A
+	// built-in with no saved override has no row, so the shipped definition
+	// stands in for it.
 	if agentID != "" {
-		agentRec, err := s.store.GetAgent(ctx, agentID, userID)
+		agentRec, _, err := s.resolveAgent(ctx, userID, agentID)
 		if err == nil {
-			// Use agent's system prompt (or prompt as fallback) as the system prompt
 			agentSystemPrompt = agentRec.SystemPrompt
 			if agentSystemPrompt == "" {
 				agentSystemPrompt = agentRec.Prompt
@@ -72,9 +75,18 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 		mode = agentMode
 	}
 
-	// Both modes have the same tools: chat is for ordinary work, crew is for
-	// long work, and neither of them is held back from the project.
-	tools = agent.Tools(workspace)
+	// The Orchestrator is not a coding agent, so it is not handed the coding
+	// tools. Its whole job is to ask what it does not know and to hand work to
+	// a worker; giving it a shell and a text editor would invite it to do the
+	// work itself, which is exactly what its prompt tells it not to do.
+	orchestrator := crew.IsOrchestrator(agentID)
+	if orchestrator {
+		return s.orchestratorTurn(ctx, userID, workspace, chatID, agentSystemPrompt)
+	}
+
+	// Both ordinary modes have the same tools: chat is for ordinary work, crew
+	// is for long work, and neither of them is held back from the project.
+	tools := agent.Tools(workspace)
 
 	// Add connector tools
 	if s.connectors != nil {
@@ -128,11 +140,7 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 	// Wrap ALL tools with budget middleware for loop guard (once, after merging)
 	budget := agent.DefaultBudget(mode)
 	runState := agent.NewRunState(budget)
-	wrappedTools := make([]goai.Tool, len(tools))
-	for i, t := range tools {
-		wrappedTools[i] = agent.BudgetMiddleware(t, runState)
-	}
-	tools = wrappedTools
+	tools = wrapBudget(tools, runState)
 
 	// Determine the system prompt to use
 	systemPrompt := s.system
@@ -158,6 +166,89 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 	// Scan project map fresh each run (depth 2)
 	projectMap := agent.ScanProjectMap(ctx, workspace.Root()).ProjectMapString()
 	return turnSetup{system: agent.SystemPrompt(workspace, systemPrompt, described, mode, projectMap), tools: tools, origins: origins, runState: runState}
+}
+
+// orchestratorTurn builds the Orchestrator's turn: two tools, and a prompt that
+// names the workers it may hand work to. It deliberately skips the coding
+// harness rules, because "you can read, write and edit files" is the opposite of
+// what the Orchestrator is for.
+func (s *Server) orchestratorTurn(ctx context.Context, userID string, workspace *agent.Workspace, chatID, prompt string) turnSetup {
+	tools := []goai.Tool{s.askQuestionsTool()}
+
+	workspaceRoot := ""
+	if workspace != nil {
+		workspaceRoot = workspace.Root()
+	}
+	tools = append(tools, agent.DelegateTaskTool(func(toolCtx context.Context, args agent.DelegateTaskArgs) (string, error) {
+		if workspaceRoot == "" {
+			return "", errors.New("this chat has no workspace, so there is nowhere to run a worker")
+		}
+		return s.delegateTask(toolCtx, userID, chatID, workspaceRoot, args)
+	}))
+
+	workers, err := s.workerSummaries(ctx, userID)
+	if err != nil {
+		s.log.Warn("could not list workers for the Orchestrator", "error", err)
+	}
+
+	rendered := agent.RenderTemplate(prompt, agent.PromptVars{
+		Workspace: workspaceRoot,
+		Date:      time.Now().Format("Monday, 2 January 2006, 15:04"),
+		Tools:     toolSummaries(tools),
+		Workers:   workers,
+	})
+
+	budget := agent.DefaultBudget(agent.ModeCrew)
+	runState := agent.NewRunState(budget)
+	return turnSetup{
+		system:   rendered,
+		tools:    wrapBudget(tools, runState),
+		runState: runState,
+	}
+}
+
+// workerSummaries lists the agents the Orchestrator may hand work to: every
+// saved agent, and every shipped worker that was never edited, minus the
+// Orchestrator itself.
+func (s *Server) workerSummaries(ctx context.Context, userID string) ([]agent.WorkerSummary, error) {
+	rows, err := s.agentRowsFor(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	workers := make([]agent.WorkerSummary, 0, len(rows))
+	for _, row := range rows {
+		if crew.IsOrchestrator(row.ID) {
+			continue
+		}
+		workers = append(workers, agent.WorkerSummary{
+			ID:          row.ID,
+			Name:        row.Name,
+			Description: row.Description,
+		})
+	}
+	return workers, nil
+}
+
+// toolSummaries is the list a prompt template renders under a heading.
+func toolSummaries(tools []goai.Tool) []agent.ToolSummary {
+	summaries := make([]agent.ToolSummary, 0, len(tools))
+	for _, tool := range tools {
+		summaries = append(summaries, agent.ToolSummary{
+			Name:        tool.Name,
+			Description: tool.Description,
+		})
+	}
+	return summaries
+}
+
+// wrapBudget puts the run's loop guard around every tool exactly once.
+func wrapBudget(tools []goai.Tool, runState *agent.RunState) []goai.Tool {
+	wrapped := make([]goai.Tool, len(tools))
+	for i, tool := range tools {
+		wrapped[i] = agent.BudgetMiddleware(tool, runState)
+	}
+	return wrapped
 }
 
 // mergeTools adds what the connectors offer to a turn's tools, leaving out the

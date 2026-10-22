@@ -404,6 +404,7 @@ function AgentDialog({
       model: modelId || "",
       altProvider: altProvider || "",
       altModel: altModelId || "",
+      skills: agent.skills ?? [],
     }
 
     setSaving(true)

@@ -1,5 +1,6 @@
 import type { IconSvgElement } from "@hugeicons/react"
 import {
+  BotIcon,
   File02Icon,
   FileAddIcon,
   FileEditIcon,
@@ -75,6 +76,27 @@ function baseName(path: string | undefined): string | undefined {
   return segments[segments.length - 1] || path
 }
 
+/**
+ * The worker a delegation went to. Once the report lands it names the worker
+ * itself; while the call is still running, the id is all there is, so it is
+ * turned back into words ("builtin-frontend-developer" -> "Frontend developer").
+ */
+function delegateWorker(part: TracePart): string | undefined {
+  if (part.output) {
+    try {
+      const report = JSON.parse(part.output) as { workerName?: unknown }
+      const name = str(report.workerName)
+      if (name !== undefined) return name
+    } catch {
+      // A failed call may carry prose instead of a report; fall through.
+    }
+  }
+  const id = str(args(part).workerId)
+  if (id === undefined) return undefined
+  const words = id.replace(/^builtin-/, "").replace(/[-_]+/g, " ").trim()
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
 const toolRenderers: Record<string, ToolRenderer> = {
   read_file: {
     icon: File02Icon,
@@ -141,6 +163,17 @@ const toolRenderers: Record<string, ToolRenderer> = {
       const count = asked.length
       return count === 1 ? "1 question" : `${count} questions`
     },
+  },
+  delegate_task: {
+    icon: BotIcon,
+    label: "Delegated task",
+    getLabel: (part) =>
+      isCallLive(part)
+        ? "Delegating task"
+        : isCallFailed(part)
+          ? "Delegation failed"
+          : "Delegated task",
+    getFileName: (part) => delegateWorker(part),
   },
 }
 

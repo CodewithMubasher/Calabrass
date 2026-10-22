@@ -209,7 +209,9 @@ function RootLayout() {
                 chatId={chatIdFrom(pathname)}
               />
             ) : null}
-            {showsTopbar ? <CrewPanel open={crewOpen} /> : null}
+            {showsTopbar ? (
+              <CrewPanel open={crewOpen} chatId={chatIdFrom(pathname)} />
+            ) : null}
           </div>
         </SidebarInset>
       </SidebarProvider>

@@ -235,6 +235,7 @@ CREATE TABLE IF NOT EXISTS agents (
 	model         TEXT NOT NULL DEFAULT '',
 	alt_provider  TEXT NOT NULL DEFAULT '',
 	alt_model     TEXT NOT NULL DEFAULT '',
+	skills        TEXT NOT NULL DEFAULT '[]',
 	created_at    INTEGER NOT NULL,
 	updated_at    INTEGER NOT NULL,
 	PRIMARY KEY (user_id, id)
@@ -300,6 +301,7 @@ CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_events(provider_id, creat
 		{"chats", "mode", "mode TEXT NOT NULL DEFAULT 'chat'"},
 		{"agents", "system_prompt", "system_prompt TEXT NOT NULL DEFAULT ''"},
 		{"agents", "description", "description TEXT NOT NULL DEFAULT ''"},
+		{"agents", "skills", "skills TEXT NOT NULL DEFAULT '[]'"},
 	}
 	for _, col := range added {
 		if err := s.ensureColumn(ctx, col.table, col.column, col.ddl); err != nil {
@@ -309,9 +311,14 @@ CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_events(provider_id, creat
 
 	// The agents table used to key on the id alone. The agents the app ships
 	// with have the same id for every account, so the key has to carry the
-	// account with it.
-	if err := s.rebuildAgents(ctx); err != nil {
+	// account with it. A table that already has user_id is already keyed that
+	// way, and rebuilding it again would wipe ownership on every startup.
+	if ok, err := s.hasColumn(ctx, "agents", "user_id"); err != nil {
 		return err
+	} else if !ok {
+		if err := s.rebuildAgents(ctx); err != nil {
+			return err
+		}
 	}
 
 	// The two modes used to be "build" and "plan". Plan is gone, and build is
@@ -406,12 +413,13 @@ CREATE TABLE agents_user_keyed (
 	model         TEXT NOT NULL DEFAULT '',
 	alt_provider  TEXT NOT NULL DEFAULT '',
 	alt_model     TEXT NOT NULL DEFAULT '',
+	skills        TEXT NOT NULL DEFAULT '[]',
 	created_at    INTEGER NOT NULL,
 	updated_at    INTEGER NOT NULL,
 	PRIMARY KEY (user_id, id)
 );
-INSERT INTO agents_user_keyed (user_id, id, name, prompt, system_prompt, mode, description, connector_id, provider, model, alt_provider, alt_model, created_at, updated_at)
-SELECT '', id, name, prompt, system_prompt, mode, '', connector_id, provider, model, alt_provider, alt_model, created_at, updated_at FROM agents;
+INSERT INTO agents_user_keyed (user_id, id, name, prompt, system_prompt, mode, description, connector_id, provider, model, alt_provider, alt_model, skills, created_at, updated_at)
+SELECT '', id, name, prompt, system_prompt, mode, description, connector_id, provider, model, alt_provider, alt_model, '[]', created_at, updated_at FROM agents;
 DROP TABLE agents;
 ALTER TABLE agents_user_keyed RENAME TO agents;
 `
@@ -1296,22 +1304,59 @@ type AgentRecord struct {
 	Model       string `json:"model"`
 	AltProvider string `json:"altProvider"`
 	AltModel    string `json:"altModel"`
-	CreatedAt   int64  `json:"createdAt"`
-	UpdatedAt   int64  `json:"updatedAt"`
+	// Skills are the folders under ~/.calabrass/skills this worker must read
+	// before it starts. Only workers use them; an interactive agent ignores them.
+	Skills    []string `json:"skills"`
+	CreatedAt int64    `json:"createdAt"`
+	UpdatedAt int64    `json:"updatedAt"`
 }
 
-const agentColumns = `id, name, prompt, system_prompt, mode, description, connector_id, provider, model, alt_provider, alt_model, created_at, updated_at`
+const agentColumns = `id, name, prompt, system_prompt, mode, description, connector_id, provider, model, alt_provider, alt_model, skills, created_at, updated_at`
 
 func scanAgent(row interface{ Scan(...any) error }) (AgentRecord, error) {
 	var rec AgentRecord
+	var skills string
 	if err := row.Scan(
 		&rec.ID, &rec.Name, &rec.Prompt, &rec.SystemPrompt, &rec.Mode, &rec.Description, &rec.ConnectorID,
-		&rec.Provider, &rec.Model, &rec.AltProvider, &rec.AltModel,
+		&rec.Provider, &rec.Model, &rec.AltProvider, &rec.AltModel, &skills,
 		&rec.CreatedAt, &rec.UpdatedAt,
 	); err != nil {
 		return AgentRecord{}, err
 	}
+	rec.Skills = decodeSkills(skills)
 	return rec, nil
+}
+
+// decodeSkills reads the JSON array a row stores. A malformed or empty value is
+// no skills rather than an error: an agent with a broken column must still open.
+func decodeSkills(text string) []string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return []string{}
+	}
+	var skills []string
+	if err := json.Unmarshal([]byte(text), &skills); err != nil {
+		return []string{}
+	}
+	if skills == nil {
+		return []string{}
+	}
+	return skills
+}
+
+// encodeSkills writes skills as the JSON array the column holds.
+func encodeSkills(skills []string) string {
+	clean := make([]string, 0, len(skills))
+	for _, skill := range skills {
+		if trimmed := strings.TrimSpace(skill); trimmed != "" {
+			clean = append(clean, trimmed)
+		}
+	}
+	data, err := json.Marshal(clean)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
 }
 
 // ListAgents returns every agent for an account, alphabetically by name.
@@ -1360,11 +1405,11 @@ func (s *Store) CreateAgent(ctx context.Context, rec AgentRecord, userID ...stri
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO agents (
 			id, user_id, name, prompt, system_prompt, mode, description, connector_id, provider, model,
-			alt_provider, alt_model, created_at, updated_at
+			alt_provider, alt_model, skills, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		rec.ID, ownerOf(userID), rec.Name, rec.Prompt, rec.SystemPrompt, rec.Mode, rec.Description, rec.ConnectorID,
-		rec.Provider, rec.Model, rec.AltProvider, rec.AltModel,
+		rec.Provider, rec.Model, rec.AltProvider, rec.AltModel, encodeSkills(rec.Skills),
 		rec.CreatedAt, rec.UpdatedAt,
 	); err != nil {
 		return AgentRecord{}, fmt.Errorf("store: create agent: %w", err)
@@ -1377,11 +1422,11 @@ func (s *Store) UpdateAgent(ctx context.Context, id string, rec AgentRecord, use
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE agents SET
 			name = ?, prompt = ?, system_prompt = ?, mode = ?, description = ?, connector_id = ?,
-			provider = ?, model = ?, alt_provider = ?, alt_model = ?,
+			provider = ?, model = ?, alt_provider = ?, alt_model = ?, skills = ?,
 			updated_at = ?
 		WHERE id = ? AND user_id = ?`,
 		rec.Name, rec.Prompt, rec.SystemPrompt, rec.Mode, rec.Description, rec.ConnectorID,
-		rec.Provider, rec.Model, rec.AltProvider, rec.AltModel,
+		rec.Provider, rec.Model, rec.AltProvider, rec.AltModel, encodeSkills(rec.Skills),
 		time.Now().UnixMilli(), id, ownerOf(userID))
 	if err != nil {
 		return AgentRecord{}, fmt.Errorf("store: update agent: %w", err)
@@ -1425,11 +1470,11 @@ func (s *Store) UpsertAgent(ctx context.Context, id string, rec AgentRecord, use
 		if _, err := s.db.ExecContext(ctx, `
 			INSERT INTO agents (
 				id, user_id, name, prompt, system_prompt, mode, description, connector_id, provider, model,
-				alt_provider, alt_model, created_at, updated_at
+				alt_provider, alt_model, skills, created_at, updated_at
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, ownerOf(userID), rec.Name, rec.Prompt, rec.SystemPrompt, rec.Mode, rec.Description, rec.ConnectorID,
-			rec.Provider, rec.Model, rec.AltProvider, rec.AltModel,
+			rec.Provider, rec.Model, rec.AltProvider, rec.AltModel, encodeSkills(rec.Skills),
 			now, now,
 		); err != nil {
 			return AgentRecord{}, fmt.Errorf("store: upsert agent insert: %w", err)
@@ -1444,11 +1489,11 @@ func (s *Store) UpsertAgent(ctx context.Context, id string, rec AgentRecord, use
 	if _, err := s.db.ExecContext(ctx, `
 		UPDATE agents SET
 			name = ?, prompt = ?, system_prompt = ?, mode = ?, description = ?, connector_id = ?,
-			provider = ?, model = ?, alt_provider = ?, alt_model = ?,
+			provider = ?, model = ?, alt_provider = ?, alt_model = ?, skills = ?,
 			updated_at = ?
 		WHERE id = ? AND user_id = ?`,
 		rec.Name, rec.Prompt, rec.SystemPrompt, rec.Mode, rec.Description, rec.ConnectorID,
-		rec.Provider, rec.Model, rec.AltProvider, rec.AltModel,
+		rec.Provider, rec.Model, rec.AltProvider, rec.AltModel, encodeSkills(rec.Skills),
 		now, id, ownerOf(userID)); err != nil {
 		return AgentRecord{}, fmt.Errorf("store: upsert agent update: %w", err)
 	}

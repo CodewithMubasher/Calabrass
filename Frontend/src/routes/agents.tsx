@@ -53,11 +53,6 @@ function AgentCard({
             <span className="block truncate text-sm font-medium text-white/90">
               {agent.name}
             </span>
-            {agent.builtin && (
-              <span className="shrink-0 rounded-full border border-[#9D79FF]/40 bg-[#9D79FF]/15 px-2 py-0.5 text-[10px] text-[#9D79FF]">
-                Built-in
-              </span>
-            )}
           </span>
           <span
             title={
@@ -80,6 +75,11 @@ function AgentCard({
       </span>
 
       <span className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-white/35">
+        {agent.builtin && (
+          <span className="rounded-full border border-[#9D79FF]/40 bg-[#9D79FF]/15 px-2 py-0.5 text-[10px] text-[#9D79FF]">
+            Built-in
+          </span>
+        )}
         {!agent.builtin && (
           <span className="rounded-full bg-white/5 px-2 py-0.5">
             {connectorName || "No connector"}

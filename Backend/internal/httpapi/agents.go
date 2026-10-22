@@ -60,19 +60,8 @@ func (s *Server) agentRowsFor(ctx context.Context, userID string) ([]agentRow, e
 		if ok {
 			delete(byID, b.ID)
 		} else {
-			rec = store.AgentRecord{
-				ID:          b.ID,
-				Name:        b.Name,
-				Prompt:      b.Persona(),
-				SystemPrompt: "",
-				Description: b.Description,
-				Mode:        b.Mode,
-				ConnectorID: "",
-				Provider:    "",
-				Model:       "",
-				CreatedAt:   now,
-				UpdatedAt:   now,
-			}
+			rec = b.Default()
+			rec.CreatedAt, rec.UpdatedAt = now, now
 		}
 		views = append(views, agentRow{AgentRecord: rec, Builtin: true})
 	}
@@ -86,16 +75,18 @@ func (s *Server) agentRowsFor(ctx context.Context, userID string) ([]agentRow, e
 // agentRequest is the form the Agents page writes: everything an agent needs to
 // be handed work, all of it optional except the name.
 type agentRequest struct {
-	Name           string `json:"name"`
-	Prompt         string `json:"prompt"`
-	SystemPrompt   string `json:"systemPrompt"`
-	Mode           string `json:"mode"`
-	Description    string `json:"description"`
-	ConnectorID    string `json:"connectorId"`
-	Provider       string `json:"provider"`
-	Model          string `json:"model"`
-	AltProvider    string `json:"altProvider"`
-	AltModel       string `json:"altModel"`
+	Name         string `json:"name"`
+	Prompt       string `json:"prompt"`
+	SystemPrompt string `json:"systemPrompt"`
+	Mode         string `json:"mode"`
+	Description  string `json:"description"`
+	ConnectorID  string `json:"connectorId"`
+	Provider     string `json:"provider"`
+	Model        string `json:"model"`
+	AltProvider  string `json:"altProvider"`
+	AltModel     string `json:"altModel"`
+	// Skills are the skill folder names this worker must read before it works.
+	Skills []string `json:"skills"`
 }
 
 // record validates the request and turns it into a stored row. Only the name is
@@ -117,17 +108,29 @@ func (a agentRequest) record() (store.AgentRecord, error) {
 
 	systemPrompt := strings.TrimSpace(a.SystemPrompt)
 
+	skills := make([]string, 0, len(a.Skills))
+	seen := make(map[string]bool, len(a.Skills))
+	for _, skill := range a.Skills {
+		skill = strings.TrimSpace(skill)
+		if skill == "" || seen[skill] {
+			continue
+		}
+		seen[skill] = true
+		skills = append(skills, skill)
+	}
+
 	return store.AgentRecord{
-		Name:           name,
-		Prompt:         strings.TrimSpace(a.Prompt),
-		SystemPrompt:   systemPrompt,
-		Mode:           mode,
-		Description:    strings.TrimSpace(a.Description),
-		ConnectorID:    strings.TrimSpace(a.ConnectorID),
-		Provider:       strings.TrimSpace(a.Provider),
-		Model:          strings.TrimSpace(a.Model),
-		AltProvider:    strings.TrimSpace(a.AltProvider),
-		AltModel:       strings.TrimSpace(a.AltModel),
+		Name:         name,
+		Prompt:       strings.TrimSpace(a.Prompt),
+		SystemPrompt: systemPrompt,
+		Mode:         mode,
+		Description:  strings.TrimSpace(a.Description),
+		ConnectorID:  strings.TrimSpace(a.ConnectorID),
+		Provider:     strings.TrimSpace(a.Provider),
+		Model:        strings.TrimSpace(a.Model),
+		AltProvider:  strings.TrimSpace(a.AltProvider),
+		AltModel:     strings.TrimSpace(a.AltModel),
+		Skills:       skills,
 	}, nil
 }
 
@@ -251,7 +254,7 @@ func (s *Server) handleResetAgent(w http.ResponseWriter, r *http.Request) {
 // handleGetAgent returns a single agent by ID.
 func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r.Context())
-	rec, err := s.store.GetAgent(r.Context(), r.PathValue("agentID"), user.ID)
+	rec, builtin, err := s.resolveAgent(r.Context(), user.ID, r.PathValue("agentID"))
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -260,6 +263,27 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	builtin := crew.IsBuiltinID(rec.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"agent": agentRow{AgentRecord: rec, Builtin: builtin}})
+}
+
+// resolveAgent returns an agent's record for one account. A built-in that was
+// never edited has no row at all, so the shipped definition stands in for it;
+// the second result says whether the id names a built-in.
+func (s *Server) resolveAgent(ctx context.Context, userID, agentID string) (store.AgentRecord, bool, error) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return store.AgentRecord{}, false, store.ErrNotFound
+	}
+
+	rec, err := s.store.GetAgent(ctx, agentID, userID)
+	if err == nil {
+		return rec, crew.IsBuiltinID(rec.ID), nil
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return store.AgentRecord{}, false, err
+	}
+	if builtin, ok := crew.Find(agentID); ok {
+		return builtin.Default(), true, nil
+	}
+	return store.AgentRecord{}, false, store.ErrNotFound
 }

@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { ArrowDown01Icon, Delete02Icon } from "@hugeicons/core-free-icons"
+import {
+  ArrowDown01Icon,
+  Delete02Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons"
 
+import { cn } from "cn"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -28,6 +33,7 @@ import type {
   AgentInput,
   AgentRow,
   ProviderInfo,
+  SkillInfo,
 } from "@/types/chat"
 
 // The dialogs sit on the same dark panel as the reference project's, with our
@@ -152,8 +158,25 @@ export function AgentDialog({
   const [altModel, setAltModel] = useState(
     encodeModel(agent?.altProvider ?? "", agent?.altModel ?? "")
   )
+  const [skills, setSkills] = useState<string[]>(agent?.skills ?? [])
+  const [availableSkills, setAvailableSkills] = useState<SkillInfo[]>([])
   const [providers, setProviders] = useState<ProviderInfo[]>([])
   const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    api
+      .listSkills()
+      .then((list) => {
+        if (live) setAvailableSkills(list)
+      })
+      .catch(() => {
+        // The picker simply has nothing to offer; saving still works.
+      })
+    return () => {
+      live = false
+    }
+  }, [])
 
   useEffect(() => {
     let live = true
@@ -205,6 +228,30 @@ export function AgentDialog({
 
   const ready = name.trim() !== ""
 
+  function toggleSkill(name: string) {
+    setSkills((current) =>
+      current.includes(name)
+        ? current.filter((skill) => skill !== name)
+        : [...current, name]
+    )
+  }
+
+  // Every installed skill, plus any this agent already names that is no longer
+  // on the machine: a save must never quietly drop a choice the person made.
+  const skillsShown = useMemo(() => {
+    const byName = new Map(availableSkills.map((skill) => [skill.name, skill]))
+    for (const name of skills) {
+      if (!byName.has(name)) {
+        byName.set(name, {
+          name,
+          description: "Not installed on this machine",
+          path: "",
+        })
+      }
+    }
+    return [...byName.values()]
+  }, [availableSkills, skills])
+
   async function submit(event: React.FormEvent) {
     event.preventDefault()
     if (saving || !ready) return
@@ -226,6 +273,7 @@ export function AgentDialog({
       model: preferred.model,
       altProvider: fallback.provider,
       altModel: fallback.model,
+      skills,
     }
 
     setSaving(true)
@@ -289,11 +337,11 @@ export function AgentDialog({
               />
             </Field>
 
-            <Field label="Agent Prompt (replaces global system prompt)">
+            <Field label="System prompt">
               <Textarea
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
-                placeholder="You research a question, weigh the sources, and answer with citations. This prompt completely replaces the global system prompt when this agent is selected."
+                placeholder="You build the interface: layout, components, styling, and accessibility. Finish the whole task, then report what you changed."
                 rows={6}
               />
             </Field>
@@ -306,6 +354,70 @@ export function AgentDialog({
                 className="h-9 border-white/10 bg-white/5 px-3 text-white/80 placeholder:text-white/30"
               />
             </Field>
+
+            <div>
+              <span className="mb-2 block text-sm text-white/60">Skills</span>
+              <div className="overflow-hidden rounded-xl border border-white/10 bg-white/5">
+                {skillsShown.length === 0 ? (
+                  <p className="px-3 py-3 text-xs leading-relaxed text-white/35">
+                    No skills installed. Add a folder with a SKILL.md inside to{" "}
+                    <span className="font-mono text-white/50">
+                      %USERPROFILE%\.calabrass\skills\
+                    </span>
+                    and reload the page.
+                  </p>
+                ) : (
+                  <div className="scrollbar-thin flex max-h-44 flex-col overflow-y-auto">
+                    {skillsShown.map((skill) => {
+                      const checked = skills.includes(skill.name)
+                      return (
+                        <button
+                          key={skill.name}
+                          type="button"
+                          onClick={() => toggleSkill(skill.name)}
+                          aria-pressed={checked}
+                          className={cn(
+                            "flex items-start gap-3 px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-white/20",
+                            checked ? "bg-white/[0.06]" : "hover:bg-white/[0.03]"
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "mt-0.5 grid size-4 shrink-0 place-items-center rounded border transition-colors",
+                              checked
+                                ? "border-[#9D79FF] bg-[#9D79FF] text-black"
+                                : "border-white/20 bg-transparent"
+                            )}
+                          >
+                            {checked ? (
+                              <HugeiconsIcon
+                                icon={Tick02Icon}
+                                strokeWidth={3}
+                                className="size-3"
+                              />
+                            ) : null}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-xs font-medium text-white/80">
+                              {skill.name}
+                            </span>
+                            {skill.description ? (
+                              <span className="mt-0.5 block text-[11px] leading-relaxed text-white/40">
+                                {skill.description}
+                              </span>
+                            ) : null}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+              <p className="mt-1.5 text-[11px] leading-relaxed text-white/30">
+                A worker must read each selected skill with its read_skill tool
+                before it starts work.
+              </p>
+            </div>
 
             <div className="grid grid-cols-2 gap-4">
               <Field label="Default model">

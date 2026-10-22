@@ -2,7 +2,11 @@ import { useEffect, useRef, useState, type ReactNode } from "react"
 import { cn } from "cn"
 
 import { HugeiconsIcon } from "@hugeicons/react"
-import { ArrowDown01Icon, BrainIcon } from "@hugeicons/core-free-icons"
+import {
+  ArrowDown01Icon,
+  BrainIcon,
+  File02Icon,
+} from "@hugeicons/core-free-icons"
 
 import { TimelineNode } from "@/components/timeline-node"
 import {
@@ -152,7 +156,11 @@ export function ToolTimeline({
                 durationMs={part.durationMs}
                 isLast={stopHere}
                 showLine={!stopHere}
-                detail={callPanel(part)}
+                detail={
+                  part.name === "delegate_task"
+                    ? workerPanel(part)
+                    : callPanel(part)
+                }
                 isDetailExpanded={openDetail === key}
                 onToggleDetail={() => setDetail(openDetail === key ? null : key)}
               />
@@ -190,6 +198,165 @@ function callPanel(part: TracePart): ReactNode {
         {output !== "" ? output : failed ? "(no message)" : "(no output)"}
       </Panel>
     </div>
+  )
+}
+
+/**
+ * A delegation is not a tool call whose JSON is worth reading: it is a task
+ * handed out and a report sent back. So the node shows exactly those two things
+ * — the clean todo the worker was given, and the report it returned — rather
+ * than the raw request and response.
+ */
+function workerPanel(part: TracePart): ReactNode {
+  const todo = parsedObject(part.input)
+  const task = text(todo?.task)
+  const context = text(todo?.context)
+  const report = parsedObject(part.output)
+  const status = text(report?.status)
+  const summary = text(report?.summary)
+  const error = text(report?.error)
+  const files = textList(report?.filesChanged)
+  const checks = textList(report?.checks)
+  const failed = isCallFailed(part)
+
+  return (
+    <div className="flex flex-col gap-1.5 pt-1 pb-0.5">
+      <div className="min-w-0 rounded-lg border border-white/10 bg-white/5 p-3">
+        <p className="mb-1.5 font-mono text-[10px] text-white/40">Todo</p>
+        <p className="text-[12.5px] leading-relaxed whitespace-pre-wrap text-white/70">
+          {task !== "" ? task : "(the worker was given no task text)"}
+        </p>
+        {context !== "" ? (
+          <p className="mt-2 border-t border-white/10 pt-2 text-[11.5px] leading-relaxed whitespace-pre-wrap text-white/45">
+            <span className="text-white/35">Context: </span>
+            {context}
+          </p>
+        ) : null}
+      </div>
+
+      <div
+        className={cn(
+          "min-w-0 rounded-lg border p-3",
+          failed
+            ? "border-red-500/15 bg-red-500/5"
+            : "border-white/10 bg-white/5"
+        )}
+      >
+        <p className="mb-2 font-mono text-[10px] text-white/40">Report</p>
+
+        {report ? (
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={cn(
+                  "rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                  statusTone(status)
+                )}
+              >
+                {status !== "" ? status : "unknown"}
+              </span>
+              {text(report.workerName) !== "" ? (
+                <span className="text-[10px] text-white/40">
+                  {text(report.workerName)}
+                </span>
+              ) : null}
+            </div>
+
+            <p className="text-[12.5px] leading-relaxed whitespace-pre-wrap text-white/70">
+              {summary !== "" ? summary : "(no summary)"}
+            </p>
+
+            {files.length > 0 ? (
+              <div>
+                <p className="mb-1 text-[10px] text-white/40">Files changed</p>
+                <ul className="flex flex-col gap-0.5">
+                  {files.map((file) => (
+                    <li
+                      key={file}
+                      className="flex items-start gap-1.5 font-mono text-[11px] text-white/60"
+                    >
+                      <HugeiconsIcon
+                        icon={File02Icon}
+                        strokeWidth={2}
+                        className="mt-0.5 size-3 shrink-0 text-white/35"
+                      />
+                      <span className="break-all">{file}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {checks.length > 0 ? (
+              <div>
+                <p className="mb-1 text-[10px] text-white/40">Checks</p>
+                <div className="flex flex-wrap gap-1">
+                  {checks.map((check) => (
+                    <span
+                      key={check}
+                      className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-white/55"
+                    >
+                      {check}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {error !== "" ? (
+              <p className="rounded-lg border border-red-500/15 bg-red-500/5 p-2 text-[11.5px] leading-relaxed whitespace-pre-wrap text-red-300/80">
+                {error}
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-[11.5px] leading-relaxed text-white/40">
+            {failed
+              ? (part.error ?? "The delegation failed.")
+              : "Waiting for the worker's report…"}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** How a report's status reads: done, blocked, failed, or something else. */
+function statusTone(status: string): string {
+  switch (status.toLowerCase()) {
+    case "completed":
+      return "border-emerald-500/20 bg-emerald-500/10 text-emerald-300"
+    case "blocked":
+      return "border-amber-500/20 bg-amber-500/10 text-amber-300"
+    case "failed":
+      return "border-red-500/20 bg-red-500/10 text-red-300"
+    default:
+      return "border-white/10 bg-white/5 text-white/50"
+  }
+}
+
+/** A JSON object argument or result, or undefined when it is not one. */
+function parsedObject(raw?: string): Record<string, unknown> | undefined {
+  if (!raw || raw.trim() === "") return undefined
+  try {
+    const value: unknown = JSON.parse(raw)
+    if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+      return value as Record<string, unknown>
+    }
+  } catch {
+    return undefined
+  }
+  return undefined
+}
+
+function text(value: unknown): string {
+  return typeof value === "string" ? value.trim() : ""
+}
+
+function textList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(
+    (item): item is string => typeof item === "string" && item.trim() !== ""
   )
 }
 

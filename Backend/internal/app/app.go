@@ -113,6 +113,13 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error)
 		log.Info("usage limits loaded", "file", quotaPath)
 	}
 
+	// Skills are files in ~/.calabrass/skills. The shipped ones are written on
+	// first run so a worker has a standard to follow; a skill the person has
+	// already edited or removed is left exactly as it is.
+	if err := agent.EnsureDefaultSkills(); err != nil {
+		log.Warn("could not install the shipped skills", "error", err)
+	}
+
 	handler := httpapi.NewServer(httpapi.Deps{
 		Store:         st,
 		Registry:      registry,

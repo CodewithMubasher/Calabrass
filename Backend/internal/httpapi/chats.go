@@ -93,7 +93,7 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if agentID != "" {
-		agentRec, err := s.store.GetAgent(r.Context(), agentID, user.ID)
+		agentRec, _, err := s.resolveAgent(r.Context(), user.ID, agentID)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusBadRequest, errors.New("unknown agent"))
 			return
