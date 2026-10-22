@@ -102,11 +102,6 @@ interface PromptInputProps {
    * usually above it is not wanted.
    */
   attached?: boolean
-  /**
-   * The Autonomous page's composer: the page takes the task and runs with it,
-   * so there is no mode to pick and no model to pick. A single label says so.
-   */
-  autonomous?: boolean
   /** The hint the empty composer shows, when a page has its own question. */
   placeholder?: string
   /**
@@ -131,7 +126,6 @@ const PromptInput = forwardRef<PromptInputRef, PromptInputProps>(
       isStreaming = false,
       attached = false,
       placement = "home",
-      autonomous = false,
       placeholder: placeholderText,
     },
     ref
@@ -324,7 +318,10 @@ const PromptInput = forwardRef<PromptInputRef, PromptInputProps>(
       drag.moved = true
       // The thumb's left edge can travel from the first segment to the last one
       // and no further — its right edge stays inside the track.
-      drag.x = Math.min(drag.segment * (MODES.length - 1), Math.max(0, drag.from + delta))
+      drag.x = Math.min(
+        drag.segment * (MODES.length - 1),
+        Math.max(0, drag.from + delta)
+      )
       setThumbX(drag.x)
     }
 
@@ -382,65 +379,58 @@ const PromptInput = forwardRef<PromptInputRef, PromptInputProps>(
             />
           </button>
           {/* A track with a thumb in it: the pill slides to the mode you are in,
-              and can be taken hold of and dragged there instead. The Autonomous
-              composer has no mode to be in, so it has no track. */}
-          {!autonomous && (
+              and can be taken hold of and dragged there instead. */}
+          <div
+            ref={modeTrackRef}
+            role="group"
+            aria-label="Mode"
+            onPointerDown={handleModeGrab}
+            onPointerMove={handleModeMove}
+            onPointerUp={handleModeRelease}
+            onPointerCancel={handleModeCancel}
+            className="relative flex h-7 shrink-0 touch-none items-center rounded-full bg-black/40 text-xs select-none"
+          >
+            {/* The thumb fills one half of the track exactly — full height, full
+                width, no gutter. Two modes = two equal segments. */}
             <div
-              ref={modeTrackRef}
-              role="group"
-              aria-label="Mode"
-              onPointerDown={handleModeGrab}
-              onPointerMove={handleModeMove}
-              onPointerUp={handleModeRelease}
-              onPointerCancel={handleModeCancel}
-              className="relative flex h-7 shrink-0 touch-none items-center rounded-full bg-black/40 text-xs select-none"
-            >
-              {/* The thumb fills one half of the track exactly — full height, full
-                  width, no gutter. Two modes = two equal segments. */}
-              <div
-                ref={modeThumbRef}
-                aria-hidden="true"
-                // One mechanism for position: the `translate` property. Resting,
-                // it is a whole number of the thumb's own widths (the thumb is a
-                // half of the track, so 100% is exactly one segment). Dragging,
-                // it is pixels with the transition off.
-                style={
-                  thumbX === null
-                    ? { translate: `${modeIndex * 100}%` }
-                    : { translate: `${thumbX}px`, transition: "none" }
-                }
-                className={cn(
-                  "absolute top-0 bottom-0 left-0 w-1/2 rounded-full border transition-[translate] duration-200 ease-out",
-                  activeMode.fill
-                )}
-              />
-              {MODES.map((item) => {
-                const active = item.value === internalMode
-                return (
-                  <button
-                    key={item.value}
-                    type="button"
-                    title={item.hint}
-                    aria-pressed={active}
-                    onClick={() => setMode(item.value)}
-                    className={cn(
-                      "relative z-10 flex h-6 w-14 cursor-pointer items-center justify-center rounded-full transition-colors",
-                      active ? item.text : "text-white/40 hover:text-white/70"
-                    )}
-                  >
-                    {item.label}
-                  </button>
-                )
-              })}
-            </div>
-          )}
+              ref={modeThumbRef}
+              aria-hidden="true"
+              // One mechanism for position: the `translate` property. Resting,
+              // it is a whole number of the thumb's own widths (the thumb is a
+              // half of the track, so 100% is exactly one segment). Dragging,
+              // it is pixels with the transition off.
+              style={
+                thumbX === null
+                  ? { translate: `${modeIndex * 100}%` }
+                  : { translate: `${thumbX}px`, transition: "none" }
+              }
+              className={cn(
+                "absolute top-0 bottom-0 left-0 w-1/2 rounded-full border transition-[translate] duration-200 ease-out",
+                activeMode.fill
+              )}
+            />
+            {MODES.map((item) => {
+              const active = item.value === internalMode
+              return (
+                <button
+                  key={item.value}
+                  type="button"
+                  title={item.hint}
+                  aria-pressed={active}
+                  onClick={() => setMode(item.value)}
+                  className={cn(
+                    "relative z-10 flex h-6 w-14 cursor-pointer items-center justify-center rounded-full transition-colors",
+                    active ? item.text : "text-white/40 hover:text-white/70"
+                  )}
+                >
+                  {item.label}
+                </button>
+              )
+            })}
+          </div>
         </div>
         <div className="flex items-center gap-2">
-          {autonomous ? (
-            <span className="px-2.5 text-xs text-white/50">
-              Autonomous mode
-            </span>
-          ) : internalMode === "crew" ? (
+          {internalMode === "crew" ? (
             // Crew hands the task to the agent team, so there is no model to pick:
             // a single fixed name stands in for the menu.
             <span className="px-2.5 text-xs text-white/70">Orchestrator</span>
@@ -616,12 +606,7 @@ const PromptInput = forwardRef<PromptInputRef, PromptInputProps>(
             activeMode.edge,
             isInChat
               ? "bg-black/40 backdrop-blur-xl"
-              : autonomous
-                ? // The Autonomous composer stands over the wave on its own, so
-                  // it is a shade more solid than the home screen's glass and
-                  // blurs a little more of what is behind it.
-                  "bg-white/10 backdrop-blur-sm"
-                : "bg-white/5 backdrop-blur-[2px]"
+              : "bg-white/5 backdrop-blur-[2px]"
           )}
         >
           {attachments.length > 0 ? (

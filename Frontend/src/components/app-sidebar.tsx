@@ -3,7 +3,6 @@ import { Link } from "@tanstack/react-router"
 import {
   AddCircleHalfDotIcon,
   AiSpeechIcon,
-  AlignSelectionIcon,
   ApertureIcon,
   ChartRelationshipIcon,
   Folder01Icon,
@@ -38,11 +37,6 @@ const data = {
       to: "/cal-live",
       icon: AiSpeechIcon,
       badge: "Beta",
-    },
-    {
-      title: "Autonomous",
-      to: "/autonomous",
-      icon: AlignSelectionIcon,
     },
     {
       title: "Workspaces",

@@ -19,7 +19,6 @@ export type NavTo =
   | "/schedules"
   | "/providers"
   | "/usage"
-  | "/autonomous"
 
 export interface NavItem {
   title: string
