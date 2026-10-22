@@ -5,6 +5,7 @@ import { ApertureIcon } from "@hugeicons/core-free-icons"
 import { cn } from "cn"
 import { ArtifactCard } from "@/components/artifact-card"
 import { ArtifactDetail } from "@/components/artifact-detail"
+import { CrewWorkView } from "@/components/crew-work"
 import { useIsMobile } from "@/hooks/use-mobile"
 import {
   setSelectedCrewPath,
@@ -14,6 +15,46 @@ import {
 } from "@/lib/crew-store"
 import { setCrewOpen } from "@/lib/panel-store"
 import { api, startDownload } from "@/lib/api"
+import type { ArtifactFile } from "@/lib/artifacts"
+
+/** What a crew file is for, and whose work it is. */
+interface CrewFileMeta {
+  kind: "todo" | "report"
+  title: string
+  subtitle: string
+}
+
+const TODO_SUFFIX = ".todo.json"
+
+/**
+ * A crew file's path is bookkeeping; its name is not. A todo is named after the
+ * worker it was handed to, and a report sits in that worker's folder. So the
+ * rail reads "Todo · Frontend Developer", not a chat id and a file suffix.
+ */
+function crewFileMeta(file: ArtifactFile): CrewFileMeta {
+  const isTodo = file.name.endsWith(TODO_SUFFIX)
+  const parts = file.path.split("/")
+  const slug = isTodo
+    ? file.name.slice(0, -TODO_SUFFIX.length)
+    : (parts[parts.length - 2] ?? "")
+  const worker = workerTitle(slug)
+
+  return {
+    kind: isTodo ? "todo" : "report",
+    title: isTodo ? "Todo" : "Report",
+    subtitle: worker !== "" ? worker : isTodo ? "Orchestrator" : "Worker",
+  }
+}
+
+/** A worker id reads as a name: builtin-frontend-developer → Frontend Developer. */
+function workerTitle(slug: string): string {
+  return slug
+    .replace(/^builtin-/, "")
+    .split("-")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ")
+}
 
 /**
  * The Crew work rail: the artifacts rail's twin, watching a different folder.
@@ -27,13 +68,7 @@ import { api, startDownload } from "@/lib/api"
  * opening, and the same maximize rule applies: the rail grows to fill the row
  * and the app column gives up its width rather than the panel lifting out.
  */
-export function CrewPanel({
-  open,
-  chatId,
-}: {
-  open: boolean
-  chatId: string
-}) {
+export function CrewPanel({ open, chatId }: { open: boolean; chatId: string }) {
   const files = useCrewFiles(chatId)
   const selectedPath = useSelectedCrewPath(chatId)
   const [maximized, setMaximized] = useState(false)
@@ -131,6 +166,7 @@ export function CrewPanel({
   }
 
   const selected = files.find((file) => file.path === selectedPath) ?? null
+  const selectedMeta = selected ? crewFileMeta(selected) : null
 
   return (
     <>
@@ -139,7 +175,9 @@ export function CrewPanel({
         onClick={() => setCrewOpen(false)}
         className={cn(
           "hidden max-md:fixed max-md:inset-0 max-md:z-30 max-md:block max-md:bg-black/60 max-md:transition-opacity max-md:duration-300",
-          open ? "max-md:opacity-100" : "max-md:pointer-events-none max-md:opacity-0"
+          open
+            ? "max-md:opacity-100"
+            : "max-md:pointer-events-none max-md:opacity-0"
         )}
       />
 
@@ -171,7 +209,11 @@ export function CrewPanel({
         className={cn(
           "flex h-full shrink-0 items-center overflow-hidden transition-[width] duration-300 ease-out",
           "max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-40 max-md:w-[86%] max-md:max-w-[22rem] max-md:touch-pan-y max-md:transition-transform",
-          open ? (maximized ? "w-full" : "w-[376px]") : "w-0 max-md:translate-x-full"
+          open
+            ? maximized
+              ? "w-full"
+              : "w-[376px]"
+            : "w-0 max-md:translate-x-full"
         )}
       >
         <div
@@ -181,11 +223,16 @@ export function CrewPanel({
             "max-md:mx-0 max-md:h-full max-md:w-full max-md:rounded-l-2xl max-md:rounded-r-none max-md:border-y-0 max-md:border-r-0"
           )}
         >
-          {selected ? (
+          {selected && selectedMeta ? (
             <ArtifactDetail
               key={selected.path}
               chatId={chatId}
               file={selected}
+              title={selectedMeta.title}
+              subtitle={selectedMeta.subtitle}
+              renderContent={(content) => (
+                <CrewWorkView kind={selectedMeta.kind} content={content} />
+              )}
               maximized={maximized}
               onToggleMaximize={() => setMaximized((value) => !value)}
               onClose={closeDetail}
@@ -198,10 +245,12 @@ export function CrewPanel({
                   strokeWidth={2}
                   className="size-4 text-white/50"
                 />
-                <span className="text-sm font-medium text-white">Crew work</span>
+                <span className="text-sm font-medium text-white">
+                  Crew work
+                </span>
               </header>
 
-              <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-3">
+              <div className="min-h-0 flex-1 scrollbar-thin overflow-y-auto p-3">
                 {files.length === 0 ? (
                   <div className="flex h-full items-center justify-center px-6 text-center">
                     <p className="text-xs text-white/40">
@@ -211,16 +260,23 @@ export function CrewPanel({
                   </div>
                 ) : (
                   <div className="flex flex-col gap-2">
-                    {files.map((file) => (
-                      <ArtifactCard
-                        key={file.path}
-                        file={file}
-                        onSelect={() => setSelectedPath(file.path)}
-                        onDownload={() =>
-                          startDownload(api.artifactFileUrl(chatId, file.path))
-                        }
-                      />
-                    ))}
+                    {files.map((file) => {
+                      const meta = crewFileMeta(file)
+                      return (
+                        <ArtifactCard
+                          key={file.path}
+                          file={file}
+                          title={meta.title}
+                          subtitle={meta.subtitle}
+                          onSelect={() => setSelectedPath(file.path)}
+                          onDownload={() =>
+                            startDownload(
+                              api.artifactFileUrl(chatId, file.path)
+                            )
+                          }
+                        />
+                      )
+                    })}
                   </div>
                 )}
               </div>

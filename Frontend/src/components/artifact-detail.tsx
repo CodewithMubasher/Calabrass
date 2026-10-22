@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
   Cancel01Icon,
@@ -51,7 +51,7 @@ function TablePreview({
       {sheets.map((sheet) => (
         <div key={sheet.name} className="space-y-2">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-white/70 px-2 py-0.5 rounded bg-white/5 border border-white/10">
+            <span className="rounded border border-white/10 bg-white/5 px-2 py-0.5 text-xs font-medium text-white/70">
               {sheet.name}
             </span>
             <span className="text-xs text-white/40">
@@ -61,11 +61,11 @@ function TablePreview({
           <div className="overflow-x-auto rounded-lg border border-white/10">
             <table className="w-full border-collapse text-sm">
               <thead>
-                <tr className="bg-white/5 border-b border-white/10">
+                <tr className="border-b border-white/10 bg-white/5">
                   {sheet.rows[0]?.map((cell, colIdx) => (
                     <th
                       key={colIdx}
-                      className="px-3 py-2 text-left font-medium text-white/80 border-r border-white/10"
+                      className="border-r border-white/10 px-3 py-2 text-left font-medium text-white/80"
                     >
                       {cell || `Column ${colIdx + 1}`}
                     </th>
@@ -76,25 +76,28 @@ function TablePreview({
                 {sheet.rows.slice(1).map((row, rowIdx) => (
                   <tr
                     key={rowIdx}
-                    className={rowIdx % 2 === 0 ? "bg-white/2" : "bg-transparent"}
+                    className={
+                      rowIdx % 2 === 0 ? "bg-white/2" : "bg-transparent"
+                    }
                   >
                     {row.map((cell, colIdx) => (
                       <td
                         key={colIdx}
-                        className="px-3 py-1.5 text-white/70 border-r border-white/5 truncate max-w-[15ch]"
+                        className="max-w-[15ch] truncate border-r border-white/5 px-3 py-1.5 text-white/70"
                       >
                         {cell}
                       </td>
                     ))}
                     {/* Fill missing cells if row is shorter than header */}
                     {row.length < (sheet.rows[0]?.length ?? 0) &&
-                      Array.from({ length: (sheet.rows[0]?.length ?? 0) - row.length }).map(
-                        (_, i) => (
-                          <td
-                            key={`empty-${i}`}
-                            className="px-3 py-1.5 text-white/30 border-r border-white/5"
-                          />
-                        ))}
+                      Array.from({
+                        length: (sheet.rows[0]?.length ?? 0) - row.length,
+                      }).map((_, i) => (
+                        <td
+                          key={`empty-${i}`}
+                          className="border-r border-white/5 px-3 py-1.5 text-white/30"
+                        />
+                      ))}
                   </tr>
                 ))}
               </tbody>
@@ -126,16 +129,27 @@ export function ArtifactDetail({
   maximized,
   onToggleMaximize,
   onClose,
+  title,
+  subtitle,
+  renderContent,
 }: {
   chatId: string
   file: ArtifactFile
   maximized: boolean
   onToggleMaximize: () => void
   onClose: () => void
+  /** Overrides the name-derived title, e.g. "Todo" in the crew rail. */
+  title?: string
+  /** Overrides the folder line, e.g. the worker's name. */
+  subtitle?: string
+  /** Draws the loaded text itself instead of the usual code/markdown preview. */
+  renderContent?: (content: string) => ReactNode
 }) {
   const preview = previewFor(file.extension)
   const [content, setContent] = useState("")
-  const [sheets, setSheets] = useState<Array<{ name: string; rows: string[][] }>>([])
+  const [sheets, setSheets] = useState<
+    Array<{ name: string; rows: string[][] }>
+  >([])
   const [loaded, setLoaded] = useState(false)
   const [binary, setBinary] = useState(false)
   const [truncated, setTruncated] = useState(false)
@@ -184,7 +198,8 @@ export function ArtifactDetail({
     copyTimer.current = setTimeout(() => setCopied(false), 2000)
   }
 
-  const directory = directoryOf(file)
+  const directory = subtitle ?? directoryOf(file)
+  const displayTitle = title ?? titleFrom(file.name)
   const readable = loaded && !failed && !binary && preview !== "none"
 
   return (
@@ -195,12 +210,15 @@ export function ArtifactDetail({
           strokeWidth={2}
           className="size-4 shrink-0 text-white/50"
         />
-        <p className="flex min-w-0 flex-1 items-baseline gap-1.5" title={file.path}>
+        <p
+          className="flex min-w-0 flex-1 items-baseline gap-1.5"
+          title={file.path}
+        >
           {directory !== "" ? (
             <span className="truncate text-xs text-white/35">{directory}</span>
           ) : null}
           <span className="truncate text-sm font-medium text-white">
-            {titleFrom(file.name)}
+            {displayTitle}
           </span>
         </p>
         {file.extension !== "" ? (
@@ -226,7 +244,9 @@ export function ArtifactDetail({
           <button
             type="button"
             aria-label={`Download ${file.name}`}
-            onClick={() => startDownload(api.artifactFileUrl(chatId, file.path))}
+            onClick={() =>
+              startDownload(api.artifactFileUrl(chatId, file.path))
+            }
             className={HEADER_BUTTON}
           >
             <HugeiconsIcon
@@ -266,7 +286,7 @@ export function ArtifactDetail({
         </div>
       </header>
 
-      <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-5">
+      <div className="min-h-0 flex-1 scrollbar-thin overflow-y-auto p-5">
         {failed ? (
           <p className="text-xs text-white/40">
             {file.name} could not be read. It may have been moved or deleted.
@@ -275,7 +295,9 @@ export function ArtifactDetail({
           // The measure is capped for the same reason the reply caps it: a file
           // read at full screen is a line nobody can follow.
           <div className="mx-auto w-full max-w-[42em]">
-            {preview === "code" ? (
+            {renderContent ? (
+              renderContent(content)
+            ) : preview === "code" ? (
               <CodeBlock language={languageFor(file.extension)}>
                 {content}
               </CodeBlock>
@@ -305,8 +327,8 @@ export function ArtifactDetail({
             </div>
             <p className="text-xs text-white/40">
               No preview for{" "}
-              {file.extension === "" ? "this file" : `${file.extension} files`} —
-              download it to open it.
+              {file.extension === "" ? "this file" : `${file.extension} files`}{" "}
+              — download it to open it.
             </p>
           </div>
         )}

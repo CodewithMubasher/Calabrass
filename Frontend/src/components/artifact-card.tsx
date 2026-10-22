@@ -30,17 +30,25 @@ import { kindFor, titleFrom, type ArtifactFile } from "@/lib/artifacts"
  */
 export function ArtifactCard({
   file,
+  title,
+  subtitle,
   onSelect,
   onDownload,
 }: {
   file: ArtifactFile
+  /** Overrides the name-derived title, e.g. "Todo" in the crew rail. */
+  title?: string
+  /** Overrides the kind · extension line, e.g. the worker's name. */
+  subtitle?: string
   onSelect: () => void
   onDownload: () => void
 }) {
-  const title = titleFrom(file.name)
-  const subtitle = file.extension
-    ? `${kindFor(file.extension)} · ${file.extension}`
-    : kindFor(file.extension)
+  const displayTitle = title ?? titleFrom(file.name)
+  const displaySubtitle =
+    subtitle ??
+    (file.extension
+      ? `${kindFor(file.extension)} · ${file.extension}`
+      : kindFor(file.extension))
 
   return (
     <div
@@ -59,11 +67,11 @@ export function ArtifactCard({
         }
       }}
       title={file.path}
-      className="group flex cursor-pointer items-center gap-4 overflow-hidden rounded-2xl border border-white/10 p-3.5 outline-none transition-colors hover:border-white/25 focus-visible:ring-2 focus-visible:ring-white/20"
+      className="group flex cursor-pointer items-center gap-4 overflow-hidden rounded-2xl border border-white/10 p-3.5 transition-colors outline-none hover:border-white/25 focus-visible:ring-2 focus-visible:ring-white/20"
     >
       {/* `-mb-3.5` is the card's `p-3.5`; the two move together. The bottom
           border is dropped so the tile reads as tucked into the card's base. */}
-      <div className="grid size-14 shrink-0 -mb-3.5 self-end place-items-center rounded-t-xl border border-b-0 border-white/10 transition-colors group-hover:bg-white/5">
+      <div className="-mb-3.5 grid size-14 shrink-0 place-items-center self-end rounded-t-xl border border-b-0 border-white/10 transition-colors group-hover:bg-white/5">
         <HugeiconsIcon
           icon={File01Icon}
           strokeWidth={1.5}
@@ -72,8 +80,10 @@ export function ArtifactCard({
       </div>
 
       <div className="min-w-0 flex-1 font-outfit">
-        <p className="truncate text-sm font-medium text-white">{title}</p>
-        <p className="truncate text-xs text-white/50">{subtitle}</p>
+        <p className="truncate text-sm font-medium text-white">
+          {displayTitle}
+        </p>
+        <p className="truncate text-xs text-white/50">{displaySubtitle}</p>
       </div>
 
       <button
@@ -85,7 +95,7 @@ export function ArtifactCard({
           event.stopPropagation()
           onDownload()
         }}
-        className="grid size-9 shrink-0 cursor-pointer place-items-center rounded-full text-white/50 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-white/20"
+        className="grid size-9 shrink-0 cursor-pointer place-items-center rounded-full text-white/50 transition-colors outline-none hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-white/20"
       >
         <HugeiconsIcon
           icon={Download01Icon}
