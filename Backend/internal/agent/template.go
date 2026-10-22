@@ -35,6 +35,25 @@ type WorkerSummary struct {
 	Description string
 }
 
+// WorkerChoices lists workers as "id (Name)". It is the exact set of values
+// delegate_task accepts, so it belongs both in the prompt and in the error a
+// mistaken call gets back.
+func WorkerChoices(workers []WorkerSummary) string {
+	choices := make([]string, 0, len(workers))
+	for _, worker := range workers {
+		id := strings.TrimSpace(worker.ID)
+		if id == "" {
+			continue
+		}
+		if name := strings.TrimSpace(worker.Name); name != "" {
+			choices = append(choices, id+" ("+name+")")
+		} else {
+			choices = append(choices, id)
+		}
+	}
+	return strings.Join(choices, ", ")
+}
+
 // The placeholders a template may use.
 const (
 	placeholderWorkspace = "{{workspace}}"
@@ -98,14 +117,16 @@ func toolSection(tools []ToolSummary) string {
 }
 
 // workerSection is the workers a run may hand work to, numbered, each with
-// what it is for.
+// what it is for and the exact id delegate_task wants.
 func workerSection(workers []WorkerSummary) string {
 	if len(workers) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("Available workers:")
+	b.WriteString("\nPass the id, not the name, as workerId in delegate_task.")
 	number := 0
+	firstID := ""
 	for _, worker := range workers {
 		name := strings.TrimSpace(worker.Name)
 		if name == "" {
@@ -117,6 +138,9 @@ func workerSection(workers []WorkerSummary) string {
 		b.WriteString(". ")
 		b.WriteString(name)
 		if id := strings.TrimSpace(worker.ID); id != "" {
+			if firstID == "" {
+				firstID = id
+			}
 			b.WriteString(" (id: ")
 			b.WriteString(id)
 			b.WriteString(")")
@@ -130,6 +154,11 @@ func workerSection(workers []WorkerSummary) string {
 	}
 	if number == 0 {
 		return ""
+	}
+	if firstID != "" {
+		b.WriteString("\n\nExample: delegate_task({\"workerId\": \"")
+		b.WriteString(firstID)
+		b.WriteString("\", \"task\": \"What the worker must do\", \"context\": \"What is already known\"})")
 	}
 	return b.String()
 }

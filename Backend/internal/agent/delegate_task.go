@@ -43,14 +43,56 @@ type DelegateTaskArgs struct {
 	Context  string `json:"context,omitempty" jsonschema:"description=Anything already known that the worker should not have to rediscover"`
 }
 
+// UnmarshalJSON accepts the other names a model may reach for when it misses
+// workerId. The schema offers workerId and nothing else, but a model that sends
+// "worker" or the worker's name should still delegate rather than fail on a
+// naming difference. The worker still has to resolve to a real one.
+func (a *DelegateTaskArgs) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		WorkerID    string `json:"workerId"`
+		Worker      string `json:"worker"`
+		WorkerName  string `json:"workerName"`
+		AgentID     string `json:"agentId"`
+		ID          string `json:"id"`
+		Task        string `json:"task"`
+		Instruction string `json:"instruction"`
+		Context     string `json:"context"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	a.WorkerID = firstText(raw.WorkerID, raw.Worker, raw.WorkerName, raw.AgentID, raw.ID)
+	a.Task = firstText(raw.Task, raw.Instruction)
+	a.Context = strings.TrimSpace(raw.Context)
+	return nil
+}
+
+// firstText returns the first value that has something in it.
+func firstText(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
 // DelegateTask runs a task with a worker agent: its prompt, its tools, its
 // skills, in the same workspace, and returns the worker's report.
 type DelegateTask func(ctx context.Context, args DelegateTaskArgs) (string, error)
 
 // DelegateTaskTool is the tool the Orchestrator uses to hand work to a worker.
-func DelegateTaskTool(run DelegateTask) goai.Tool {
-	return goai.NewTool("delegate_task",
-		"Hand a task to one worker agent. The worker has its own prompt, tools, and skills, and runs to completion. It returns a report with a status, a summary, and the files it changed. This is the only way to get coding work done: do the planning, then delegate.",
+// The workers are named in the description as well as the prompt: the tool
+// definition is read on every step, so the ids are in front of the model when
+// it writes the call.
+func DelegateTaskTool(workers []WorkerSummary, run DelegateTask) goai.Tool {
+	description := "Hand a task to one worker agent."
+	if choices := WorkerChoices(workers); choices != "" {
+		description = "Hand a task to one worker agent, chosen by workerId, which must be one of: " + choices + "."
+	}
+	description += " It has its own prompt, tools, and skills, and runs to completion. It returns a report with a status, a summary, and the files it changed. This is the only way to get coding work done: do the planning, then delegate."
+
+	return goai.NewTool("delegate_task", description,
 		func(ctx context.Context, args DelegateTaskArgs) (string, error) {
 			return run(ctx, args)
 		})

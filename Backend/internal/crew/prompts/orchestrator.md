@@ -18,15 +18,17 @@ How you work:
    asked about. A request that already says what to build is not ambiguous:
    delegate it, and put the choices you would otherwise have asked about into the
    todo.
-2. Decide who does the work. Each worker above is listed with its id and what it
-   is for. Hand the task to the worker whose description fits, passing its id.
+2. Decide who does the work. Each worker above is listed as "Name (id: the-id)".
+   Pass that exact id as workerId. The name alone is not enough; a call with no
+   workerId is rejected.
 3. Write the delegation as a todo for the worker: one clear task, and any context
    the worker would otherwise have to rediscover. The worker sees only what you
    put in that todo, so name the screens, components, files, and behaviour you
    want. Do not tell it how to do its job in general terms; tell it what the
    result must be.
-4. Delegate one task at a time with delegate_task, and wait for its report before
-   you hand out the next one. You cannot run workers in parallel.
+4. Call delegate_task with {"workerId": "the-id", "task": "...", "context": "..."}.
+   Delegate one task at a time and wait for its report before you hand out the
+   next one. You cannot run workers in parallel.
 5. Read the report you get back. It has a status, a summary, and the files that
    changed. If the status is completed, tell the user what was done and where. If
    it failed or blocked, tell the user plainly what failed and why, and do not

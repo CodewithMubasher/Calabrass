@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
@@ -80,6 +81,144 @@ func TestACrewTurnWithoutAnAgentIsTheOrchestratorTurn(t *testing.T) {
 	}
 	if !strings.Contains(setup.system, "Orchestrator") {
 		t.Fatalf("the crew turn does not describe the Orchestrator:\n%s", setup.system)
+	}
+	// The ids are the one fact the model cannot infer. They must be in the
+	// prompt even if a saved persona lost the placeholder.
+	if !strings.Contains(setup.system, "id: "+crew.BuiltinFrontendDeveloperID) {
+		t.Fatalf("the crew turn does not name the worker id:\n%s", setup.system)
+	}
+	for _, tool := range setup.tools {
+		if tool.Name == "delegate_task" && !strings.Contains(tool.Description, crew.BuiltinFrontendDeveloperID) {
+			t.Fatalf("delegate_task does not name the worker id:\n%s", tool.Description)
+		}
+	}
+}
+
+// newCrewTestServer builds the pieces delegateTask needs: a store for the
+// agents and a workspace for the .crew files. No provider is registered, so a
+// worker run ends with the "no model" report; the todo is still written, which
+// is what these tests read.
+func newCrewTestServer(t *testing.T) (*Server, *agent.Workspace) {
+	t.Helper()
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "calabrass.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ws, err := agent.NewWorkspace(t.TempDir())
+	if err != nil {
+		t.Fatalf("workspace: %v", err)
+	}
+
+	return &Server{store: st, log: slog.Default()}, ws
+}
+
+// readTodo reads the todo delegateTask wrote for one worker.
+func readTodo(t *testing.T, workspaceRoot, workerID string) agent.DelegateTaskTodo {
+	t.Helper()
+
+	orchestratorDir, _ := agent.CrewDirs(workspaceRoot)
+	data, err := os.ReadFile(agent.DelegateTaskTodoPath(orchestratorDir, workerID))
+	if err != nil {
+		t.Fatalf("read the todo for %s: %v", workerID, err)
+	}
+
+	var todo agent.DelegateTaskTodo
+	if err := json.Unmarshal(data, &todo); err != nil {
+		t.Fatalf("read the todo JSON: %v", err)
+	}
+	return todo
+}
+
+// A model that drops workerId still delegates when there is one worker: there
+// is nothing to choose, so the only worker is used.
+func TestDelegateTaskUsesTheOnlyWorkerWhenTheIDIsMissing(t *testing.T) {
+	s, ws := newCrewTestServer(t)
+
+	report, err := s.delegateTask(context.Background(), "", "chat-1", ws.Root(), agent.DelegateTaskArgs{
+		Task: "Build the Foodie page",
+	})
+	if err != nil {
+		t.Fatalf("delegating without an id: %v", err)
+	}
+	if !strings.Contains(report, `"workerId": "builtin-frontend-developer"`) {
+		t.Fatalf("the report is not for the Frontend Developer:\n%s", report)
+	}
+
+	todo := readTodo(t, ws.Root(), crew.BuiltinFrontendDeveloperID)
+	if todo.WorkerID != crew.BuiltinFrontendDeveloperID {
+		t.Fatalf("the todo went to %q, want the Frontend Developer", todo.WorkerID)
+	}
+	if todo.Task != "Build the Foodie page" {
+		t.Fatalf("the todo task is %q", todo.Task)
+	}
+}
+
+// The worker's name, or its id without the built-in prefix, resolves to the
+// same worker rather than failing on a naming difference.
+func TestDelegateTaskResolvesTheWorkerByName(t *testing.T) {
+	for _, wanted := range []string{"Frontend Developer", "frontend-developer"} {
+		t.Run(wanted, func(t *testing.T) {
+			s, ws := newCrewTestServer(t)
+
+			if _, err := s.delegateTask(context.Background(), "", "chat-1", ws.Root(), agent.DelegateTaskArgs{
+				WorkerID: wanted,
+				Task:     "Build the Foodie page",
+			}); err != nil {
+				t.Fatalf("delegating to %q: %v", wanted, err)
+			}
+
+			todo := readTodo(t, ws.Root(), crew.BuiltinFrontendDeveloperID)
+			if todo.WorkerID != crew.BuiltinFrontendDeveloperID {
+				t.Fatalf("the todo went to %q", todo.WorkerID)
+			}
+		})
+	}
+}
+
+// With more than one worker the id matters, so a call without one is refused
+// with the ids to choose from instead of a bare "a workerId is required".
+func TestDelegateTaskWithoutAnIDListsTheWorkers(t *testing.T) {
+	s, ws := newCrewTestServer(t)
+
+	if _, err := s.store.CreateAgent(context.Background(), store.AgentRecord{
+		Name:        "Backend Developer",
+		Prompt:      "Build the backend.",
+		Description: "Builds APIs.",
+		Mode:        agent.ModeCrew,
+	}); err != nil {
+		t.Fatalf("create the second worker: %v", err)
+	}
+
+	_, err := s.delegateTask(context.Background(), "", "chat-1", ws.Root(), agent.DelegateTaskArgs{
+		Task: "Build the Foodie page",
+	})
+	if err == nil {
+		t.Fatal("delegating with two workers and no id was accepted")
+	}
+	for _, want := range []string{"workerId is required", "builtin-frontend-developer", "Frontend Developer"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error does not mention %q: %v", want, err)
+		}
+	}
+}
+
+// An id that names nobody gets the choices back, so the model can retry in the
+// same turn.
+func TestDelegateTaskUnknownIDListsTheWorkers(t *testing.T) {
+	s, ws := newCrewTestServer(t)
+
+	_, err := s.delegateTask(context.Background(), "", "chat-1", ws.Root(), agent.DelegateTaskArgs{
+		WorkerID: "somebody",
+		Task:     "Build the Foodie page",
+	})
+	if err == nil {
+		t.Fatal("an unknown worker id was accepted")
+	}
+	if !strings.Contains(err.Error(), "builtin-frontend-developer") {
+		t.Errorf("the error does not list the real worker: %v", err)
 	}
 }
 

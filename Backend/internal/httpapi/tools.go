@@ -184,22 +184,24 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 // harness rules, because "you can read, write and edit files" is the opposite of
 // what the Orchestrator is for.
 func (s *Server) orchestratorTurn(ctx context.Context, userID string, workspace *agent.Workspace, chatID, prompt string) turnSetup {
-	tools := []goai.Tool{s.askQuestionsTool()}
-
 	workspaceRoot := ""
 	if workspace != nil {
 		workspaceRoot = workspace.Root()
 	}
-	tools = append(tools, agent.DelegateTaskTool(func(toolCtx context.Context, args agent.DelegateTaskArgs) (string, error) {
-		if workspaceRoot == "" {
-			return "", errors.New("this chat has no workspace, so there is nowhere to run a worker")
-		}
-		return s.delegateTask(toolCtx, userID, chatID, workspaceRoot, args)
-	}))
 
 	workers, err := s.workerSummaries(ctx, userID)
 	if err != nil {
 		s.log.Warn("could not list workers for the Orchestrator", "error", err)
+	}
+
+	tools := []goai.Tool{s.askQuestionsTool()}
+	if len(workers) > 0 {
+		tools = append(tools, agent.DelegateTaskTool(workers, func(toolCtx context.Context, args agent.DelegateTaskArgs) (string, error) {
+			if workspaceRoot == "" {
+				return "", errors.New("this chat has no workspace, so there is nowhere to run a worker")
+			}
+			return s.delegateTask(toolCtx, userID, chatID, workspaceRoot, args)
+		}))
 	}
 
 	rendered := agent.RenderTemplate(prompt, agent.PromptVars{
@@ -208,6 +210,15 @@ func (s *Server) orchestratorTurn(ctx context.Context, userID string, workspace 
 		Tools:     toolSummaries(tools),
 		Workers:   workers,
 	})
+
+	// The worker ids are the one thing the model cannot work out for itself. A
+	// saved prompt may have lost {{workers_section}}, or never had it, so the
+	// list is put back rather than trusting the template to still carry it.
+	if section := agent.RenderTemplate("{{workers_section}}", agent.PromptVars{Workers: workers}); section != "" {
+		if !strings.Contains(rendered, section) {
+			rendered = strings.TrimSpace(rendered) + "\n\n" + section
+		}
+	}
 
 	budget := agent.DefaultBudget(agent.ModeCrew)
 	runState := agent.NewRunState(budget)

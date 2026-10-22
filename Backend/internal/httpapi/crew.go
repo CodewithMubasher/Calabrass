@@ -199,6 +199,32 @@ func (s *Server) crewLock(chatID string) *sync.Mutex {
 	return lock
 }
 
+// workerByLooseName finds a worker by its name, or by its id without the
+// built-in prefix. A model often writes "Frontend Developer" or
+// "frontend-developer" when the exact value is "builtin-frontend-developer";
+// that is a naming difference, not a reason to stop the delegation.
+func (s *Server) workerByLooseName(ctx context.Context, userID, want string) (string, bool) {
+	want = strings.Trim(strings.ToLower(strings.TrimSpace(want)), `.,;:"'`)
+	if want == "" {
+		return "", false
+	}
+	wantSlug := strings.ReplaceAll(want, " ", "-")
+
+	workers, err := s.workerSummaries(ctx, userID)
+	if err != nil {
+		return "", false
+	}
+	for _, worker := range workers {
+		id := strings.ToLower(strings.TrimSpace(worker.ID))
+		name := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(worker.Name)), " ", "-")
+		if id == want || name == wantSlug || name == want ||
+			strings.TrimPrefix(id, crew.BuiltinIDPrefix) == wantSlug {
+			return worker.ID, true
+		}
+	}
+	return "", false
+}
+
 // delegateTask writes the todo, runs the worker, and makes sure a report is on
 // disk either way. A worker that failed is still a finished delegation: the
 // report says so and the Orchestrator is told, rather than the whole turn
@@ -206,7 +232,21 @@ func (s *Server) crewLock(chatID string) *sync.Mutex {
 func (s *Server) delegateTask(ctx context.Context, userID, chatID, workspaceRoot string, args agent.DelegateTaskArgs) (string, error) {
 	workerID := strings.TrimSpace(args.WorkerID)
 	if workerID == "" {
-		return "", errors.New("a workerId is required")
+		workers, err := s.workerSummaries(ctx, userID)
+		if err != nil {
+			return "", err
+		}
+		switch len(workers) {
+		case 0:
+			return "", errors.New("a workerId is required, but there are no workers available")
+		case 1:
+			// With one worker there is nothing to choose. A model that drops
+			// the id still gets the work done instead of stopping on a naming
+			// detail.
+			workerID = workers[0].ID
+		default:
+			return "", fmt.Errorf("a workerId is required; choose one of: %s", agent.WorkerChoices(workers))
+		}
 	}
 	if strings.TrimSpace(args.Task) == "" {
 		return "", errors.New("a task is required")
@@ -214,6 +254,18 @@ func (s *Server) delegateTask(ctx context.Context, userID, chatID, workspaceRoot
 
 	worker, _, err := s.resolveAgent(ctx, userID, workerID)
 	if errors.Is(err, store.ErrNotFound) {
+		// A model may write the worker's name, or its id without the built-in
+		// prefix, instead of the exact id. Resolve those before failing.
+		if canonical, ok := s.workerByLooseName(ctx, userID, workerID); ok {
+			workerID = canonical
+			worker, _, err = s.resolveAgent(ctx, userID, workerID)
+		}
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		workers, _ := s.workerSummaries(ctx, userID)
+		if choices := agent.WorkerChoices(workers); choices != "" {
+			return "", fmt.Errorf("there is no worker with id %q; choose one of: %s", workerID, choices)
+		}
 		return "", fmt.Errorf("there is no worker with id %q", workerID)
 	}
 	if err != nil {
