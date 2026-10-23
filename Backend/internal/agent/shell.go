@@ -31,9 +31,10 @@ const (
 	// shellOutputBytes caps what one command returns (total JSON size budget).
 	shellOutputBytes = 32 << 10
 	// outputHeadBytes is how many bytes to keep from the start of output.
-	outputHeadBytes = 512
-	// outputTailBytes is how many bytes to keep from the end of output.
-	outputTailBytes = 2048
+	outputHeadBytes = 2 << 10
+	// outputTailBytes is how many bytes to keep from the end of output. Build
+	// and test failures live at the end, so the tail is the larger half.
+	outputTailBytes = 8 << 10
 )
 
 // runCommandArgs is the wire shape of run_command: the JSON Schema is generated
@@ -46,10 +47,11 @@ type runCommandArgs struct {
 
 // shellToolResult is the structured result returned to the model.
 type shellToolResult struct {
-	ExitCode  int    `json:"exit_code"`
-	Cwd       string `json:"cwd"`
-	DurationMs int64 `json:"duration_ms"`
-	Output    string `json:"output"`
+	ExitCode   int    `json:"exit_code"`
+	Cwd        string `json:"cwd"`
+	DurationMs int64  `json:"duration_ms"`
+	TimedOut   bool   `json:"timed_out,omitempty"`
+	Output     string `json:"output"`
 }
 
 func shellTool(ws *Workspace) goai.Tool {
@@ -151,6 +153,13 @@ func (w *Workspace) runCommand(ctx context.Context, args runCommandArgs) (string
 	cleanOutput := stripAnsiAndClixml(rawOutput)
 	trimmedOutput := trimOutput(cleanOutput)
 
+	timedOut := runCtx.Err() == context.DeadlineExceeded
+	if timedOut {
+		// The command may have done part of its work before it was killed.
+		// Saying so is what stops the model from assuming a clean failure.
+		trimmedOutput += "\n[Hint] The command hit its timeout and was stopped. It may have completed part of its work; inspect the current state before retrying, or raise timeout_seconds."
+	}
+
 	// Hint injection for known error patterns
 	hint := detectHint(trimmedOutput, cwd, w.Root())
 	if hint != "" {
@@ -161,6 +170,7 @@ func (w *Workspace) runCommand(ctx context.Context, args runCommandArgs) (string
 		ExitCode:   exitCode,
 		Cwd:        cwd,
 		DurationMs: durationMs,
+		TimedOut:   timedOut,
 		Output:     trimmedOutput,
 	}
 

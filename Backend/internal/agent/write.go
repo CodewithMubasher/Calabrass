@@ -134,6 +134,15 @@ func (w *Workspace) editFile(args editFileArgs) (string, error) {
 	count := strings.Count(text, args.OldString)
 	switch {
 	case count == 0:
+		// A substantive replacement that is already in the file exactly once is
+		// evidence that the change was applied, perhaps by an earlier call
+		// whose result was lost. A short fragment is not evidence: it may be
+		// ordinary text that has nothing to do with this edit.
+		replacement := strings.TrimSpace(args.NewString)
+		if len(replacement) >= 8 && strings.Count(text, replacement) == 1 {
+			return "", ErrAlreadyAppliedTool(fmt.Sprintf(
+				"oldString is not in %s, but the replacement text is already present once; the change may already be applied", w.Rel(abs)))
+		}
 		return "", fmt.Errorf("oldString is not in %s; read the file again and copy the text exactly", w.Rel(abs))
 	case count > 1 && !args.ReplaceAll:
 		return "", fmt.Errorf("oldString appears %d times in %s; add more surrounding lines or set replaceAll", count, w.Rel(abs))
