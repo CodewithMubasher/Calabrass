@@ -220,6 +220,15 @@ func (s *Server) orchestratorTurn(ctx context.Context, userID string, workspace 
 		}
 	}
 
+	// The conversation is not the only memory of a long task. The persisted
+	// journal says what was completed, what failed, and what was started but
+	// never reported, and it survives a reload or a restart.
+	if workspaceRoot != "" {
+		if state := agent.CrewTaskState(workspaceRoot, chatID); state != "" {
+			rendered = strings.TrimSpace(rendered) + "\n\n" + state
+		}
+	}
+
 	budget := agent.DefaultBudget(agent.ModeCrew)
 	runState := agent.NewRunState(budget)
 	return turnSetup{

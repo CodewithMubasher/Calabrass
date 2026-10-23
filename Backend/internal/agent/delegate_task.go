@@ -42,9 +42,10 @@ const (
 
 // DelegateTaskArgs is the wire shape of delegate_task.
 type DelegateTaskArgs struct {
-	WorkerID string `json:"workerId" jsonschema:"description=The id of the worker to delegate to, exactly as listed in the Available workers section"`
-	Task     string `json:"task" jsonschema:"description=What the worker must do, written as a clear instruction"`
-	Context  string `json:"context,omitempty" jsonschema:"description=Anything already known that the worker should not have to rediscover"`
+	WorkerID   string   `json:"workerId" jsonschema:"description=The id of the worker to delegate to, exactly as listed in the Available workers section"`
+	Task       string   `json:"task" jsonschema:"description=What the worker must do, written as a clear instruction"`
+	Context    string   `json:"context,omitempty" jsonschema:"description=Anything already known that the worker should not have to rediscover"`
+	Acceptance []string `json:"acceptance,omitempty" jsonschema:"description=What must be true for this task to count as done; concrete checks or outcomes"`
 }
 
 // UnmarshalJSON accepts the other names a model may reach for when it misses
@@ -53,14 +54,17 @@ type DelegateTaskArgs struct {
 // naming difference. The worker still has to resolve to a real one.
 func (a *DelegateTaskArgs) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		WorkerID    string `json:"workerId"`
-		Worker      string `json:"worker"`
-		WorkerName  string `json:"workerName"`
-		AgentID     string `json:"agentId"`
-		ID          string `json:"id"`
-		Task        string `json:"task"`
-		Instruction string `json:"instruction"`
-		Context     string `json:"context"`
+		WorkerID    string   `json:"workerId"`
+		Worker      string   `json:"worker"`
+		WorkerName  string   `json:"workerName"`
+		AgentID     string   `json:"agentId"`
+		ID          string   `json:"id"`
+		Task        string   `json:"task"`
+		Instruction string   `json:"instruction"`
+		Context     string   `json:"context"`
+		Acceptance  []string `json:"acceptance"`
+		Done        []string `json:"done"`
+		Criteria    []string `json:"criteria"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -68,6 +72,17 @@ func (a *DelegateTaskArgs) UnmarshalJSON(data []byte) error {
 	a.WorkerID = firstText(raw.WorkerID, raw.Worker, raw.WorkerName, raw.AgentID, raw.ID)
 	a.Task = firstText(raw.Task, raw.Instruction)
 	a.Context = strings.TrimSpace(raw.Context)
+	a.Acceptance = firstList(raw.Acceptance, raw.Done, raw.Criteria)
+	return nil
+}
+
+// firstList returns the first list that carries something.
+func firstList(values ...[]string) []string {
+	for _, value := range values {
+		if len(value) > 0 {
+			return value
+		}
+	}
 	return nil
 }
 
@@ -94,7 +109,7 @@ func DelegateTaskTool(workers []WorkerSummary, run DelegateTask) goai.Tool {
 	if choices := WorkerChoices(workers); choices != "" {
 		description = "Hand a task to one worker agent, chosen by workerId, which must be one of: " + choices + "."
 	}
-	description += " It has its own prompt, tools, and skills, and runs to completion. It returns a report with a status, a summary, and the files it changed. This is the only way to get coding work done: do the planning, then delegate."
+	description += " It has its own prompt, tools, and skills, and runs to completion. It returns a report with a status, a summary, the files it changed, what it checked, and anything unresolved. State the task, the context the worker needs, and what must be true for it to count as done. This is the only way to get coding work done: do the planning, then delegate. Do not delegate a task that a report in the crew state already says is completed."
 
 	return goai.NewTool("delegate_task", description,
 		func(ctx context.Context, args DelegateTaskArgs) (string, error) {
@@ -106,14 +121,15 @@ func DelegateTaskTool(workers []WorkerSummary, run DelegateTask) goai.Tool {
 // context are the instruction; the paths say where the report belongs, and the
 // workspace says which project the worker is in.
 type DelegateTaskTodo struct {
-	WorkerID   string `json:"workerId"`
-	WorkerName string `json:"workerName"`
-	Task       string `json:"task"`
-	Context    string `json:"context,omitempty"`
-	Workspace  string `json:"workspace"`
-	CreatedAt  string `json:"createdAt"`
-	TodoPath   string `json:"todoPath"`
-	ReportPath string `json:"reportPath"`
+	WorkerID   string   `json:"workerId"`
+	WorkerName string   `json:"workerName"`
+	Task       string   `json:"task"`
+	Context    string   `json:"context,omitempty"`
+	Acceptance []string `json:"acceptance,omitempty"`
+	Workspace  string   `json:"workspace"`
+	CreatedAt  string   `json:"createdAt"`
+	TodoPath   string   `json:"todoPath"`
+	ReportPath string   `json:"reportPath"`
 }
 
 // DelegateTaskReport is the strict interface a worker answers through. A run is
@@ -126,7 +142,9 @@ type DelegateTaskReport struct {
 	Summary      string   `json:"summary"`                // one line: what was done
 	FilesChanged []string `json:"filesChanged,omitempty"` // paths relative to the workspace
 	Checks       []string `json:"checks,omitempty"`       // what was verified: build, lint, tests
+	Unresolved   []string `json:"unresolved,omitempty"`   // what remains, or what the next worker needs
 	Error        string   `json:"error,omitempty"`        // required when status is not completed
+	Partial      bool     `json:"partial,omitempty"`
 	StartedAt    string   `json:"startedAt,omitempty"`
 	FinishedAt   string   `json:"finishedAt,omitempty"`
 }
@@ -138,6 +156,7 @@ type ReportTaskArgs struct {
 	Summary      string   `json:"summary" jsonschema:"description=One line saying what was done"`
 	FilesChanged []string `json:"filesChanged,omitempty" jsonschema:"description=Paths of the files created or changed, relative to the workspace root"`
 	Checks       []string `json:"checks,omitempty" jsonschema:"description=What you verified, for example build, lint, tests, manual check"`
+	Unresolved   []string `json:"unresolved,omitempty" jsonschema:"description=What remains unfinished, what is uncertain, or what the next worker needs to know"`
 	Error        string   `json:"error,omitempty" jsonschema:"description=What went wrong; required unless status is completed"`
 }
 
@@ -147,7 +166,7 @@ type ReportTaskArgs struct {
 // calls it has not finished.
 func ReportTaskTool(write func(args ReportTaskArgs) (string, error)) goai.Tool {
 	return goai.NewTool("report_task",
-		"Finish the task by reporting the result. You MUST call this exactly once before you stop. status is completed, failed, or blocked. summary is one line. List every file you created or changed, and what you checked. If you are not completed, fill in error with the real reason.",
+		"Finish the task by reporting the result. You MUST call this exactly once before you stop. status is completed, failed, or blocked. summary is one line. List every file you created or changed, what you actually checked, and anything unresolved. If you are not completed, fill in error with the real reason.",
 		func(ctx context.Context, args ReportTaskArgs) (string, error) {
 			return write(args)
 		})
@@ -222,6 +241,9 @@ func ValidateReport(report *DelegateTaskReport) error {
 	report.Status = NormalizeReportStatus(report.Status)
 	report.Summary = strings.TrimSpace(report.Summary)
 	report.Error = strings.TrimSpace(report.Error)
+	report.FilesChanged = trimList(report.FilesChanged)
+	report.Checks = trimList(report.Checks)
+	report.Unresolved = trimList(report.Unresolved)
 
 	if report.Status == "" {
 		report.Status = ReportFailed
@@ -241,6 +263,28 @@ func ValidateReport(report *DelegateTaskReport) error {
 		report.Error = "The worker reported " + report.Status + " without a reason."
 	}
 	return nil
+}
+
+// trimList removes blanks, duplicates and surrounding space while preserving
+// order. Report fields reach a prompt, so empty strings are noise.
+func trimList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // MarshalIndentJSON is how both crew files are written: indented and newline
