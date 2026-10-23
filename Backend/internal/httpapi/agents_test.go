@@ -31,10 +31,10 @@ func TestAgentEndpoints(t *testing.T) {
 		`{"name":"Researcher","prompt":"Find the primary sources.","mode":"crew",
 		  "connectorId":"c1","provider":"google","model":"gemini-2.5-pro",
 		  "altProvider":"groq","altModel":"llama-3.3-70b"}`)
-	if len(agents) != 3 {
+	if len(agents) != 4 {
 		t.Fatalf("creating an agent answered with %d of them", len(agents))
 	}
-	// The list includes the built-in orchestrator and the one we just created.
+	// The list includes the built-in orchestrator, the built-in workers, and the one we just created.
 	var created store.AgentRecord
 	for _, a := range agents {
 		if a.Name == "Researcher" {
@@ -56,16 +56,16 @@ func TestAgentEndpoints(t *testing.T) {
 	}
 
 	agents = callAgents(t, server, token, http.MethodGet, "/api/agents", "")
-	if len(agents) != 3 {
+	if len(agents) != 4 {
 		t.Fatalf("the list has %d agents", len(agents))
 	}
 
 	agents = callAgents(t, server, token, http.MethodPut, "/api/agents/"+created.ID,
 		`{"name":"Researcher","prompt":"Find and cite.","mode":"chat"}`)
-	if len(agents) != 3 {
+	if len(agents) != 4 {
 		t.Fatalf("saving it answered with %d of them", len(agents))
 	}
-	// The saved agent is in the list alongside the built-in.
+	// The saved agent is in the list alongside the built-ins.
 	var updated store.AgentRecord
 	for _, a := range agents {
 		if a.ID == created.ID {
@@ -83,8 +83,8 @@ func TestAgentEndpoints(t *testing.T) {
 	}
 
 	agents = callAgents(t, server, token, http.MethodDelete, "/api/agents/"+created.ID, "")
-	// The built-in remains.
-	if len(agents) != 2 {
+	// The built-ins remain.
+	if len(agents) != 3 {
 		t.Fatalf("after removing it the list has %d agents", len(agents))
 	}
 }

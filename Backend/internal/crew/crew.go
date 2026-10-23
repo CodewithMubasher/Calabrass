@@ -21,6 +21,7 @@ import (
 
 //go:embed prompts/orchestrator.md
 //go:embed prompts/frontend-developer.md
+//go:embed prompts/project-analyzer.md
 var promptFS embed.FS
 
 // BuiltinIDPrefix marks the ids of the agents the app ships with. Every
@@ -32,6 +33,7 @@ const BuiltinIDPrefix = "builtin-"
 const (
 	BuiltinOrchestratorID      = BuiltinIDPrefix + "orchestrator"
 	BuiltinFrontendDeveloperID = BuiltinIDPrefix + "frontend-developer"
+	BuiltinProjectAnalyzerID   = BuiltinIDPrefix + "project-analyzer"
 )
 
 // The two roles a built-in can have. A built-in is an orchestrator when its id
@@ -93,6 +95,15 @@ func Builtins() []Builtin {
 			Role:        RoleWorker,
 			PromptName:  "frontend-developer.md",
 			Skills:      []string{"frontend-design"},
+		},
+		{
+			ID:          BuiltinProjectAnalyzerID,
+			Name:        "Project Analyzer",
+			Description: "Reads and understands large codebases: structure, conventions, dependencies, and call chains. Uses parallel reads, the symbol index, and targeted searches to answer questions accurately without reading everything.",
+			Mode:        store.ModeCrew,
+			Role:        RoleWorker,
+			PromptName:  "project-analyzer.md",
+			Skills:      []string{"project-analysis"},
 		},
 	}
 }

@@ -100,6 +100,50 @@ disabled, loading, empty, and error.
 - [ ] No text below 13px, no contrast failure, no horizontal scroll on mobile.
 - [ ] The project's lint, typecheck, and build pass.
 `,
+	"project-analysis": `# Project analysis
+
+Use this skill whenever you are asked to understand, map, or explain a codebase.
+You do not write code — you read, trace, and report.
+
+## How to explore
+
+- **Start from the entry points**: main, routes, handlers, public APIs. Follow
+  imports and references from there.
+- **Use the symbol index** (project map) to jump to definitions instead of
+  searching blindly. It knows types, functions, and their callers.
+- **Read only the important files**. A large project has thousands of files;
+  you cannot read them all. Focus on configuration, module boundaries, and the
+  call chains relevant to the question.
+- **Call tools in parallel** when you need to read multiple files, list multiple
+  directories, or search for multiple patterns. Do it in one turn — the tools
+  support concurrent calls.
+
+## What to look for
+
+- **Architecture**: layers, modules, boundaries, dependency direction.
+- **Conventions**: naming, file layout, error handling, logging, testing patterns.
+- **Data flow**: how a request becomes a response; where state lives; how it
+  moves between components.
+- **Extension points**: interfaces, plugins, hooks, middleware — where the
+  project expects you to add behaviour.
+- **Gotchas**: generated code, vendored deps, build-time codegen, platform-
+  specific files, runtime-only behaviour.
+
+## Reporting
+
+- Lead with the answer: what you found, where, and what it means.
+- Name the key files and symbols. Paths relative to the workspace root.
+- If something could not be found, say exactly what you looked for and why it
+  might not be there.
+- Do not dump raw file contents unless asked. Summarise.
+
+## Finish checklist
+
+- [ ] The question is answered directly.
+- [ ] Key files and symbols are named.
+- [ ] Conventions and patterns are described.
+- [ ] Gaps and uncertainties are acknowledged.
+`,
 }
 
 // EnsureDefaultSkills installs the shipped skills that are not already there.

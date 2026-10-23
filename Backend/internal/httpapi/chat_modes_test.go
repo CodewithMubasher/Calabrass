@@ -172,7 +172,7 @@ func TestAgentModeIsTheDefaultForItsChats(t *testing.T) {
 
 	agents := callAgents(t, server, token, http.MethodPost, "/api/agents",
 		`{"name":"Builder","prompt":"Do the work.","mode":"crew"}`)
-	if len(agents) != 3 {
+	if len(agents) != 4 {
 		t.Fatalf("creating an agent answered with %d of them", len(agents))
 	}
 	var created store.AgentRecord

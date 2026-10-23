@@ -132,30 +132,6 @@ func readTodo(t *testing.T, workspaceRoot, chatID, workerID string) agent.Delega
 	return todo
 }
 
-// A model that drops workerId still delegates when there is one worker: there
-// is nothing to choose, so the only worker is used.
-func TestDelegateTaskUsesTheOnlyWorkerWhenTheIDIsMissing(t *testing.T) {
-	s, ws := newCrewTestServer(t)
-
-	report, err := s.delegateTask(context.Background(), "", "chat-1", ws.Root(), agent.DelegateTaskArgs{
-		Task: "Build the Foodie page",
-	})
-	if err != nil {
-		t.Fatalf("delegating without an id: %v", err)
-	}
-	if !strings.Contains(report, `"workerId": "builtin-frontend-developer"`) {
-		t.Fatalf("the report is not for the Frontend Developer:\n%s", report)
-	}
-
-	todo := readTodo(t, ws.Root(), "chat-1", crew.BuiltinFrontendDeveloperID)
-	if todo.WorkerID != crew.BuiltinFrontendDeveloperID {
-		t.Fatalf("the todo went to %q, want the Frontend Developer", todo.WorkerID)
-	}
-	if todo.Task != "Build the Foodie page" {
-		t.Fatalf("the todo task is %q", todo.Task)
-	}
-}
-
 // The worker's name, or its id without the built-in prefix, resolves to the
 // same worker rather than failing on a naming difference.
 func TestDelegateTaskResolvesTheWorkerByName(t *testing.T) {
