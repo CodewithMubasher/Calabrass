@@ -466,7 +466,10 @@ func (s *Server) workerSystemPrompt(ctx context.Context, worker store.AgentRecor
 	})
 
 	projectMap := agent.ScanProjectMap(ctx, workspace.Root()).ProjectMapString()
-	harness := withoutScheduleTask(agent.SystemPrompt(workspace, persona, nil, agent.ModeCrew, projectMap))
+	// A worker gets the harness without the tools it does not have: no
+	// ask_questions and no schedule_task. Building it here rather than editing
+	// the shared prompt afterwards keeps the two from drifting apart.
+	harness := agent.WorkerPrompt(workspace, persona, projectMap)
 
 	var b strings.Builder
 	b.WriteString(harness)
@@ -508,10 +511,8 @@ func (s *Server) workerSystemPrompt(ctx context.Context, worker store.AgentRecor
 	return b.String()
 }
 
-// withoutScheduleTask drops the harness's schedule_task advice from a worker's
-// prompt. A worker has no scheduler — it finishes one task and reports — and a
-// prompt that describes a tool the model does not have invites a call that can
-// only fail.
+// withoutScheduleTask is kept for callers outside this file; the worker prompt
+// itself is now built without the scheduler line rather than edited afterwards.
 func withoutScheduleTask(prompt string) string {
 	lines := strings.Split(prompt, "\n")
 	kept := make([]string, 0, len(lines))

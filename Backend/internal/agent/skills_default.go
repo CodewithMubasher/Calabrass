@@ -109,8 +109,9 @@ You do not write code — you read, trace, and report.
 
 - **Start from the entry points**: main, routes, handlers, public APIs. Follow
   imports and references from there.
-- **Use the symbol index** (project map) to jump to definitions instead of
-  searching blindly. It knows types, functions, and their callers.
+- **Search before you walk**: use grep to find a definition or a call site, and
+  glob to find files by name. Prefer a narrow pattern over a repository-wide
+  scan.
 - **Read only the important files**. A large project has thousands of files;
   you cannot read them all. Focus on configuration, module boundaries, and the
   call chains relevant to the question.

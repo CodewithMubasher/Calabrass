@@ -3,11 +3,17 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
+
+// agentRulesMaxBytes caps the project rules injected into every prompt. A large
+// AGENTS.md or CAL.md is still useful, but not at the cost of the conversation.
+const agentRulesMaxBytes = 16 << 10
 
 // ProjectMap is the scanned summary of a workspace, injected into the system prompt.
 type ProjectMap struct {
@@ -29,19 +35,28 @@ type ProjectInfo struct {
 }
 
 // ScanProjectMap walks the workspace root (depth 2) and builds a ProjectMap.
-// It is called fresh on every run; no cache invalidation.
+// It is called fresh on every run; no cache invalidation. The scan is bounded
+// and stops when ctx is cancelled, so a cancelled turn does not keep walking a
+// large workspace.
 func ScanProjectMap(ctx context.Context, workspaceRoot string) ProjectMap {
 	pm := ProjectMap{
-		OS:        "windows",
-		Shell:     "PowerShell",
+		OS:        runtime.GOOS,
+		Shell:     "sh",
 		Workspace: workspaceRoot,
 		Projects:  nil,
 		Rules:     "",
 	}
+	if runtime.GOOS == "windows" {
+		pm.Shell = "PowerShell"
+	}
 
 	// Load AGENTS.md / CAL.md if present
-	if rules := loadAgentRules(workspaceRoot); rules != "" {
+	if rules := loadAgentRules(ctx, workspaceRoot); rules != "" {
 		pm.Rules = rules
+	}
+
+	if ctx.Err() != nil {
+		return pm
 	}
 
 	// Walk depth 2 from workspace root
@@ -53,6 +68,9 @@ func ScanProjectMap(ctx context.Context, workspaceRoot string) ProjectMap {
 	seen := make(map[string]bool)
 
 	for _, entry := range entries {
+		if ctx.Err() != nil {
+			return pm
+		}
 		if !entry.IsDir() {
 			continue
 		}
@@ -75,6 +93,9 @@ func ScanProjectMap(ctx context.Context, workspaceRoot string) ProjectMap {
 		// Also check one level deeper (depth 2)
 		subEntries, _ := os.ReadDir(projectDir)
 		for _, sub := range subEntries {
+			if ctx.Err() != nil {
+				return pm
+			}
 			if !sub.IsDir() {
 				continue
 			}
@@ -207,13 +228,29 @@ func jsonUnmarshal(data []byte, v interface{}) error {
 	return json.Unmarshal(data, v)
 }
 
-// loadAgentRules reads AGENTS.md or CAL.md from workspace root.
-func loadAgentRules(root string) string {
+// loadAgentRules reads AGENTS.md or CAL.md from workspace root, bounded so a
+// large rules file cannot dominate the prompt. It stops reading on cancellation.
+func loadAgentRules(ctx context.Context, root string) string {
 	for _, name := range []string{"AGENTS.md", "CAL.md"} {
-		path := filepath.Join(root, name)
-		if data, err := os.ReadFile(path); err == nil {
-			return strings.TrimSpace(string(data))
+		if ctx.Err() != nil {
+			return ""
 		}
+		path := filepath.Join(root, name)
+		file, err := os.Open(path)
+		if err != nil {
+			continue
+		}
+		data, readErr := io.ReadAll(io.LimitReader(file, agentRulesMaxBytes+1))
+		_ = file.Close()
+		if readErr != nil {
+			continue
+		}
+		text := strings.TrimSpace(string(data))
+		if len(data) > agentRulesMaxBytes {
+			text = strings.TrimSpace(string(data[:agentRulesMaxBytes])) +
+				"\n… [project rules truncated at 16 KB]"
+		}
+		return text
 	}
 	return ""
 }

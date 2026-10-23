@@ -40,7 +40,7 @@ const (
 // runCommandArgs is the wire shape of run_command: the JSON Schema is generated
 // from these tags.
 type runCommandArgs struct {
-	Command        string `json:"command" jsonschema:"description=The command line to run; this machine's shell is PowerShell"`
+	Command        string `json:"command" jsonschema:"description=The command line to run; it runs with this machine's shell (PowerShell on Windows, sh elsewhere)"`
 	Cwd            string `json:"cwd,omitempty" jsonschema:"description=Working directory relative to workspace root (e.g., 'Frontend/'). Defaults to workspace root. Must not escape the workspace."`
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty" jsonschema:"description=Seconds to allow before the command is killed; defaults to 120 and at most 900"`
 }
@@ -60,7 +60,8 @@ func shellTool(ws *Workspace) goai.Tool {
 			"Use it to build, test, install and inspect the project with tools of your own; "+
 			"for reading code prefer read_file, glob and grep, which cost far less. "+
 			"Set cwd to the project folder that owns the config file (e.g., 'Frontend/' for package.json). "+
-			"A command that fails is not a failed call: its output, exit code, and cwd come back for you to read.",
+			"A command that fails is not a failed call: its output, exit code, and cwd come back for you to read. "+
+			"Commands may change state; do not run two that touch the same files in parallel.",
 		func(ctx context.Context, args runCommandArgs) (string, error) {
 			return ws.runCommand(ctx, args)
 		})

@@ -24,7 +24,7 @@ type readFileArgs struct {
 
 func readFileTool(ws *Workspace) goai.Tool {
 	return goai.NewTool("read_file",
-		"Read a text file from the project. Returns the lines, numbered for later reference. Use offset and limit to page through a long file.",
+		"Read a text file from the project. Returns the lines, numbered for later reference. Use offset and limit to page through a long file instead of reading it again from the top. Read-only and safe to run in parallel.",
 		func(ctx context.Context, args readFileArgs) (string, error) {
 			return ws.readFile(args)
 		})
@@ -105,7 +105,7 @@ type listDirArgs struct {
 
 func listDirTool(ws *Workspace) goai.Tool {
 	return goai.NewTool("list_dir",
-		"List the entries of a directory in the project: subdirectories first, then files with their sizes.",
+		"List the entries of a directory in the project: subdirectories first, then files with their sizes. Read-only and safe to run in parallel.",
 		func(ctx context.Context, args listDirArgs) (string, error) {
 			return ws.listDir(args.Path)
 		})
@@ -180,7 +180,7 @@ type globArgs struct {
 
 func globTool(ws *Workspace) goai.Tool {
 	return goai.NewTool("glob",
-		"Find files in the project by glob. Returns matching paths relative to the project root, newest matches last.",
+		"Find files in the project by glob. Returns matching paths relative to the project root, newest matches last. Read-only and safe to run in parallel; prefer a narrow pattern over the whole tree.",
 		func(ctx context.Context, args globArgs) (string, error) {
 			return ws.glob(args.Pattern, args.Limit)
 		})
@@ -236,7 +236,7 @@ type grepArgs struct {
 
 func grepTool(ws *Workspace) goai.Tool {
 	return goai.NewTool("grep",
-		"Search file contents with a regular expression. Returns file:line: text for each match, so it is the fastest way to find where something is defined or used.",
+		"Search file contents with a regular expression. Returns file:line: text for each match, so it is the fastest way to find where something is defined or used. Read-only and safe to run in parallel; use include to keep the search narrow.",
 		func(ctx context.Context, args grepArgs) (string, error) {
 			return ws.grep(args)
 		})

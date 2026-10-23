@@ -19,7 +19,7 @@ type createDirArgs struct {
 
 func createDirTool(ws *Workspace) goai.Tool {
 	return goai.NewTool("create_dir",
-		"Create a directory in the project, including any missing parents. Does nothing when it already exists.",
+		"Create a directory in the project, including any missing parents. Does nothing when it already exists, so a repeat is safe. Changes the filesystem; do not run it in parallel with another write to the same path.",
 		func(ctx context.Context, args createDirArgs) (string, error) {
 			return ws.createDir(args.Path)
 		})
@@ -55,7 +55,7 @@ type writeFileArgs struct {
 
 func writeFileTool(ws *Workspace) goai.Tool {
 	return goai.NewTool("write_file",
-		"Write a whole file, creating it and any missing parent directories. Existing contents are replaced, so use edit_file for small changes to a file you have read.",
+		"Write a whole file, creating it and any missing parent directories. Existing contents are replaced, so use edit_file for small changes to a file you have read. Changes state; do not run two writes to the same file in parallel.",
 		func(ctx context.Context, args writeFileArgs) (string, error) {
 			return ws.writeFile(args.Path, args.Content)
 		})
@@ -101,7 +101,7 @@ type editFileArgs struct {
 
 func editFileTool(ws *Workspace) goai.Tool {
 	return goai.NewTool("edit_file",
-		"Change part of an existing file by replacing an exact piece of text. The text must match exactly once unless replaceAll is set, so include enough surrounding lines to be unambiguous.",
+		"Change part of an existing file by replacing an exact piece of text. The text must match exactly once unless replaceAll is set, so include enough surrounding lines to be unambiguous. Read the file first. Changes state; do not run two edits to the same file in parallel.",
 		func(ctx context.Context, args editFileArgs) (string, error) {
 			return ws.editFile(args)
 		})

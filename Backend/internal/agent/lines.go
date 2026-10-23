@@ -91,7 +91,8 @@ func editLinesTool(ws *Workspace) goai.Tool {
 		"Change an existing file line by line, using the numbers read_file prints. "+
 			"Each edit replaces lines start..end with text: repeat start as the end to change one line, and make the end lower than the start to insert before it. "+
 			"Every edit in the call describes the file as you read it and they are written together, so they cannot disturb each other's numbers. "+
-			"Pass expect, the beginning of the text on line start, and an edit that would land somewhere else is refused instead.",
+			"Pass expect, the beginning of the text on line start, and an edit that would land somewhere else is refused instead. "+
+			"Read the file first. Changes state; do not run two edits to the same file in parallel.",
 		func(ctx context.Context, args editLinesArgs) (string, error) {
 			return ws.editLines(args)
 		})

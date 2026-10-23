@@ -36,7 +36,8 @@ func TestCrewModePrompt(t *testing.T) {
 
 	for _, want := range []string{
 		"OPERATING MODE: CREW",
-		"FINISH the whole job",
+		"finish a substantial job",
+		"acceptance criteria",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("the prompt does not mention %q:\n%s", want, prompt)
@@ -84,13 +85,27 @@ func TestThePromptStillDescribesTheProject(t *testing.T) {
 func TestThePromptPutsParallelCallsFirst(t *testing.T) {
 	prompt := SystemPrompt(nil, "You are a test.", nil, ModeChat, "")
 
-	parallel := strings.Index(prompt, "Prefer parallel tool calls")
+	parallel := strings.Index(prompt, "Prefer parallel calls")
 	if parallel < 0 {
 		t.Fatalf("the prompt does not ask for parallel tool calls:\n%s", prompt)
 	}
-	for _, later := range []string{"Use tools when the answer depends", "Locate things with glob and grep"} {
+	for _, later := range []string{"Locate code with glob and grep", "Use run_command to build"} {
 		if at := strings.Index(prompt, later); at >= 0 && at < parallel {
 			t.Errorf("the parallel instruction should come before %q:\n%s", later, prompt)
 		}
+	}
+}
+
+// A worker cannot ask the user and cannot schedule a follow-up. Describing
+// either tool is an invitation to call something that does not exist.
+func TestWorkerPromptOmitsToolsTheWorkerDoesNotHave(t *testing.T) {
+	prompt := WorkerPrompt(nil, "You are a worker.", "")
+	for _, unwanted := range []string{"schedule_task", "ask_questions"} {
+		if strings.Contains(prompt, unwanted) {
+			t.Errorf("worker prompt mentions %q:\n%s", unwanted, prompt)
+		}
+	}
+	if !strings.Contains(prompt, "When a tool fails:") {
+		t.Errorf("worker prompt is missing the recovery rules:\n%s", prompt)
 	}
 }
