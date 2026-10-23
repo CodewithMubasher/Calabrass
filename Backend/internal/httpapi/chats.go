@@ -175,6 +175,10 @@ func (s *Server) handleUpdateChat(w http.ResponseWriter, r *http.Request) {
 		Mode string `json:"mode"`
 		// Pinned is a pointer so "leave it alone" is different from false.
 		Pinned *bool `json:"pinned"`
+		// WorkspaceID moves the chat to another workspace. A pointer so an
+		// absent field leaves the binding alone; an empty value resets it to
+		// the default workspace.
+		WorkspaceID *string `json:"workspaceId"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -182,7 +186,30 @@ func (s *Server) handleUpdateChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	chatID := r.PathValue("chatID")
+
+	// Resolve the workspace before writing anything, so an unknown id changes
+	// nothing else about the chat.
+	workspaceDir := ""
+	if req.WorkspaceID != nil {
+		id := strings.TrimSpace(*req.WorkspaceID)
+		if id != "" {
+			record, err := s.store.GetWorkspace(r.Context(), id, user.ID)
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusBadRequest, errors.New("unknown workspace"))
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			workspaceDir = record.Dir
+		}
+	}
+
 	chat, err := s.store.UpdateChat(r.Context(), chatID, req.Title, req.Provider, req.Model, user.ID)
+	if err == nil && req.WorkspaceID != nil {
+		chat, err = s.store.SetChatWorkspace(r.Context(), chatID, workspaceDir, user.ID)
+	}
 	if err == nil && req.Pinned != nil {
 		chat, err = s.store.SetChatPinned(r.Context(), chatID, *req.Pinned, user.ID)
 	}

@@ -9,12 +9,15 @@ interface WorkspaceState {
   loading: boolean
   /** Workspace ids with a change in flight. */
   pending: string[]
+  /** The workspace a chat started from the home screen will use. */
+  preferredId: string
 }
 
 let state: WorkspaceState = {
   workspaces: [],
   loading: false,
   pending: [],
+  preferredId: "",
 }
 
 const listeners = new Set<() => void>()
@@ -38,6 +41,16 @@ function getSnapshot() {
 /** Subscribe to the workspace list and its changes. */
 export function useWorkspacesState() {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+}
+
+/** The workspace the next chat from the home screen should use. */
+export function usePreferredWorkspaceId() {
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot).preferredId
+}
+
+/** Pick the workspace the next chat from the home screen will use. */
+export function setPreferredWorkspace(workspaceId: string) {
+  setState({ preferredId: workspaceId })
 }
 
 let inFlight = false

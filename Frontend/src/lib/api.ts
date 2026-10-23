@@ -197,7 +197,7 @@ export const api = {
       }),
     }).then((r) => r.chat),
 
-  updateChat: (chatId: string, patch: { title?: string; pinned?: boolean; mode?: ChatMode }) =>
+  updateChat: (chatId: string, patch: { title?: string; pinned?: boolean; mode?: ChatMode; workspaceId?: string }) =>
     request<{ chat: Chat }>(`/chats/${chatId}`, {
       method: "PATCH",
       body: JSON.stringify(patch),

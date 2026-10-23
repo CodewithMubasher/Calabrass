@@ -483,6 +483,19 @@ export async function updateChatMode(chatId: string, mode: ChatMode) {
   }
 }
 
+/** Move a chat to another workspace. The AI and crew workers follow it. */
+export async function updateChatWorkspace(chatId: string, workspaceId: string) {
+  try {
+    const chat = await api.updateChat(chatId, { workspaceId })
+    setState({ chats: upsertChat(state.chats, chat) })
+    return chat
+  } catch (err) {
+    if (is401(err)) throw err
+    notifyError(errorMessage(err), "Could not change the workspace")
+    throw err
+  }
+}
+
 /** Remember a chat the server created, so the sidebar shows it. */
 export function rememberChat(chat: Chat) {
   setState({ chats: upsertChat(state.chats, chat) })

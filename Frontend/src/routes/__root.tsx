@@ -10,7 +10,6 @@ import { HugeiconsIcon } from "@hugeicons/react"
 import {
   ApertureIcon,
   Files01Icon,
-  StarIcon,
 } from "@hugeicons/core-free-icons"
 
 import { AppSidebar } from "@/components/app-sidebar"
@@ -18,7 +17,7 @@ import { ArtifactsPanel } from "@/components/artifacts-panel"
 import { CrewPanel } from "@/components/crew-panel"
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts"
 import WaveBackground from "@/components/wave-background"
-import { Badge } from "@/components/ui/badge"
+import { WorkspaceBadge } from "@/components/workspace-badge"
 import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/toast"
 import {
@@ -154,22 +153,12 @@ function RootLayout() {
                     <SidebarTrigger className="-ml-1 size-[29px]" />
                   </div>
 
-                  {/* Centered badge: a link to the repository, so the star can
-                      be given without leaving the app. */}
+                  {/* Centered badge: the folder this chat works in. Clicking it
+                      moves the chat, and the AI and crew workers follow. */}
                   <div className="pointer-events-none absolute inset-x-0 flex justify-center">
-                    <Badge
-                      render={
-                        <a
-                          href="https://github.com/CodewithMubasher/Calabrass"
-                          target="_blank"
-                          rel="noreferrer"
-                        />
-                      }
-                      className="pointer-events-auto h-6 gap-1 bg-sky-50 px-2.5 text-xs font-medium text-sky-700 hover:bg-sky-100 dark:bg-sky-950 dark:text-sky-300"
-                    >
-                      <HugeiconsIcon icon={StarIcon} strokeWidth={2} />
-                      Star on GitHub
-                    </Badge>
+                    <div className="pointer-events-auto">
+                      <WorkspaceBadge chatId={chatIdFrom(pathname)} />
+                    </div>
                   </div>
 
                   {/* Right corner icons — same size as the sidebar trigger button */}

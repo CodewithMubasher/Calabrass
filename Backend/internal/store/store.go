@@ -395,7 +395,7 @@ func (s *Store) hasColumn(ctx context.Context, table, column string) (bool, erro
 
 // rebuildAgents rebuilds the agents table onto the (user_id, id) key without
 // losing any saved agents. A row that was left by the build that keyed on the
-// id alone becomes an unowned row (user_id = '') and is assigned to the admin
+// id alone becomes an unowned row (user_id = ”) and is assigned to the admin
 // account once it has been seeded.
 func (s *Store) rebuildAgents(ctx context.Context) error {
 	const rebuild = `
@@ -924,6 +924,21 @@ func (s *Store) SetChatMode(ctx context.Context, id string, mode string, userID 
 		`UPDATE chats SET mode = ? WHERE id = ? AND user_id = ?`, mode, id, ownerOf(userID))
 	if err != nil {
 		return Chat{}, fmt.Errorf("store: set chat mode: %w", err)
+	}
+	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+		return Chat{}, ErrNotFound
+	}
+	return s.getChat(ctx, id, userID...)
+}
+
+// SetChatWorkspace points a chat at another workspace folder. An empty folder
+// puts it back on the account's default.
+func (s *Store) SetChatWorkspace(ctx context.Context, id, workspaceDir string, userID ...string) (Chat, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE chats SET workspace_dir = ? WHERE id = ? AND user_id = ?`,
+		workspaceDir, id, ownerOf(userID))
+	if err != nil {
+		return Chat{}, fmt.Errorf("store: set chat workspace: %w", err)
 	}
 	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
 		return Chat{}, ErrNotFound
