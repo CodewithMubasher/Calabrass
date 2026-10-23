@@ -635,6 +635,12 @@ func (s *Store) getChat(ctx context.Context, id string, userID ...string) (Chat,
 	return c, nil
 }
 
+// GetChatRecord returns a chat without loading its messages. It is what a
+// handler needs when it must inspect the binding before changing it.
+func (s *Store) GetChatRecord(ctx context.Context, id string, userID ...string) (Chat, error) {
+	return s.getChat(ctx, id, userID...)
+}
+
 // GetChat returns a chat with all of its messages.
 func (s *Store) GetChat(ctx context.Context, id string, userID ...string) (ChatDetail, error) {
 	chat, err := s.getChat(ctx, id, userID...)
@@ -924,6 +930,21 @@ func (s *Store) SetChatMode(ctx context.Context, id string, mode string, userID 
 		`UPDATE chats SET mode = ? WHERE id = ? AND user_id = ?`, mode, id, ownerOf(userID))
 	if err != nil {
 		return Chat{}, fmt.Errorf("store: set chat mode: %w", err)
+	}
+	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+		return Chat{}, ErrNotFound
+	}
+	return s.getChat(ctx, id, userID...)
+}
+
+// SetChatAgent points a chat at an agent, or clears the binding when agentID is
+// empty. A chat's mode and its agent are separate: the mode says how the turn
+// runs, the agent says whose prompt and model it uses.
+func (s *Store) SetChatAgent(ctx context.Context, id, agentID string, userID ...string) (Chat, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE chats SET agent_id = ? WHERE id = ? AND user_id = ?`, agentID, id, ownerOf(userID))
+	if err != nil {
+		return Chat{}, fmt.Errorf("store: set chat agent: %w", err)
 	}
 	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
 		return Chat{}, ErrNotFound

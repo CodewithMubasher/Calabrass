@@ -20,6 +20,10 @@ type turnSetup struct {
 	tools    []goai.Tool
 	origins  map[string]string
 	runState *agent.RunState // budget / loop guard state
+	// mode is the mode this turn actually resolved to. It is not always the
+	// chat row's mode: a chat that never chose one inherits its agent's, and a
+	// turn without a chat defaults to chat. Callers use it for the step budget.
+	mode string
 }
 
 // setupTurn builds a turn for the shipped admin account. Handlers use
@@ -59,20 +63,29 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 		}
 	}
 
-	// The chat's own mode decides how the turn runs: the address it lives at
-	// says which mode it is in, and that is what the turn obeys. The agent's
-	// mode is the default a chat starts with, so it stands in only when the
-	// chat itself does not say.
-	mode := agent.ModeChat
+	// The chat's own mode decides how the turn runs. The agent's mode is only
+	// the default a chat starts with, so it stands in when the chat itself does
+	// not say — it must not override a mode the chat has chosen.
+	mode := ""
 	if chatID != "" {
-		if chatDetail, err := s.store.GetChat(ctx, chatID, userID); err == nil {
-			if normalised := agent.NormalMode(chatDetail.Mode); normalised != "" {
-				mode = normalised
-			}
+		if chatDetail, err := s.store.GetChatRecord(ctx, chatID, userID); err == nil {
+			mode = agent.NormalMode(chatDetail.Mode)
 		}
 	}
-	if mode == agent.ModeChat && agentMode != "" {
-		mode = agentMode
+	if mode == "" {
+		mode = agent.NormalMode(agentMode)
+	}
+	if mode == "" {
+		mode = agent.ModeChat
+	}
+
+	// An Orchestrator binding left on a chat that has been moved to chat mode
+	// is stale. The orchestrator prompt is delegate-only, so using it here would
+	// leave the chat unable to do ordinary work. Ignore the binding rather than
+	// depending on every caller having cleaned it up.
+	if mode != agent.ModeCrew && crew.IsOrchestrator(agentID) {
+		agentSystemPrompt = ""
+		agentConnectorID = ""
 	}
 
 	// The Orchestrator is not a coding agent, so it is not handed the coding
@@ -83,8 +96,8 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 	// A crew chat that names no agent is still the Orchestrator's: crew mode is
 	// how the crew is reached, and an empty agent there used to fall through to
 	// the ordinary coding harness and do the task itself.
-	orchestrator := crew.IsOrchestrator(agentID) ||
-		(agentID == "" && mode == agent.ModeCrew)
+	orchestrator := mode == agent.ModeCrew &&
+		(crew.IsOrchestrator(agentID) || strings.TrimSpace(agentID) == "")
 	if orchestrator {
 		prompt := agentSystemPrompt
 		if strings.TrimSpace(prompt) == "" {
@@ -172,11 +185,11 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 	// With no project and nothing acting on the machine, there is no harness to
 	// explain: the turn is a plain completion with the system prompt.
 	if workspace == nil && len(described) == 0 {
-		return turnSetup{system: systemPrompt, tools: tools, origins: origins, runState: runState}
+		return turnSetup{system: systemPrompt, tools: tools, origins: origins, runState: runState, mode: mode}
 	}
 	// Scan project map fresh each run (depth 2)
 	projectMap := agent.ScanProjectMap(ctx, workspace.Root()).ProjectMapString()
-	return turnSetup{system: agent.SystemPrompt(workspace, systemPrompt, described, mode, projectMap), tools: tools, origins: origins, runState: runState}
+	return turnSetup{system: agent.SystemPrompt(workspace, systemPrompt, described, mode, projectMap), tools: tools, origins: origins, runState: runState, mode: mode}
 }
 
 // orchestratorTurn builds the Orchestrator's turn: two tools, and a prompt that
@@ -235,6 +248,7 @@ func (s *Server) orchestratorTurn(ctx context.Context, userID string, workspace 
 		system:   rendered,
 		tools:    wrapBudget(tools, runState),
 		runState: runState,
+		mode:     agent.ModeCrew,
 	}
 }
 

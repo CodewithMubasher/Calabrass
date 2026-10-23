@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -187,6 +188,26 @@ func (s *Server) handleUpdateChat(w http.ResponseWriter, r *http.Request) {
 
 	chatID := r.PathValue("chatID")
 
+	// Read the current binding before changing anything. A mode switch has to
+	// know which agent the chat is attached to: the Orchestrator only makes
+	// sense in crew mode, and crew mode with no agent means the Orchestrator.
+	current, err := s.store.GetChatRecord(r.Context(), chatID, user.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	// Validate the mode before writing anything, so a bad request cannot leave
+	// half of an update behind.
+	if req.Mode != "" && !agent.ValidMode(req.Mode) {
+		writeError(w, http.StatusBadRequest, errors.New(`mode must be "chat" or "crew"`))
+		return
+	}
+
 	// Resolve the workspace before writing anything, so an unknown id changes
 	// nothing else about the chat.
 	workspaceDir := ""
@@ -214,11 +235,24 @@ func (s *Server) handleUpdateChat(w http.ResponseWriter, r *http.Request) {
 		chat, err = s.store.SetChatPinned(r.Context(), chatID, *req.Pinned, user.ID)
 	}
 	if err == nil && req.Mode != "" {
-		if !agent.ValidMode(req.Mode) {
-			writeError(w, http.StatusBadRequest, errors.New(`mode must be "chat" or "crew"`))
-			return
+		mode := agent.NormalMode(req.Mode)
+		chat, err = s.store.SetChatMode(r.Context(), chatID, mode, user.ID)
+		if err == nil {
+			// Keep the agent binding consistent with the mode. A chat moved to
+			// crew with no agent gets the Orchestrator; a chat moved out of crew
+			// drops an Orchestrator binding, because the orchestrator prompt is
+			// delegate-only and would leave the chat unable to do ordinary work.
+			desiredAgent := current.AgentID
+			switch {
+			case mode == agent.ModeCrew && strings.TrimSpace(desiredAgent) == "":
+				desiredAgent = crew.BuiltinOrchestratorID
+			case mode == agent.ModeChat && crew.IsOrchestrator(desiredAgent):
+				desiredAgent = ""
+			}
+			if desiredAgent != current.AgentID {
+				chat, err = s.store.SetChatAgent(r.Context(), chatID, desiredAgent, user.ID)
+			}
 		}
-		chat, err = s.store.SetChatMode(r.Context(), chatID, agent.NormalMode(req.Mode), user.ID)
 	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, err)
@@ -314,6 +348,61 @@ type donePayload struct {
 
 type errorPayload struct {
 	Message string `json:"message"`
+}
+
+// maxHistoryMessages bounds the conversation replay. It is large enough to hold
+// the recent work and small enough that uncompacted tool replays do not fill the
+// window on their own; compaction keeps the same number of messages.
+const maxHistoryMessages = 20
+
+// historyWindow returns the first user turn plus the most recent messages. The
+// first turn is the one place the original objective and constraints live, so it
+// is pinned rather than allowed to slide out of the window. If it is already in
+// the tail it is not duplicated.
+func historyWindow(history []store.Message, max int) []store.Message {
+	if max <= 0 {
+		return nil
+	}
+	if len(history) <= max {
+		return history
+	}
+	tail := history[len(history)-max:]
+	firstUser := -1
+	for i := 0; i < len(history)-max; i++ {
+		if history[i].Role == ai.RoleUser {
+			firstUser = i
+			break
+		}
+	}
+	if firstUser < 0 {
+		return tail
+	}
+	window := make([]store.Message, 0, max+1)
+	window = append(window, history[firstUser])
+	window = append(window, tail...)
+	return window
+}
+
+// runLimitNote turns a harness stop into one honest sentence for the saved
+// answer. The model may have written a confident summary before a limit cut it
+// off; the note is what keeps that summary from reading as a finished task.
+func runLimitNote(reply ai.Reply, state *agent.RunState) string {
+	if state != nil {
+		if reason, stopped := state.StopReason(); stopped {
+			switch {
+			case strings.Contains(reason, "tool budget"):
+				return "_Run note: the run reached its tool budget before finishing, so this answer may be incomplete._"
+			case strings.Contains(reason, "failed in a row"):
+				return "_Run note: the run stopped after repeated tool failures, so this answer may be incomplete._"
+			default:
+				return "_Run note: the run was stopped by a harness limit before finishing, so this answer may be incomplete._"
+			}
+		}
+	}
+	if reply.StepsExhausted {
+		return fmt.Sprintf("_Run note: the run reached its step limit (%d steps) before finishing, so this answer may be incomplete._", reply.Steps)
+	}
+	return ""
 }
 
 // workspaceFor picks the folder a chat works in for the shipped admin account.
@@ -443,16 +532,12 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	turns := make([]ai.Message, 0, len(history)+1)
-	// Limit history to last 20 messages to prevent context window overflow.
-	// Compacted messages have small summaries, but uncompressed ones with tool
-	// replays can be very large.
-	const maxHistoryMessages = 20
-	start := 0
-	if len(history) > maxHistoryMessages {
-		start = len(history) - maxHistoryMessages
-	}
-	for _, m := range history[start:] {
+	turns := make([]ai.Message, 0, maxHistoryMessages+1)
+	// The first user turn carries the objective and the constraints; losing it
+	// to a window makes the model re-ask or drift. Keep it pinned in front of
+	// the most recent messages, which carry the current state of the work.
+	window := historyWindow(history, maxHistoryMessages)
+	for _, m := range window {
 		turns = append(turns, ai.Message{Role: m.Role, Content: m.Content, Replay: m.Replay})
 	}
 	if !req.Regenerate {
@@ -472,7 +557,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		Messages:    turns,
 		Tools:       setup.tools,
 		ToolOrigins: setup.origins,
-		MaxSteps:    agent.MaxSteps(chat.Mode),
+		MaxSteps:    agent.MaxSteps(setup.mode),
 	}, ai.Handlers{
 		OnText: func(delta string) error {
 			return stream.event("token", deltaPayload{Text: delta})
@@ -505,6 +590,16 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	content := reply.Text
 	if answer := reply.Trace.AnswerText(); strings.TrimSpace(answer) != "" {
 		content = answer
+	}
+	// The saved answer has to say when a limit cut the run short. The tokens
+	// already streamed cannot be changed, but the final message can carry the
+	// truth, and it is the final message that a reload or a later turn sees.
+	if note := runLimitNote(reply, setup.runState); note != "" && !strings.Contains(content, note) {
+		if strings.TrimSpace(content) == "" {
+			content = note
+		} else {
+			content = strings.TrimSpace(content) + "\n\n" + note
+		}
 	}
 	var savedTrace json.RawMessage
 	if len(lastTrace.Steps) > 0 {
@@ -541,9 +636,10 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 				StepsExhausted: reply.StepsExhausted,
 			})
 
-			// Compact old messages to keep context size bounded.
-			// Keep the 10 most recent messages uncompressed.
-			if _, err := s.store.CompactMessages(ctx, chatID, 10); err != nil {
+			// Compact old messages to keep context size bounded. Keep the same
+			// number of messages the history window can show uncompressed, so
+			// the window never consists mostly of stale summaries.
+			if _, err := s.store.CompactMessages(ctx, chatID, maxHistoryMessages); err != nil {
 				s.log.Warn("could not compact messages", "chat", chatID, "error", err)
 			}
 		}
