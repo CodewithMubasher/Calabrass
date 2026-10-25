@@ -1,0 +1,12 @@
+{
+  "workerId": "builtin-project-analyzer",
+  "workerName": "Project Analyzer",
+  "status": "completed",
+  "summary": "Retrieved the full content of README.md and the top-level directory structure of the project.",
+  "checks": [
+    "Read README.md",
+    "Listed root directory structure"
+  ],
+  "startedAt": "2026-10-23T07:59:20+05:00",
+  "finishedAt": "2026-10-23T07:59:25+05:00"
+}

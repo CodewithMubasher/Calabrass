@@ -5,7 +5,7 @@ import { PromptInput } from "@/components/prompt-input"
 import { createChat, sendMessage } from "@/lib/chat-store"
 import { setComposerMode, useComposerMode } from "@/lib/mode-store"
 import { notifyError } from "@/lib/toast"
-import { usePreferredWorkspaceId } from "@/lib/workspace-store"
+import { usePreferredWorkspaceDir } from "@/lib/workspace-store"
 import { Route as rootRoute } from "@/routes/__root"
 
 export const Route = createRoute({
@@ -18,7 +18,7 @@ function HomePage() {
   const navigate = useNavigate()
   const [sending, setSending] = useState(false)
   const mode = useComposerMode()
-  const preferredWorkspaceId = usePreferredWorkspaceId()
+  const preferredWorkspaceDir = usePreferredWorkspaceDir()
 
   const handleSend = (value: string) => {
     if (sending) return
@@ -30,9 +30,10 @@ function HomePage() {
         // opens at: an ordinary chat lives under /chat, a crew run under
         // /crew.
         const chat = await createChat(
-          preferredWorkspaceId || undefined,
           undefined,
-          mode
+          undefined,
+          mode,
+          preferredWorkspaceDir || undefined
         )
         await navigate({
           to: mode === "crew" ? "/crew/$chatId" : "/chat/$chatId",

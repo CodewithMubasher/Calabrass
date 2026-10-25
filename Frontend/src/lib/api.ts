@@ -186,18 +186,19 @@ export const api = {
   getChat: (chatId: string) =>
     request<{ chat: ChatDetail }>(`/chats/${chatId}`).then((r) => r.chat),
 
-  createChat: (selection?: ModelSelection | null, workspaceId?: string, agentId?: string, mode?: ChatMode) =>
+  createChat: (selection?: ModelSelection | null, workspaceId?: string, agentId?: string, mode?: ChatMode, workspacePath?: string) =>
     request<{ chat: Chat }>("/chats", {
       method: "POST",
       body: JSON.stringify({
         ...(selection ?? {}),
         ...(workspaceId ? { workspaceId } : {}),
+        ...(workspacePath ? { workspacePath } : {}),
         ...(agentId ? { agentId } : {}),
         ...(mode ? { mode } : {}),
       }),
     }).then((r) => r.chat),
 
-  updateChat: (chatId: string, patch: { title?: string; pinned?: boolean; mode?: ChatMode; workspaceId?: string }) =>
+  updateChat: (chatId: string, patch: { title?: string; pinned?: boolean; mode?: ChatMode; workspaceId?: string; workspacePath?: string }) =>
     request<{ chat: Chat }>(`/chats/${chatId}`, {
       method: "PATCH",
       body: JSON.stringify(patch),

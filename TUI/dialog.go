@@ -41,17 +41,16 @@ type DialogSelectMsg struct {
 // defaultCommands is the list shown in the palette. Edit it freely.
 func defaultCommands() []Command {
 	return []Command{
-		{ID: "switch-session", Title: "Switch session", Shortcut: "ctrl+x l", Section: "Suggested"},
-		{ID: "switch-model", Title: "Switch model", Shortcut: "ctrl+x m", Section: "Suggested"},
-		{ID: "open-settings", Title: "Open settings", Section: "Suggested"},
+		{ID: "switch-model", Title: "Switch model", Section: "Suggested"},
+		{ID: "switch-session", Title: "Open an earlier session", Section: "Suggested"},
+		{ID: "connect", Title: "Add or edit a provider key", Section: "Suggested"},
 
 		{ID: "toggle-right", Title: "Toggle right panel", Shortcut: keyToggleRight, Section: "View"},
+		{ID: "toggle-rows", Title: "Open / close all tool and edit rows", Shortcut: keyToggleRows, Section: "View"},
 
-		{ID: "switch-session", Title: "Switch session", Shortcut: "ctrl+x l", Section: "Session"},
-		{ID: "new-session", Title: "New session", Shortcut: "ctrl+x n", Section: "Session"},
-		{ID: "clear-session", Title: "Clear session", Section: "Session"},
-		{ID: "open-project", Title: "Open session or project", Shortcut: "ctrl+o", Section: "Session"},
-		{ID: "close-tab", Title: "Close tab", Shortcut: "ctrl+x w", Section: "Session"},
+		{ID: "new-session", Title: "New session", Section: "Session"},
+		{ID: "mcps", Title: "MCP servers", Section: "Session"},
+		{ID: "help", Title: "Help", Section: "Session"},
 	}
 }
 

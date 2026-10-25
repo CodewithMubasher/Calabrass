@@ -1,0 +1,15 @@
+{
+  "workerId": "builtin-project-analyzer",
+  "workerName": "Project Analyzer",
+  "status": "completed",
+  "summary": "Comprehensive analysis of Calabrass project structure, purpose, and architecture completed.",
+  "checks": [
+    "Analyzed README.md",
+    "Inspected Backend structure (cmd, internal, desktop)",
+    "Inspected Frontend structure (src, package.json)",
+    "Inspected MCP connectors (excel, gmail, win-control)",
+    "Verified tech stack from go.mod and package.json"
+  ],
+  "startedAt": "2026-10-23T08:05:45+05:00",
+  "finishedAt": "2026-10-23T08:05:53+05:00"
+}

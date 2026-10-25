@@ -223,14 +223,21 @@ export async function ensureChatLoaded(chatId: string) {
 export async function createChat(
   workspaceId?: string,
   agentId?: string,
-  mode?: ChatMode
+  mode?: ChatMode,
+  workspacePath?: string
 ): Promise<Chat> {
   try {
     // A chat that belongs to an agent runs on the agent's own model, so the
     // one the composer happened to have selected is left out of the request:
     // the agent's configuration is what this conversation is.
     const selection = agentId ? null : getSelectedModel()
-    const chat = await api.createChat(selection, workspaceId, agentId, mode)
+    const chat = await api.createChat(
+      selection,
+      workspaceId,
+      agentId,
+      mode,
+      workspacePath
+    )
     setState({
       chats: upsertChat(state.chats, chat),
       messages: { ...state.messages, [chat.id]: [] },
@@ -492,6 +499,22 @@ export async function updateChatWorkspace(chatId: string, workspaceId: string) {
   } catch (err) {
     if (is401(err)) throw err
     notifyError(errorMessage(err), "Could not change the workspace")
+    throw err
+  }
+}
+
+/** Point a chat at a folder picked on disk. The AI and workers open it. */
+export async function updateChatWorkspacePath(
+  chatId: string,
+  workspacePath: string
+) {
+  try {
+    const chat = await api.updateChat(chatId, { workspacePath })
+    setState({ chats: upsertChat(state.chats, chat) })
+    return chat
+  } catch (err) {
+    if (is401(err)) throw err
+    notifyError(errorMessage(err), "Could not open the folder")
     throw err
   }
 }

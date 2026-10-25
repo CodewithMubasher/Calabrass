@@ -1,0 +1,10 @@
+{
+  "workerId": "builtin-project-analyzer",
+  "workerName": "Project Analyzer",
+  "task": "Analyze the overall project structure, identify the main purpose of the application, and list its key features. Provide a comprehensive summary of the project's architecture and functionality.",
+  "context": "The user wants a high-level analysis of the project to understand its purpose and available features.",
+  "workspace": "C:\\Users\\Mubasher Developer\\Desktop\\Calabrass",
+  "createdAt": "2026-10-23T08:05:45+05:00",
+  "todoPath": ".crew/chats/25754102986310/orchestrator/builtin-project-analyzer.todo.json",
+  "reportPath": ".crew/chats/25754102986310/workers/builtin-project-analyzer/report.json"
+}

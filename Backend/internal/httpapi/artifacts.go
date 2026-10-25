@@ -176,7 +176,15 @@ func (s *Server) artifactsWorkspace(ctx context.Context, userID, chatID string) 
 	if ws == nil {
 		return nil, "", errArtifactsUnavailable
 	}
-	return ws, firstNonEmpty(chat.WorkspaceDir, agent.DefaultWorkspaceName), nil
+	label := agent.DefaultWorkspaceName
+	if dir := strings.TrimSpace(chat.WorkspaceDir); dir != "" {
+		if filepath.IsAbs(dir) {
+			label = filepath.Base(dir)
+		} else {
+			label = dir
+		}
+	}
+	return ws, label, nil
 }
 
 // artifactFile resolves the ?path= argument of a file request. Every path goes
@@ -350,7 +358,7 @@ func (s *Server) handleExcelContent(w http.ResponseWriter, abs string, payload a
 	}
 
 	type SheetData struct {
-		Name string   `json:"name"`
+		Name string     `json:"name"`
 		Rows [][]string `json:"rows"`
 	}
 

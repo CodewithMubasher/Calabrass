@@ -47,6 +47,26 @@ type desktop struct {
 	server   *http.Server
 	cancel   context.CancelFunc
 	startErr error
+	picker   *FolderPicker
+}
+
+// FolderPicker is the one native dialog the frontend needs. The File System
+// Access API in a browser deliberately hides the real path, so a picked handle
+// cannot tell the Go side which folder to open. This returns the path itself.
+type FolderPicker struct {
+	ctx context.Context
+}
+
+// PickFolder opens the system folder dialog and returns the chosen directory.
+// An empty result means the dialog was closed without a choice.
+func (p *FolderPicker) PickFolder(startIn string) (string, error) {
+	if p == nil || p.ctx == nil {
+		return "", errors.New("the desktop folder picker is not ready")
+	}
+	return runtime.OpenDirectoryDialog(p.ctx, runtime.OpenDialogOptions{
+		Title:            "Choose the folder the AI should work in",
+		DefaultDirectory: startIn,
+	})
 }
 
 func main() {
@@ -54,7 +74,7 @@ func main() {
 	log, closeLog := newLogger(logPath)
 	defer closeLog()
 
-	d := &desktop{log: log, cfg: cfg}
+	d := &desktop{log: log, cfg: cfg, picker: &FolderPicker{}}
 	d.startErr = d.start()
 	defer d.stop()
 
@@ -72,7 +92,9 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
+		Bind: []interface{}{d.picker},
 		OnStartup: func(ctx context.Context) {
+			d.picker.ctx = ctx
 			if d.startErr == nil {
 				return
 			}

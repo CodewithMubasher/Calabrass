@@ -96,8 +96,8 @@ func NewPromptInput() PromptInput {
 		input:    ta,
 		initCmd:  initCmd,
 		Mode:     "chat", // start in chat mode
-		Model:    "Gemini-3.5-flash",
-		Provider: "Google",
+		Model:    "",
+		Provider: "",
 	}
 }
 
@@ -163,9 +163,7 @@ func (p PromptInput) Update(msg tea.Msg) (PromptInput, tea.Cmd) {
 			p.fitHeight()
 			return p, nil
 		case "tab", "shift+tab":
-			// Cycle modes: chat -> crew -> chat
-			p.CycleMode()
-			return p, nil
+			return p, nil // no modes yet: Tab does nothing
 		}
 	}
 
@@ -204,6 +202,10 @@ func (p PromptInput) statusView() string {
 		label = "Build"
 	}
 
+	if p.Model == "" {
+		return base.Foreground(accent).Bold(true).Render(label) +
+			base.Foreground(promptMuted).Render(" · no model: type /connect to add a provider key")
+	}
 	return base.Foreground(accent).Bold(true).Render(label) +
 		base.Foreground(promptMuted).Render(" · ") +
 		base.Foreground(colorText).Render(p.Model) +
@@ -253,13 +255,4 @@ func (p *PromptInput) SetValue(v string) {
 	p.input.SetValue(v)
 	p.input.CursorEnd()
 	p.fitHeight()
-}
-
-// CycleMode switches chat <-> crew (same as pressing tab).
-func (p *PromptInput) CycleMode() {
-	if p.Mode == "chat" {
-		p.Mode = "crew"
-	} else {
-		p.Mode = "chat"
-	}
 }

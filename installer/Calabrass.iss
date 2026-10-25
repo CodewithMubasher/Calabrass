@@ -9,7 +9,7 @@
 ; its file name and the entry in Apps & features all follow. It can also be
 ; overridden for a one-off build: ISCC /DAppVersion=1.1 Calabrass.iss
 #ifndef AppVersion
-  #define AppVersion "1.0.3"
+  #define AppVersion "1.0.4"
 #endif
 #define AppPublisher "Calabrass"
 #define AppCopyright "Copyright (c) 2026 Mubasher Chaudhary"

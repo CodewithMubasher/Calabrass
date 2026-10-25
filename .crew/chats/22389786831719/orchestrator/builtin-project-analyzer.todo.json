@@ -1,0 +1,9 @@
+{
+  "workerId": "builtin-project-analyzer",
+  "workerName": "Project Analyzer",
+  "task": "Read the README.md at the project root and return its full contents. Also list the top-level project directory structure.",
+  "workspace": "C:\\Users\\Mubasher Developer\\Desktop\\Calabrass",
+  "createdAt": "2026-10-23T07:59:20+05:00",
+  "todoPath": ".crew/chats/22389786831719/orchestrator/builtin-project-analyzer.todo.json",
+  "reportPath": ".crew/chats/22389786831719/workers/builtin-project-analyzer/report.json"
+}

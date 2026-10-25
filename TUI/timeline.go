@@ -30,7 +30,12 @@ const (
 	PartThought          // reasoning
 	PartEdit             // a file that was written:  "# Wrote main.py"
 	PartPatch            // a change to a file:       "← Edit main.py"  (old - / new +)
+	PartTool             // any other tool call:      "✓ Read main.py"
 )
+
+// maxNodeLines is how many lines of a file or a diff an open row shows; the
+// rest is summarised, so one huge write cannot flood the screen.
+const maxNodeLines = 200
 
 // DiffLine is one line of a patch: Op is ' ' (unchanged), '+' (added) or
 // '-' (removed).
@@ -57,6 +62,21 @@ type Part struct {
 
 	Start int        // PartPatch: line number of the first line of the hunk
 	Hunk  []DiffLine // PartPatch: the lines (with a little context around the change)
+
+	Note string // PartPatch: a line under the title, e.g. "lines 4-6 replaced"
+
+	// PartTool: one tool call of the agent.
+	Tool      string // tool name, e.g. "read_file"
+	Server    string // MCP server it came from, if any
+	Label     string // what it did:   "Read main.py"
+	WorkLabel string // while running:  "Reading main.py…"
+	Output    string // what it returned (shown when the row is open)
+	Err       string // what went wrong, when it failed
+	Failed    bool   // the call failed (or the command exited non-zero)
+	Stopped   bool   // the turn ended before the call finished
+	DurMs     int64  // how long the call took
+
+	Working bool // still being made: the folded row shows a spinner
 
 	// Only used on the FIRST part of a folded row: is the row open?
 	Expanded bool
@@ -95,13 +115,49 @@ func plural(n int, word string) string {
 	return fmt.Sprintf("%d %ss", n, word)
 }
 
+// workingPart returns the unfinished part of a group, if any.
+func workingPart(parts []Part) *Part {
+	for i := range parts {
+		if parts[i].Working {
+			return &parts[i]
+		}
+	}
+	return nil
+}
+
+// workingLabel is the text next to the spinner.
+func workingLabel(p Part) string {
+	switch p.Kind {
+	case PartThought:
+		return "Thinking…"
+	case PartEdit:
+		if p.File == "" {
+			return "Writing…"
+		}
+		return "Writing " + p.File + "…"
+	case PartPatch:
+		if p.File == "" {
+			return "Editing…"
+		}
+		return "Editing " + p.File + "…"
+	case PartTool:
+		if p.WorkLabel != "" {
+			return p.WorkLabel
+		}
+		return "Working…"
+	}
+	return "Working…"
+}
+
 // groupSummary names a folded group: "1 edit, 2 thoughts".
 func groupSummary(parts []Part) string {
-	edits, thoughts := 0, 0
+	edits, tools, thoughts := 0, 0, 0
 	for _, p := range parts {
 		switch p.Kind {
 		case PartEdit, PartPatch:
 			edits++
+		case PartTool:
+			tools++
 		case PartThought:
 			thoughts++
 		}
@@ -109,6 +165,9 @@ func groupSummary(parts []Part) string {
 	var items []string
 	if edits > 0 {
 		items = append(items, plural(edits, "edit"))
+	}
+	if tools > 0 {
+		items = append(items, plural(tools, "tool call"))
 	}
 	if thoughts > 0 {
 		items = append(items, plural(thoughts, "thought"))
@@ -119,7 +178,7 @@ func groupSummary(parts []Part) string {
 // renderTimeline draws all parts, `width` columns wide. It returns the lines
 // and, for every line, whether it is a clickable group row.
 // hover is the first-part index of the group under the mouse (or -1).
-func renderTimeline(parts []Part, width, hover int, streaming bool) ([]string, []lineHit) {
+func renderTimeline(parts []Part, width, hover int, streaming bool, spin string) ([]string, []lineHit) {
 	pad := strings.Repeat(" ", bubbleIndent)
 	textW := width - bubbleIndent - 1
 
@@ -160,20 +219,34 @@ func renderTimeline(parts []Part, width, hover int, streaming bool) ([]string, [
 		group := parts[i:j]
 		open := parts[i].Expanded
 
+		// While a part of the group is still being made, the row shows the
+		// spinner and what is happening; when it is done it becomes "+ 1 thought".
 		icon := "+"
 		if open {
 			icon = "−"
 		}
 		label := icon + " " + groupSummary(group)
-		color := tlMuted
+		tone := tlMuted
 		if hover == i {
-			color = tlHover
+			tone = tlHover
 		}
-		row := lipgloss.NewStyle().Foreground(color).Bold(true).Render(label)
+		rowStyle := lipgloss.NewStyle().Foreground(tone).Bold(true)
+		var row string
+		if w := workingPart(group); w != nil {
+			// The spinner has its own colors, so it is joined, not nested.
+			text := workingLabel(*w)
+			label = "  " + text // same width as "⠋ " + text
+			row = spin + " " + rowStyle.Render(text)
+		} else {
+			row = rowStyle.Render(label)
+		}
 		add(pad+row, lineHit{Part: i, W: lipgloss.Width(label)})
 
 		if open {
 			for _, node := range group {
+				if node.Working {
+					continue // not finished yet, nothing to show
+				}
 				add("", noHit)
 				for _, l := range renderNode(node, width) {
 					add(l, noHit)
@@ -193,6 +266,8 @@ func renderNode(p Part, width int) []string {
 		return editNode(p, width)
 	case PartPatch:
 		return patchNode(p, width)
+	case PartTool:
+		return toolNode(p, width)
 	}
 	return nil
 }
@@ -201,7 +276,11 @@ func renderNode(p Part, width int) []string {
 // dark bar on the left.
 func thoughtNode(p Part, width int) []string {
 	blockW := width - bubbleIndent - 2 - 1
-	lines := barBlock([]string{msgThoughtTitle.Render(fmt.Sprintf("Thought: %dms", p.Ms))})
+	title := "Thought"
+	if p.Ms > 0 {
+		title = fmt.Sprintf("Thought: %s", formatMs(p.Ms))
+	}
+	lines := barBlock([]string{msgThoughtTitle.Render(title)})
 	lines = append(lines, "")
 	text := msgMuted.Render(wrapText(p.Text, blockW))
 	return append(lines, barBlock(strings.Split(text, "\n"))...)
@@ -225,8 +304,9 @@ func editNode(p Part, width int) []string {
 		return bar + base.Render("  ") + content + base.Render(strings.Repeat(" ", fill+1))
 	}
 
-	code := highlightCode(p.Code, p.Lang)
-	numW := len(strconv.Itoa(len(code)))
+	total := countLines(p.Code)
+	code := highlightCode(firstLines(p.Code, maxNodeLines), p.Lang)
+	numW := len(strconv.Itoa(total))
 	numStyle := base.Foreground(lipgloss.Color("#6b6b6b"))
 	title := base.Foreground(lipgloss.Color("#8a8a8a")).Bold(true).Render("# Wrote " + p.File)
 
@@ -234,6 +314,10 @@ func editNode(p Part, width int) []string {
 	for i, l := range code {
 		num := numStyle.Render(fmt.Sprintf("%*d", numW, i+1))
 		lines = append(lines, row(base.Render("  ")+num+base.Render(" ")+l))
+	}
+	if total > len(code) {
+		more := base.Foreground(lipgloss.Color("#6b6b6b")).Render(fmt.Sprintf("  … %d more lines", total-len(code)))
+		lines = append(lines, row(more))
 	}
 	return append(lines, row(""))
 }
@@ -362,11 +446,17 @@ func patchNode(p Part, width int) []string {
 		return bar + base.Render("  ") + content + st.Render(strings.Repeat(" ", fill+1))
 	}
 
+	hunk, hidden := p.Hunk, 0
+	if len(hunk) > maxNodeLines {
+		hidden = len(hunk) - maxNodeLines
+		hunk = hunk[:maxNodeLines]
+	}
+
 	// Work out the line numbers first, to know how wide the number column is.
 	// Unchanged and added lines use the new numbering, removed lines the old.
-	nums := make([]int, len(p.Hunk))
+	nums := make([]int, len(hunk))
 	oldNo, newNo, maxNo := p.Start, p.Start, 0
-	for i, d := range p.Hunk {
+	for i, d := range hunk {
 		switch d.Op {
 		case '-':
 			nums[i] = oldNo
@@ -388,8 +478,12 @@ func patchNode(p Part, width int) []string {
 	hl := newHighlighter(p.Lang)
 	title := base.Foreground(lipgloss.Color("#8a8a8a")).Bold(true).Render("← Edit " + p.File)
 
-	lines := []string{row(tlPanelBg, ""), row(tlPanelBg, title), row(tlPanelBg, "")}
-	for i, d := range p.Hunk {
+	lines := []string{row(tlPanelBg, ""), row(tlPanelBg, title)}
+	if p.Note != "" {
+		lines = append(lines, row(tlPanelBg, base.Foreground(lipgloss.Color("#6b6b6b")).Render(p.Note)))
+	}
+	lines = append(lines, row(tlPanelBg, ""))
+	for i, d := range hunk {
 		bg := tlPanelBg
 		marker := " "
 		st := lipgloss.NewStyle().Background(tlPanelBg)
@@ -409,6 +503,10 @@ func patchNode(p Part, width int) []string {
 		num := st.Foreground(lipgloss.Color("#6b6b6b")).Render(fmt.Sprintf("%*d", numW, nums[i]))
 		content := st.Render("  ") + num + st.Render(" ") + marker + st.Render(" ") + hl(d.Text, bg)
 		lines = append(lines, row(bg, content))
+	}
+	if hidden > 0 {
+		more := base.Foreground(lipgloss.Color("#6b6b6b")).Render(fmt.Sprintf("  … %d more lines", hidden))
+		lines = append(lines, row(tlPanelBg, more))
 	}
 	return append(lines, row(tlPanelBg, ""))
 }

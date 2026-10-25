@@ -1,0 +1,4 @@
+opentui>=0.1.0
+markdown>=3.4.0
+rich>=13.0.0
+textual>=0.41.0

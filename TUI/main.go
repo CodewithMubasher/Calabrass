@@ -1,11 +1,15 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"calabrass-tui/internal/api"
+	"calabrass-tui/internal/settings"
 )
 
 // App-wide styles
@@ -26,7 +30,25 @@ var (
 )
 
 func main() {
-	p := tea.NewProgram(NewModel())
+	addr := flag.String("addr", "", "backend address (default: $CALABRASS_ADDR, the saved one, or "+api.DefaultAddr+")")
+	cont := flag.Bool("c", false, "continue the latest session of this folder")
+	flag.BoolVar(cont, "continue", false, "continue the latest session of this folder")
+	flag.Parse()
+
+	st, err := settings.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "calabrass: could not read settings:", err)
+		st = settings.Settings{}
+	}
+	switch {
+	case *addr != "":
+		st.Addr = *addr
+	case os.Getenv("CALABRASS_ADDR") != "":
+		st.Addr = os.Getenv("CALABRASS_ADDR")
+	}
+
+	app := &appCtx{client: api.New(st.Addr), st: &st, resume: *cont}
+	p := tea.NewProgram(NewModel(app))
 	if _, err := p.Run(); err != nil {
 		fmt.Println("Error running TUI:", err)
 		os.Exit(1)

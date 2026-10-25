@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/paginator"
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -30,14 +31,18 @@ func newSpinner() paginator.Model {
 	return p
 }
 
+// newRowSpinner is the bubbles Spinner shown while the AI is thinking or
+// making an edit (it turns into "+ 1 thought" / "+ 1 edit" when done).
+func newRowSpinner() spinner.Model {
+	return spinner.New(
+		spinner.WithSpinner(spinner.MiniDot),
+		spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#b8862f"))),
+	)
+}
+
 // running reports whether the AI is thinking or typing.
 func (m Model) running() bool {
-	for _, msg := range m.messages {
-		if msg.Role == RoleAssistant && (msg.Pending || msg.Streaming) {
-			return true
-		}
-	}
-	return false
+	return m.turn != nil
 }
 
 // advanceSpinner moves the focus to the next dot (wraps around).
@@ -45,20 +50,7 @@ func (m *Model) advanceSpinner() {
 	m.spin.Page = (m.spin.Page + 1) % spinDots
 }
 
-// interrupt stops every answer that is still running (Esc).
-func (m *Model) interrupt() {
-	for i := range m.messages {
-		msg := &m.messages[i]
-		if msg.Role == RoleAssistant && (msg.Pending || msg.Streaming) {
-			msg.Pending = false
-			msg.Streaming = false
-			msg.Interrupted = true
-			msg.Elapsed = time.Since(msg.Started)
-		}
-	}
-}
-
-// runningView is the footer while the AI works:  • • ● • • • • •  esc interrupt
+// runningView is the footer while the AI works:           esc interrupt
 func (m Model) runningView() string {
 	accent := lipgloss.Color("#ffffff")
 	if n := len(m.messages); n > 0 {
@@ -66,8 +58,8 @@ func (m Model) runningView() string {
 	}
 
 	sp := m.spin // copy, so styling here doesn't touch the model
-	sp.ActiveDot = lipgloss.NewStyle().Foreground(accent).Bold(true).Render("•")
-	sp.InactiveDot = lipgloss.NewStyle().Foreground(lipgloss.Color("#444444")).Render("•")
+	sp.ActiveDot = lipgloss.NewStyle().Foreground(accent).Bold(true).Render("■")
+	sp.InactiveDot = lipgloss.NewStyle().Foreground(lipgloss.Color("#444444")).Render("⬝")
 
 	esc := lipgloss.NewStyle().Foreground(lipgloss.Color("#b0b0b0")).Bold(true).Render("esc")
 	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).Render("interrupt")

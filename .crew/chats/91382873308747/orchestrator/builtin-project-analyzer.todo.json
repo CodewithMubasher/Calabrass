@@ -1,0 +1,15 @@
+{
+  "workerId": "builtin-project-analyzer",
+  "workerName": "Project Analyzer",
+  "task": "Analyze the codebase to determine the project's overall purpose, core features, and technical architecture.",
+  "context": "The user wants a simple summary of what the project 'Calabrass' is and what its features are.",
+  "acceptance": [
+    "A high-level summary of the project purpose.",
+    "A list of the main features and functional modules.",
+    "An overview of the tech stack used."
+  ],
+  "workspace": "C:\\Users\\Mubasher Developer\\Desktop\\Calabrass",
+  "createdAt": "2026-10-23T15:03:14+05:00",
+  "todoPath": ".crew/chats/91382873308747/orchestrator/builtin-project-analyzer.todo.json",
+  "reportPath": ".crew/chats/91382873308747/workers/builtin-project-analyzer/report.json"
+}

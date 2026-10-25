@@ -24,25 +24,18 @@ type SlashSelectMsg struct {
 // defaultSlashCommands is the menu content. Keep it sorted A-Z. Edit freely.
 func defaultSlashCommands() []SlashCommand {
 	return []SlashCommand{
-		{"/agents", "Switch agent"},
-		{"/btw", "One-shot answer from the session's context without adding to it"},
-		{"/cd", "Change working directory"},
-		{"/clear", "Clear session"},
-		{"/connect", "Connect an integration"},
-		{"/continue", "Switch session"},
-		{"/debug", "View debug info"},
-		{"/diff", "Open diff viewer"},
-		{"/editor", "Open editor"},
-		{"/effort", "Switch model variant"},
+		{"/answer", "Reopen the agent's questions"},
+		{"/cd", "Change the working folder: /cd <dir>"},
+		{"/connect", "Add or edit a provider API key"},
+		{"/continue", "Open an earlier session"},
 		{"/exit", "Exit the app"},
-		{"/export", "Export session to Markdown"},
-		{"/help", "Show help"},
-		{"/init", "Create or update the project guide"},
-		{"/mcps", "Toggle MCP servers"},
+		{"/export", "Save the session as Markdown: /export [file]"},
+		{"/help", "Show keys and commands"},
+		{"/mcps", "Turn MCP servers on or off"},
 		{"/models", "Switch model"},
 		{"/new", "Start a new session"},
-		{"/share", "Share session"},
-		{"/themes", "Switch theme"},
+		{"/rename", "Rename this session: /rename <title>"},
+		{"/retry", "Answer the last message again"},
 	}
 }
 

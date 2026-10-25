@@ -52,6 +52,44 @@ func TestWorkspaceForUsesTheChatsFolder(t *testing.T) {
 	}
 }
 
+// A folder picked on disk is opened itself, not copied into the workspace
+// library, so the AI and the crew workers see the project the person chose.
+func TestWorkspaceForUsesAPickedFolder(t *testing.T) {
+	s, _, _ := testServer(t)
+
+	root := t.TempDir()
+	got := s.workspaceFor(store.Chat{ID: "picked", WorkspaceDir: root})
+	if got == nil {
+		t.Fatal("the picked folder did not open")
+	}
+
+	want, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		want = root
+	}
+	if got.Root() != want {
+		t.Fatalf("workspace = %s, want the picked folder %s", got.Root(), want)
+	}
+}
+
+func TestResolveWorkspacePath(t *testing.T) {
+	dir := t.TempDir()
+	got, err := resolveWorkspacePath(dir)
+	if err != nil {
+		t.Fatalf("resolving the picked folder: %v", err)
+	}
+	if !filepath.IsAbs(got) {
+		t.Fatalf("workspace path %q is not absolute", got)
+	}
+
+	if _, err := resolveWorkspacePath(filepath.Join(dir, "missing")); err == nil {
+		t.Fatal("a missing folder was accepted")
+	}
+	if got, err := resolveWorkspacePath("  "); got != "" || err != nil {
+		t.Fatalf("empty path = %q, %v; want it to clear the binding", got, err)
+	}
+}
+
 // A binding that would climb out of the library cannot be opened, so the turn
 // falls back to the default rather than escaping.
 func TestWorkspaceForRefusesEscapingFolders(t *testing.T) {

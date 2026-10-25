@@ -10,38 +10,25 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-const (
-	contextLimit = 256000 // fake context window, used for the "3%" number
-	baseTokens   = 7295   // fake tokens already used by the system prompt
-)
-
 // --- working directory + git branch ---------------------------------------
 
 // workDirLabel returns something like "~/desktop/project:feature/cli-app".
-func workDirLabel() string {
-	wd, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	wd = filepath.ToSlash(wd)
+func workDirLabel(dir string) string {
+	wd := filepath.ToSlash(dir)
 	if home, err := os.UserHomeDir(); err == nil {
 		home = filepath.ToSlash(home)
 		if strings.HasPrefix(wd, home) {
 			wd = "~" + strings.TrimPrefix(wd, home)
 		}
 	}
-	if b := gitBranch(); b != "" {
+	if b := gitBranch(dir); b != "" {
 		wd += ":" + b
 	}
 	return wd
 }
 
 // gitBranch reads .git/HEAD, walking up from the current directory.
-func gitBranch() string {
-	dir, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
+func gitBranch(dir string) string {
 	for {
 		data, err := os.ReadFile(filepath.Join(dir, ".git", "HEAD"))
 		if err == nil {
@@ -64,18 +51,9 @@ func gitBranch() string {
 
 // --- tokens -----------------------------------------------------------------
 
-// tokens is a rough fake count: base + about 1 token per 4 characters.
-func (m Model) tokens() int {
-	n := baseTokens
-	for _, msg := range m.messages {
-		n += msg.charCount() / 4
-	}
-	return n
-}
-
-func (m Model) tokenPercent() int {
-	return (m.tokens()*100 + contextLimit/2) / contextLimit
-}
+// sessionTokens is what the turns of this session have used, as the backend
+// reported it.
+func (m Model) sessionTokens() int { return m.usageIn + m.usageOut }
 
 // formatInt adds thousands separators: 7295 -> "7,295".
 func formatInt(n int) string {
@@ -109,33 +87,32 @@ func formatShort(n int) string {
 
 // footerView is the row under the prompt-input, `w` columns wide.
 //
-//	chat screen: "~/path:branch ........ 7.3K (3%)   ctrl+p commands"
-//	home screen: "tab agents ........ ctrl+p commands"
+//	chat screen: "~/path:branch ........ 7.3K tokens   ctrl+o rows   ctrl+p commands"
+//	home screen: "~/path:branch (or a hint) ........ ctrl+p commands"
 func (m Model) footerView(w int, home bool) string {
 	bold := lipgloss.NewStyle().Foreground(colorText).Bold(true)
 
 	right := bold.Render(keyCommandPalette) + msgMuted.Render(" commands")
 	if !home {
-		right = msgMuted.Render(fmt.Sprintf("%s (%d%%)", formatShort(m.tokens()), m.tokenPercent())) +
-			"   " + right
+		right = msgMuted.Render(keyToggleRows+" rows") + "   " + right
+		if n := m.sessionTokens(); n > 0 {
+			right = msgMuted.Render(formatShort(n)+" tokens") + "   " + right
+		}
 	}
 
+	avail := w - lipgloss.Width(right) - 1
+	if avail < 0 {
+		avail = 0
+	}
 	var left string
 	switch {
+	case home && m.banner != "":
+		left = lipgloss.NewStyle().Foreground(lipgloss.Color("#b8862f")).Render(ansi.Truncate(m.banner, avail, "…"))
 	case home:
-		left = bold.Render("tab") + msgMuted.Render(" agents")
+		left = msgMuted.Render(ansi.Truncate(m.cwd, avail, "…"))
 	case m.running():
-		avail := w - lipgloss.Width(right) - 1
-		if avail < 0 {
-			avail = 0
-		}
 		left = ansi.Truncate(m.runningView(), avail, "") // dots + esc + interrupt
 	default:
-		// Chat page: the working folder (cut with "…" if it doesn't fit).
-		avail := w - lipgloss.Width(right) - 1
-		if avail < 0 {
-			avail = 0
-		}
 		left = msgMuted.Render(ansi.Truncate(m.cwd, avail, "…"))
 	}
 
@@ -148,32 +125,7 @@ func (m Model) footerView(w int, home bool) string {
 
 // --- right panel content ----------------------------------------------------
 
-type sidebarItem struct {
-	Name   string
-	Status string
-	Active bool // active items are drawn in blue
-}
-
-type sidebarSection struct {
-	Title string
-	Items []sidebarItem
-}
-
-// defaultSidebar is the list shown in the right panel. Edit it freely.
-func defaultSidebar() []sidebarSection {
-	return []sidebarSection{
-		{Title: "MCPs", Items: []sidebarItem{
-			{Name: "Gmail", Status: "Disabled"},
-			{Name: "Excel", Status: "Disabled"},
-			{Name: "Win-control", Status: "Disabled"},
-		}},
-		{Title: "Workers", Items: []sidebarItem{
-			{Name: "Frontend agent", Status: "Idle"},
-		}},
-	}
-}
-
-// truncLeft keeps the END of a path and cuts the start: "…/calabrass/TUI".
+// truncLeft keeps the END of a path and cuts the start: "/calabrass/TUI".
 func truncLeft(s string, w int) string {
 	r := []rune(s)
 	if w < 1 || len(r) <= w {
@@ -199,31 +151,44 @@ func (m Model) sidebarView(inner, innerH int) string {
 	var lines []string
 
 	// Session title.
-	session := "New session - " + m.started.Format("2006-01-02T15:04:05.000Z")
+	session := "New session"
+	if m.chat != nil && strings.TrimSpace(m.chat.Title) != "" {
+		session = m.chat.Title
+	}
 	for _, l := range strings.Split(wrapText(session, inner), "\n") {
 		lines = append(lines, title.Render(l))
 	}
 
-	// Context.
-	lines = append(lines,
-		blank,
-		title.Render("Context"),
-		muted.Render(formatInt(m.tokens())+" tokens"),
-		muted.Render(fmt.Sprintf("%d%% used", m.tokenPercent())),
-	)
+	// Model + tokens, as the backend reported them.
+	model := "none: /connect"
+	if m.prompt.Model != "" {
+		model = m.prompt.Model
+	}
+	lines = append(lines, blank, title.Render("Model"), muted.Render(model))
+	if m.prompt.Provider != "" {
+		lines = append(lines, muted.Render(m.prompt.Provider))
+	}
+	lines = append(lines, blank, title.Render("Tokens"))
+	if m.sessionTokens() == 0 {
+		lines = append(lines, muted.Render("none used yet"))
+	} else {
+		lines = append(lines,
+			muted.Render(formatInt(m.sessionTokens())+" this session"),
+			muted.Render(formatInt(m.usageIn)+" in · "+formatInt(m.usageOut)+" out"))
+	}
 
-	// MCPs, Workers, ...
-	for _, sec := range defaultSidebar() {
-		lines = append(lines, blank, title.Render(sec.Title))
-		for _, it := range sec.Items {
-			dot, status := muted, muted
-			if it.Active {
-				dot, status = blue, blue
-			}
-			left := dot.Render("• ") + title.Render(it.Name)
-			right := status.Render(it.Status)
-			lines = append(lines, twoCol(left, right, inner, base))
+	// MCP servers.
+	lines = append(lines, blank, title.Render("MCPs"))
+	if len(m.connectors) == 0 {
+		lines = append(lines, muted.Render("none registered"))
+	}
+	for _, c := range m.connectors {
+		dot, status, label := muted, muted, "Disabled"
+		if c.Enabled {
+			dot, status, label = blue, blue, "Enabled"
 		}
+		left := dot.Render("● ") + title.Render(c.Name)
+		lines = append(lines, twoCol(left, status.Render(label), inner, base))
 	}
 
 	// A row wider than the panel would wrap and push the layout down.

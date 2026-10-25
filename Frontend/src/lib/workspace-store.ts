@@ -9,15 +9,26 @@ interface WorkspaceState {
   loading: boolean
   /** Workspace ids with a change in flight. */
   pending: string[]
-  /** The workspace a chat started from the home screen will use. */
-  preferredId: string
+  /** The folder a chat started from the home screen will use. */
+  preferredDir: string
+}
+
+/** Keeps the home-screen pick across a reload until the person changes it. */
+const PREFERRED_DIR_KEY = "calabrass.workspaceDir"
+
+function storedPreferredDir() {
+  try {
+    return localStorage.getItem(PREFERRED_DIR_KEY) ?? ""
+  } catch {
+    return ""
+  }
 }
 
 let state: WorkspaceState = {
   workspaces: [],
   loading: false,
   pending: [],
-  preferredId: "",
+  preferredDir: storedPreferredDir(),
 }
 
 const listeners = new Set<() => void>()
@@ -43,14 +54,19 @@ export function useWorkspacesState() {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-/** The workspace the next chat from the home screen should use. */
-export function usePreferredWorkspaceId() {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot).preferredId
+/** The folder the next chat from the home screen should use. */
+export function usePreferredWorkspaceDir() {
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot).preferredDir
 }
 
-/** Pick the workspace the next chat from the home screen will use. */
-export function setPreferredWorkspace(workspaceId: string) {
-  setState({ preferredId: workspaceId })
+/** Pick the folder the next chat from the home screen will use. */
+export function setPreferredWorkspaceDir(dir: string) {
+  try {
+    localStorage.setItem(PREFERRED_DIR_KEY, dir)
+  } catch {
+    // A blocked storage does not stop the pick from working in this run.
+  }
+  setState({ preferredDir: dir })
 }
 
 let inFlight = false
@@ -82,8 +98,16 @@ export async function loadWorkspaces() {
  * dialog can show it next to the form.
  */
 export async function createWorkspace(input: WorkspaceInput) {
-  setState({ workspaces: await api.createWorkspace(input) })
+  const workspaces = await api.createWorkspace(input)
+  setState({ workspaces })
   notifySuccess(`${input.name} was added.`, "Workspace added")
+
+  const name = input.name.trim().toLowerCase()
+  return (
+    workspaces.find(
+      (workspace) => workspace.name.trim().toLowerCase() === name
+    ) ?? workspaces[workspaces.length - 1]
+  )
 }
 
 /** Forget a workspace. Its files stay on disk. Throws on failure. */

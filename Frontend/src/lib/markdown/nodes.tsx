@@ -116,8 +116,9 @@ function NodeRenderer({ node }: { node: Content | Root }): React.ReactNode {
     case "html":
       return null
 
-    case "text":
-      return node.value
+    case "text": {
+      return node.value.replace(/\$\\\rightarrow\$/g, " → ").replace(/\\\rightarrow/g, " → ")
+    }
 
     case "break":
       return <br />
