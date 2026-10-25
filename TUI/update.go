@@ -354,12 +354,15 @@ func (m *Model) apiFailed(err error, what string) tea.Cmd {
 }
 
 // afterTurn runs when a turn is over: it opens the questions form when the
-// agent asked something.
+// agent asked something. Also refreshes schedules in case the agent created one.
 func (m *Model) afterTurn() tea.Cmd {
+	cmds := []tea.Cmd{}
 	if qs := pendingQuestions(m.messages); len(qs) > 0 {
-		return m.qform.Open(qs)
+		cmds = append(cmds, m.qform.Open(qs))
 	}
-	return nil
+	// Refresh schedules in case the agent booked one via schedule_task tool
+	cmds = append(cmds, loadSchedulesCmd(m.app.client))
+	return tea.Batch(cmds...)
 }
 
 // onKey routes a key press: dialogs first, then the "/" menu, then the app.

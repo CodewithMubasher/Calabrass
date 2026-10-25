@@ -224,14 +224,21 @@ func (m Model) sidebarView(inner, innerH int) string {
 			dotStyle = base.Foreground(promptMuted) // empty/gray for pending
 		}
 
-		// Truncate prompt to fit
-		maxPromptWidth := inner - 4 // "● " + padding
+		// Show when it's due on the right - calculate first to know its width
+		when := formatScheduleTime(s.RunAt, now)
+		whenRendered := muted.Render(when)
+		whenWidth := lipgloss.Width(whenRendered)
+
+		// Truncate prompt to fit remaining space (dot + prompt + gap + when)
+		// gap is at least 1, so available = inner - 2 (dot) - 1 (gap) - whenWidth
+		maxPromptWidth := inner - 3 - whenWidth
+		if maxPromptWidth < 4 {
+			maxPromptWidth = 4
+		}
 		prompt := ansi.Truncate(s.Prompt, maxPromptWidth, "…")
 
 		left := dotStyle.Render("● ") + title.Render(prompt)
-		// Show when it's due on the right
-		when := formatScheduleTime(s.RunAt, now)
-		lines = append(lines, twoCol(left, muted.Render(when), inner, base))
+		lines = append(lines, twoCol(left, whenRendered, inner, base))
 	}
 	if activeSchedules == 0 {
 		lines = append(lines, muted.Render("none scheduled"))
