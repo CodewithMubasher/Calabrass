@@ -10,26 +10,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-const helpText = `Calabrass TUI
-
-Keys
-  enter        send            alt+enter / ctrl+j   new line
-  esc          interrupt the running answer
-  ctrl+c       interrupt, or quit when idle
-  ctrl+p       command palette
-  ctrl+o       open / close every tool and edit row (or click a row)
-  ctrl+r       show / hide the right panel
-  pgup/pgdn    scroll (the mouse wheel works too)
-
-Commands
-  /models      switch model            /connect     add or edit a provider key
-  /continue    open an earlier session /new         start a new session
-  /mcps        turn MCP servers on/off /cd <dir>    change the working folder
-  /rename <t>  rename this session     /retry       answer the last message again
-  /answer      reopen the agent's questions
-  /export [f]  save the session as Markdown
-  /exit        quit`
-
 // runCommand runs a slash command. args is what was typed after its name.
 func (m *Model) runCommand(name, args string) tea.Cmd {
 	c := m.app.client
@@ -41,7 +21,10 @@ func (m *Model) runCommand(name, args string) tea.Cmd {
 		m.newSession()
 
 	case "/help":
-		m.notice(helpText, false)
+		return m.showToast("Press ctrl+p to view all commands", false)
+
+	case "/copy":
+		return m.copyLastResponse()
 
 	case "/models":
 		cmd := m.list.Show("models", "Select model", m.modelItems())

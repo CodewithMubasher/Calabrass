@@ -70,6 +70,9 @@ type Part struct {
 	Server    string // MCP server it came from, if any
 	Label     string // what it did:   "Read main.py"
 	WorkLabel string // while running:  "Reading main.py…"
+	Command   string // run_command: the full command, as written
+	Explore   string // read_file / grep / glob / list_dir: "read", "search" or "list"
+	Summary   string // Explored line, e.g.  Grep "workspace" in Backend (120 matches)
 	Output    string // what it returned (shown when the row is open)
 	Err       string // what went wrong, when it failed
 	Failed    bool   // the call failed (or the command exited non-zero)
@@ -211,9 +214,24 @@ func renderTimeline(parts []Part, width, hover int, streaming bool, spin string)
 			continue
 		}
 
+		// Run of read / grep / glob / list calls: its own "Explored" row.
+		if isExplore(parts[i]) {
+			j := i
+			for j < len(parts) && isExplore(parts[j]) {
+				j++
+			}
+			rows, w := exploreBlock(parts[i:j], width, hover == i, spin)
+			add(rows[0], lineHit{Part: i, W: w})
+			for _, l := range rows[1:] {
+				add(l, noHit)
+			}
+			i = j
+			continue
+		}
+
 		// Group of thoughts / edits, folded into one row.
 		j := i
-		for j < len(parts) && parts[j].Kind != PartText {
+		for j < len(parts) && parts[j].Kind != PartText && !isExplore(parts[j]) {
 			j++
 		}
 		group := parts[i:j]
@@ -272,18 +290,18 @@ func renderNode(p Part, width int) []string {
 	return nil
 }
 
-// thoughtNode: orange "Thought: 579ms" and the reasoning, each with a thin
-// dark bar on the left.
+// thoughtNode: orange "Thought: 579ms" and the reasoning, all inside ONE
+// unbroken bar on the left (the blank row between them has the bar too).
 func thoughtNode(p Part, width int) []string {
 	blockW := width - bubbleIndent - 2 - 1
 	title := "Thought"
 	if p.Ms > 0 {
 		title = fmt.Sprintf("Thought: %s", formatMs(p.Ms))
 	}
-	lines := barBlock([]string{msgThoughtTitle.Render(title)})
-	lines = append(lines, "")
+	body := []string{msgThoughtTitle.Render(title), ""}
 	text := msgMuted.Render(wrapText(p.Text, blockW))
-	return append(lines, barBlock(strings.Split(text, "\n"))...)
+	body = append(body, strings.Split(text, "\n")...)
+	return barBlock(body)
 }
 
 // editNode: a darker panel with "# Wrote main.py" and numbered code.

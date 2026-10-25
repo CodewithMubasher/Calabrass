@@ -131,6 +131,15 @@ func toolParts(tp api.TracePart, o partOpts) []Part {
 		Err: tp.Error, Failed: failed, Stopped: stopped, DurMs: tp.DurationMs,
 		Output: tp.Output,
 	}
+	p.Explore, p.Summary = exploreInfo(tp)
+	if tp.Name == "run_command" && tp.Server == "" {
+		var cin struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal([]byte(tp.Input), &cin) == nil {
+			p.Command = strings.TrimSpace(cin.Command)
+		}
+	}
 	if tp.Name == "run_command" && tp.Server == "" && tp.Output != "" {
 		var res struct {
 			ExitCode int    `json:"exit_code"`
@@ -143,6 +152,7 @@ func toolParts(tp api.TracePart, o partOpts) []Part {
 				p.Failed, p.Err = true, "the command timed out"
 			} else if res.ExitCode != 0 {
 				p.Failed = true
+				p.Err = fmt.Sprintf("exit code %d", res.ExitCode)
 				p.Label += fmt.Sprintf(" (exit %d)", res.ExitCode)
 			}
 		}
@@ -272,6 +282,63 @@ func toolLabels(tp api.TracePart) (done, working string) {
 		name = "tool"
 	}
 	return name, "Running " + name + "…"
+}
+
+// exploreInfo says whether a call is a looking-around call ("read", "search"
+// or "list") and gives the one line shown for it in an open Explored row.
+func exploreInfo(tp api.TracePart) (kind, line string) {
+	if tp.Server != "" {
+		return "", ""
+	}
+	args := map[string]any{}
+	_ = json.Unmarshal([]byte(tp.Input), &args)
+	str := func(key string) string {
+		if v, ok := args[key].(string); ok {
+			return oneLine(v)
+		}
+		return ""
+	}
+	in := func(path string) string {
+		if path == "" {
+			return ""
+		}
+		return " in " + path
+	}
+	// "(120 matches)": one match per output line. Only once the call is done.
+	count := func(one, many string) string {
+		if tp.Status != api.StatusOK {
+			return ""
+		}
+		n := 0
+		for _, l := range strings.Split(tp.Output, "\n") {
+			if strings.TrimSpace(l) != "" {
+				n++
+			}
+		}
+		switch n {
+		case 0:
+			return " (no " + many + ")"
+		case 1:
+			return " (1 " + one + ")"
+		}
+		return fmt.Sprintf(" (%d %s)", n, many)
+	}
+
+	switch tp.Name {
+	case "read_file":
+		return "read", strings.TrimSpace("Read " + str("path"))
+	case "list_dir":
+		p := str("path")
+		if p == "" {
+			p = "."
+		}
+		return "list", "List " + p
+	case "grep":
+		return "search", `Grep "` + str("pattern") + `"` + in(str("path")) + count("match", "matches")
+	case "glob":
+		return "search", `Glob "` + str("pattern") + `"` + in(str("path")) + count("file", "files")
+	}
+	return "", ""
 }
 
 // oneLine collapses whitespace so a multi-line command fits on a row.

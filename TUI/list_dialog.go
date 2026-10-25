@@ -11,10 +11,11 @@ import (
 
 // ListItem is one row of a ListDialog.
 type ListItem struct {
-	ID    string
-	Title string
-	Desc  string // shown after the title, muted
-	Right string // right-aligned
+	ID      string
+	Title   string
+	Desc    string // shown after the title, muted
+	Right   string // right-aligned
+	Section string // optional group header (e.g. the provider name)
 }
 
 // ListSelectMsg is sent when the user presses Enter on a row.
@@ -166,7 +167,8 @@ func (d *ListDialog) refilter() {
 		out := make([]ListItem, 0, len(d.items))
 		for _, it := range d.items {
 			if strings.Contains(strings.ToLower(it.Title), q) ||
-				strings.Contains(strings.ToLower(it.Desc), q) {
+				strings.Contains(strings.ToLower(it.Desc), q) ||
+				strings.Contains(strings.ToLower(it.Section), q) {
 				out = append(out, it)
 			}
 		}
@@ -178,6 +180,30 @@ func (d *ListDialog) refilter() {
 	if d.cursor < 0 {
 		d.cursor = 0
 	}
+}
+
+// listRow is one rendered row: a group header (-1), a blank separator (-2),
+// or an index into d.filtered (>= 0).
+type listRow struct {
+	section string
+	item    int
+}
+
+// rows expands the filtered items with their section headers.
+func (d ListDialog) rows() []listRow {
+	var out []listRow
+	last := "\x00" // never equal to a real section
+	for i, it := range d.filtered {
+		if it.Section != "" && it.Section != last {
+			if len(out) > 0 {
+				out = append(out, listRow{item: -2})
+			}
+			out = append(out, listRow{section: it.Section, item: -1})
+			last = it.Section
+		}
+		out = append(out, listRow{item: i})
+	}
+	return out
 }
 
 // maxRows is how many list rows fit on screen.
@@ -193,15 +219,31 @@ func (d ListDialog) maxRows() int {
 }
 
 func (d *ListDialog) ensureVisible() {
+	rows := d.rows()
+	sel := -1
+	for i, r := range rows {
+		if r.item == d.cursor {
+			sel = i
+			break
+		}
+	}
+	if sel < 0 {
+		d.scroll = 0
+		return
+	}
+
 	max := d.maxRows()
-	if d.cursor < d.scroll {
-		d.scroll = d.cursor
+	if sel < d.scroll {
+		d.scroll = sel
+		if sel > 0 && rows[sel-1].item == -1 {
+			d.scroll = sel - 1 // keep the section title visible
+		}
 	}
-	if d.cursor >= d.scroll+max {
-		d.scroll = d.cursor - max + 1
+	if sel >= d.scroll+max {
+		d.scroll = sel - max + 1
 	}
-	if d.scroll > len(d.filtered)-max {
-		d.scroll = len(d.filtered) - max
+	if d.scroll > len(rows)-max {
+		d.scroll = len(rows) - max
 	}
 	if d.scroll < 0 {
 		d.scroll = 0
@@ -290,7 +332,8 @@ func (d ListDialog) View() string {
 	out = append(out, line(title), blank, line(d.input.View()), blank)
 
 	max := d.maxRows()
-	target := len(d.items)
+	rows := d.rows()
+	target := len(rows)
 	if target > max {
 		target = max
 	}
@@ -307,30 +350,46 @@ func (d ListDialog) View() string {
 		out = append(out, line(base.Foreground(dialogMuted).Render(msg)))
 		shown++
 	}
-	for i := d.scroll; i < len(d.filtered) && shown < target; i++ {
-		it := d.filtered[i]
-		right := it.Right
-		avail := inner - lipgloss.Width(right) - 4
-		if avail < 4 {
-			avail = 4
-		}
+	for i := d.scroll; i < len(rows) && shown < target; i++ {
+		r := rows[i]
+		switch {
+		case r.item == -2:
+			out = append(out, blank)
+		case r.item == -1:
+			n := 0
+			for _, it := range d.filtered {
+				if it.Section == r.section {
+					n++
+				}
+			}
+			header := base.Foreground(dialogPurple).Bold(true).Render(r.section) +
+				base.Foreground(dialogMuted).Render("  "+plural(n, "model"))
+			out = append(out, line(header))
+		default:
+			it := d.filtered[r.item]
+			right := it.Right
+			avail := inner - lipgloss.Width(right) - 4
+			if avail < 4 {
+				avail = 4
+			}
 
-		if i == d.cursor {
-			sel := lipgloss.NewStyle().Background(dialogBlue).Foreground(dialogDark)
-			pad := sel.Render(strings.Repeat(" ", dialogPadX))
-			left := sel.Render(" ") + sel.Bold(true).Render(it.Title)
-			if it.Desc != "" {
-				left += sel.Render(" " + it.Desc)
+			if r.item == d.cursor {
+				sel := lipgloss.NewStyle().Background(dialogBlue).Foreground(dialogDark)
+				pad := sel.Render(strings.Repeat(" ", dialogPadX))
+				left := sel.Render(" ") + sel.Bold(true).Render(it.Title)
+				if it.Desc != "" {
+					left += sel.Render(" " + it.Desc)
+				}
+				left = ansi.Truncate(left, avail, "")
+				out = append(out, pad+twoCol(left, sel.Render(right), inner, sel)+pad)
+			} else {
+				left := base.Render("  ") + base.Foreground(colorText).Bold(true).Render(it.Title)
+				if it.Desc != "" {
+					left += base.Foreground(dialogMuted).Render(" " + it.Desc)
+				}
+				left = ansi.Truncate(left, avail, "")
+				out = append(out, line(twoCol(left, base.Foreground(dialogMuted).Render(right), inner, base)))
 			}
-			left = ansi.Truncate(left, avail, "")
-			out = append(out, pad+twoCol(left, sel.Render(right), inner, sel)+pad)
-		} else {
-			left := base.Render("  ") + base.Foreground(colorText).Bold(true).Render(it.Title)
-			if it.Desc != "" {
-				left += base.Foreground(dialogMuted).Render(" " + it.Desc)
-			}
-			left = ansi.Truncate(left, avail, "")
-			out = append(out, line(twoCol(left, base.Foreground(dialogMuted).Render(right), inner, base)))
 		}
 		shown++
 	}

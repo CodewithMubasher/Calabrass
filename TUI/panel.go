@@ -52,6 +52,7 @@ type Model struct {
 	list       ListDialog
 	provForm   ProviderForm
 	qform      QuestionForm
+	quick      QuickMenu // hold ↓ for two seconds
 	slash      SlashMenu // the "/" command menu above the prompt
 	screen     Screen    // home (start) or chat
 	messages   []Message
@@ -67,6 +68,13 @@ type Model struct {
 	sp         spinner.Model   // bubbles Spinner for thinking / edit rows
 	spBusy     bool            // the spinner tick loop is running
 	spinActive bool            // a spinTick loop is already running
+	holdSeq    int             // identifies the current hold-↓ timer
+	holdCount  int             // arrow-down presses seen while holding
+	holdLast   time.Time       // when the last arrow-down press arrived
+	holdSeen   bool            // a hold is in progress or just opened the menu
+	toastText  string          // one-line notice in the chat's top-right corner
+	toastErr   bool            // draw the toast in the error color
+	toastSeq   int             // identifies the current toast timer
 
 	// --- backend state ---
 	app          *appCtx
@@ -96,6 +104,7 @@ func NewModel(app *appCtx) Model {
 		list:      NewListDialog(),
 		provForm:  NewProviderForm(),
 		qform:     NewQuestionForm(),
+		quick:     NewQuickMenu(),
 		slash:     NewSlashMenu(),
 		hoverMsg:  -1,
 		hoverPart: -1,
@@ -139,7 +148,8 @@ func (m Model) rightPanelContent(panelW, bodyH int) string {
 
 // modalOpen reports whether a dialog has the keyboard.
 func (m Model) modalOpen() bool {
-	return m.dialog.IsOpen() || m.list.IsOpen() || m.provForm.IsOpen() || m.qform.IsOpen()
+	return m.dialog.IsOpen() || m.list.IsOpen() || m.provForm.IsOpen() ||
+		m.qform.IsOpen() || m.quick.IsOpen()
 }
 
 // slashVisible reports whether the "/" menu is showing.
@@ -173,19 +183,19 @@ func (m Model) viewString() string {
 		view = m.chatView()
 	}
 
-	if m.dialog.IsOpen() {
-		return m.dialog.Overlay(view, m.width, m.height)
+	switch {
+	case m.dialog.IsOpen():
+		view = m.dialog.Overlay(view, m.width, m.height)
+	case m.list.IsOpen():
+		view = m.list.Overlay(view, m.width, m.height)
+	case m.provForm.IsOpen():
+		view = m.provForm.Overlay(view, m.width, m.height)
+	case m.qform.IsOpen():
+		view = m.qform.Overlay(view, m.width, m.height)
+	case m.quick.IsOpen():
+		view = m.quick.Overlay(view, m.width, m.height)
 	}
-	if m.list.IsOpen() {
-		return m.list.Overlay(view, m.width, m.height)
-	}
-	if m.provForm.IsOpen() {
-		return m.provForm.Overlay(view, m.width, m.height)
-	}
-	if m.qform.IsOpen() {
-		return m.qform.Overlay(view, m.width, m.height)
-	}
-	return view
+	return m.withToast(view)
 }
 
 // chatView is the chat screen: chat, prompt-input and the right panel.

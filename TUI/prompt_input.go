@@ -26,7 +26,7 @@ var (
 	promptBg = lipgloss.Color("#1e1e1e") // card background
 
 	// Accent colors per mode.
-	promptAccentChat    = lipgloss.Color("#5bc0de") // blue for chat mode
+	promptAccentChat    = lipgloss.Color("#5c9cf5") // blue for chat mode
 	promptAccentCrew    = lipgloss.Color("#9b59b6") // purple for crew mode
 	promptAccentDefault = lipgloss.Color("#5c9cf5") // default/Build color
 

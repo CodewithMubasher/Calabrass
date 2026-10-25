@@ -54,8 +54,9 @@ type providersMsg struct {
 	open bool
 }
 type providerSavedMsg struct {
-	rows []api.ProviderRow
-	err  error
+	rows    []api.ProviderRow
+	err     error
+	created bool // a new provider was added (not an edit)
 }
 type chatDeletedMsg struct {
 	id  string
@@ -66,6 +67,13 @@ type renamedMsg struct {
 	err  error
 }
 type cdDoneMsg struct {
+	path string
+	err  error
+}
+
+// workspaceBoundMsg reports that a session was quietly bound to the folder the
+// TUI was opened in.
+type workspaceBoundMsg struct {
 	path string
 	err  error
 }
@@ -148,12 +156,13 @@ func saveProviderCmd(c *api.Client, s ProviderSaveMsg) tea.Cmd {
 		defer cancel()
 		var rows []api.ProviderRow
 		var err error
-		if s.ID == "" {
+		created := s.ID == ""
+		if created {
 			rows, err = c.CreateProvider(ctx, s.Update)
 		} else {
 			rows, err = c.UpdateProvider(ctx, s.ID, s.Update)
 		}
-		return providerSavedMsg{rows: rows, err: err}
+		return providerSavedMsg{rows: rows, err: err, created: created}
 	}
 }
 
@@ -184,6 +193,18 @@ func setWorkspaceCmd(c *api.Client, chatID, path string) tea.Cmd {
 			}
 		}
 		return cdDoneMsg{path: path}
+	}
+}
+
+// bindWorkspaceCmd points a session that had no folder at the folder the TUI
+// was opened in. Unlike /cd it stays quiet: opening a session should not print
+// a notice about a binding the user did not ask for.
+func bindWorkspaceCmd(c *api.Client, chatID, path string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := withTimeout(20 * time.Second)
+		defer cancel()
+		_, err := c.SetChatWorkspace(ctx, chatID, path)
+		return workspaceBoundMsg{path: path, err: err}
 	}
 }
 
@@ -283,11 +304,16 @@ func (m *Model) selectModel(provider, model string) {
 func (m Model) modelItems() []ListItem {
 	items := make([]ListItem, 0, len(m.models))
 	for _, e := range m.models {
-		right := ""
+		title := e.Label
 		if e.ProviderID == m.selProvider && e.ID == m.selModel {
-			right = "current"
+			title = "✓ " + title
 		}
-		items = append(items, ListItem{ID: e.ProviderID + "\x00" + e.ID, Title: e.Label, Desc: e.ProviderName, Right: right})
+		items = append(items, ListItem{
+			ID:      e.ProviderID + "\x00" + e.ID,
+			Title:   title,
+			Right:   e.ProviderName,
+			Section: e.ProviderName, // group the list by provider
+		})
 	}
 	return items
 }
@@ -346,11 +372,14 @@ func samePath(a, b string) bool {
 	return a == b
 }
 
-// chatsHere are the sessions to list, newest first.
+// chatsHere are the sessions to list, newest first. A session with no folder
+// was made before chats recorded one (or by a client that did not choose a
+// workspace), so it is treated as belonging to the folder the TUI is in; it is
+// bound to that folder when it is opened.
 func (m Model) chatsHere() []api.Chat {
 	var out []api.Chat
 	for _, c := range m.allChats {
-		if m.sessionsAll || samePath(c.WorkspaceDir, m.cwdPath) {
+		if m.sessionsAll || c.WorkspaceDir == "" || samePath(c.WorkspaceDir, m.cwdPath) {
 			out = append(out, c)
 		}
 	}
@@ -444,7 +473,10 @@ func (m *Model) loadHistory(d api.ChatDetail) {
 	m.messages = nil
 	m.usageIn, m.usageOut = 0, 0
 	m.started = time.Now().UTC()
-	if c.WorkspaceDir != "" {
+	// A folder the TUI bound is absolute. A name without a path belongs to the
+	// backend's workspace library, and using it as a local path would make the
+	// footer claim a folder that does not exist.
+	if filepath.IsAbs(c.WorkspaceDir) {
 		m.setCwd(c.WorkspaceDir)
 	}
 	if m.hasModel(c.Provider, c.Model) {

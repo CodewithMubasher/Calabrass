@@ -18,7 +18,7 @@ const (
 
 const (
     appName         = "Calabrass"
-    appVersion      = "0.1.0"
+    appVersion      = "v1.0.4"
     homePlaceholder = `Ask anything "Fix a TODO in the codebase"`
     homePromptMax   = 72 // widest the prompt gets on the home screen
 )
@@ -95,7 +95,7 @@ func logoView() string {
 
 // --- home view --------------------------------------------------------------
 
-// homeStatusBar: " 0 MCP /mcps ............ 0.1.0"
+// homeStatusBar: " 0 MCP /mcps ............ v1.0.4"
 func (m Model) homeStatusBar() string {
     left := "  " +
         msgMuted.Render("● ") +

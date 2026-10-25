@@ -176,7 +176,13 @@ func (s *Server) artifactsWorkspace(ctx context.Context, userID, chatID string) 
 	if ws == nil {
 		return nil, "", errArtifactsUnavailable
 	}
-	return ws, firstNonEmpty(chat.WorkspaceDir, agent.DefaultWorkspaceName), nil
+	label := firstNonEmpty(chat.WorkspaceDir, agent.DefaultWorkspaceName)
+	// A chat bound by a local client (the TUI) stores the folder's absolute
+	// path; an archive is named after the folder, not the whole path.
+	if filepath.IsAbs(label) {
+		label = filepath.Base(label)
+	}
+	return ws, label, nil
 }
 
 // artifactFile resolves the ?path= argument of a file request. Every path goes

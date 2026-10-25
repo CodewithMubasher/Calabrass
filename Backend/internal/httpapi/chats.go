@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -59,6 +62,10 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 		// WorkspaceID binds the chat to one workspace's folder. Empty means the
 		// default workspace.
 		WorkspaceID string `json:"workspaceId"`
+		// WorkspacePath binds the chat straight to a folder on this machine.
+		// The TUI uses it so a chat works in the directory the app was opened
+		// from; WorkspaceID wins when both are sent.
+		WorkspacePath string `json:"workspacePath"`
 		// AgentID binds the chat to an agent's configuration. When set, the agent's
 		// provider, model, connector and system prompt are used.
 		AgentID string `json:"agentId"`
@@ -80,6 +87,18 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		workspaceDir = record.Dir
+	} else if strings.TrimSpace(req.WorkspacePath) != "" {
+		if !localRequest(r) {
+			writeError(w, http.StatusForbidden,
+				errors.New("workspacePath is only available to clients on this machine"))
+			return
+		}
+		dir, err := chatWorkspacePath(req.WorkspacePath)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		workspaceDir = dir
 	}
 
 	// If agentId is provided, load the agent and use its configuration
@@ -180,6 +199,9 @@ func (s *Server) handleUpdateChat(w http.ResponseWriter, r *http.Request) {
 		// absent field leaves the binding alone; an empty value resets it to
 		// the default workspace.
 		WorkspaceID *string `json:"workspaceId"`
+		// WorkspacePath moves the chat to a folder on this machine. WorkspaceID
+		// wins when both are sent.
+		WorkspacePath *string `json:"workspacePath"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -225,10 +247,22 @@ func (s *Server) handleUpdateChat(w http.ResponseWriter, r *http.Request) {
 			}
 			workspaceDir = record.Dir
 		}
+	} else if req.WorkspacePath != nil && strings.TrimSpace(*req.WorkspacePath) != "" {
+		if !localRequest(r) {
+			writeError(w, http.StatusForbidden,
+				errors.New("workspacePath is only available to clients on this machine"))
+			return
+		}
+		dir, err := chatWorkspacePath(*req.WorkspacePath)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		workspaceDir = dir
 	}
 
 	chat, err := s.store.UpdateChat(r.Context(), chatID, req.Title, req.Provider, req.Model, user.ID)
-	if err == nil && req.WorkspaceID != nil {
+	if err == nil && (req.WorkspaceID != nil || req.WorkspacePath != nil) {
 		chat, err = s.store.SetChatWorkspace(r.Context(), chatID, workspaceDir, user.ID)
 	}
 	if err == nil && req.Pinned != nil {
@@ -411,18 +445,65 @@ func (s *Server) workspaceFor(chat store.Chat) *agent.Workspace {
 	return s.workspaceForUser("", chat)
 }
 
+// localRequest reports whether the request came from this machine. Choosing a
+// folder by its path only makes sense for a client that shares the backend's
+// filesystem, and keeps a remotely reachable server from being told to work in
+// an arbitrary directory.
+func localRequest(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// chatWorkspacePath checks a folder a local client asked a chat to work in.
+// It must be an absolute, existing directory: a relative value would otherwise
+// silently mean a folder inside the account's workspace library.
+func chatWorkspacePath(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", nil
+	}
+	if !filepath.IsAbs(path) {
+		return "", errors.New("workspacePath must be an absolute folder")
+	}
+	path = filepath.Clean(path)
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("workspacePath: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("workspacePath %s is not a folder", path)
+	}
+	return path, nil
+}
+
 // workspaceForUser picks the folder a chat works in: the workspace it was bound
 // to, or the account's default. The folder is opened on demand, so a chat keeps
 // working in the directory it remembers even after the workspace row is gone.
 // A binding that cannot be opened falls back to the default rather than running
 // the turn without tools.
 func (s *Server) workspaceForUser(userID string, chat store.Chat) *agent.Workspace {
+	dir := strings.TrimSpace(chat.WorkspaceDir)
+	// A local client (the TUI) binds a chat to the folder it was opened in, so
+	// the path is absolute and sits outside the account's workspace library.
+	if filepath.IsAbs(dir) {
+		opened, err := agent.NewWorkspace(dir)
+		if err != nil {
+			s.log.Warn("could not open the chat's workspace",
+				"chat", chat.ID, "workspace", dir, "error", err)
+			return s.workspaceForUser(userID, store.Chat{ID: chat.ID})
+		}
+		return opened
+	}
+
 	lib := s.libraryFor(userID)
 	if lib == nil {
 		return nil
 	}
 
-	dir := strings.TrimSpace(chat.WorkspaceDir)
 	if dir == "" || dir == agent.DefaultWorkspaceName {
 		if userID == "" {
 			if s.workspace != nil {

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // maxToolLines is how many lines of a tool's output an open row shows.
@@ -21,6 +22,10 @@ var (
 //	│ ✓ Read main.py                          12ms
 //	│   1  def add(a, b): ...
 func toolNode(p Part, width int) []string {
+	if p.Command != "" {
+		return shellNode(p, width)
+	}
+
 	blockW := width - bubbleIndent - 2 - 1
 	if blockW < 8 {
 		blockW = 8
@@ -60,6 +65,79 @@ func toolNode(p Part, width int) []string {
 		lines = append(lines, barBlock(body)...)
 	}
 	return lines
+}
+
+// maxShellLines is how many lines of a command's output the panel shows.
+const maxShellLines = 40
+
+// shellNode draws a shell command like an edit node: a dark panel with
+//
+//	$ cd TUI && go build ./...
+//
+//	ok   calabrass-tui  22.471s
+func shellNode(p Part, width int) []string {
+	base := lipgloss.NewStyle().Background(tlPanelBg)
+	bar := lipgloss.NewStyle().Foreground(lipgloss.Color("#3a3a3a")).Background(tlPanelBg).Render("▎")
+
+	inner := width - 1 - 2 - 1 // bar, left padding, right padding
+	if inner < 1 {
+		inner = 1
+	}
+	textW := inner - 1
+	if textW < 1 {
+		textW = 1
+	}
+
+	row := func(content string) string {
+		content = ansi.Truncate(content, inner, "")
+		fill := inner - ansi.StringWidth(content)
+		if fill < 0 {
+			fill = 0
+		}
+		return bar + base.Render("  ") + content + base.Render(strings.Repeat(" ", fill+1))
+	}
+
+	// wrapped: wrap text, style every line (with the panel background), cap at max.
+	wrapped := func(text string, st lipgloss.Style, max int) []string {
+		text = strings.ReplaceAll(strings.TrimRight(text, "\n \t"), "\t", "    ")
+		var out []string
+		hidden := 0
+		for _, raw := range strings.Split(text, "\n") {
+			for _, l := range strings.Split(wrapText(raw, textW), "\n") {
+				if max > 0 && len(out) >= max {
+					hidden++
+					continue
+				}
+				out = append(out, row(st.Render(strings.TrimRight(l, " "))))
+			}
+		}
+		if hidden > 0 {
+			dim := base.Foreground(lipgloss.Color("#6b6b6b"))
+			out = append(out, row(dim.Render(fmt.Sprintf("… %d more lines", hidden))))
+		}
+		return out
+	}
+
+	cmdStyle := base.Foreground(colorText).Bold(true)
+	outStyle := base.Foreground(lipgloss.Color("#808080"))
+	errStyle := base.Foreground(lipgloss.Color("#e06c75"))
+
+	lines := []string{row("")}
+	lines = append(lines, wrapped("$ "+p.Command, cmdStyle, 0)...)
+
+	if strings.TrimSpace(p.Output) != "" {
+		lines = append(lines, row(""))
+		lines = append(lines, wrapped(p.Output, outStyle, maxShellLines)...)
+	}
+	if p.Err != "" {
+		lines = append(lines, row(""))
+		lines = append(lines, wrapped(p.Err, errStyle, 0)...)
+	}
+	if p.Stopped {
+		lines = append(lines, row(""))
+		lines = append(lines, wrapped("stopped", outStyle, 0)...)
+	}
+	return append(lines, row(""))
 }
 
 // clipText wraps text to w columns and keeps at most max lines.

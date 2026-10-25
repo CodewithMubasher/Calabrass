@@ -49,6 +49,7 @@ func defaultCommands() []Command {
 		{ID: "toggle-rows", Title: "Open / close all tool and edit rows", Shortcut: keyToggleRows, Section: "View"},
 
 		{ID: "new-session", Title: "New session", Section: "Session"},
+		{ID: "copy", Title: "Copy last response", Shortcut: "/copy", Section: "Session"},
 		{ID: "mcps", Title: "MCP servers", Section: "Session"},
 		{ID: "help", Title: "Help", Section: "Session"},
 	}

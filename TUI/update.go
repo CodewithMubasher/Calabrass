@@ -21,6 +21,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list.SetSize(msg.Width, msg.Height)
 		m.provForm.SetSize(msg.Width, msg.Height)
 		m.qform.SetSize(msg.Width, msg.Height)
+		m.quick.SetSize(msg.Width, msg.Height)
 		return m, nil
 
 	// --- the backend answers ---------------------------------------------
@@ -82,7 +83,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.provForm.Close()
 		m.providerRows = msg.rows
-		return m, tea.Batch(m.openProviders(), loadModelsCmd(m.app.client, true))
+		text := "Provider saved"
+		if msg.created {
+			text = "Provider added"
+		}
+		return m, tea.Batch(m.showToast(text, false), m.openProviders(), loadModelsCmd(m.app.client, true))
 
 	case chatsMsg:
 		if msg.err != nil {
@@ -103,6 +108,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.apiFailed(msg.err, "Could not open the session")
 		}
 		m.loadHistory(msg.detail)
+		// An older session has no folder yet. Bind it to the folder the TUI was
+		// opened in, so the next turn does not quietly run in the default
+		// workspace under the app's data directory.
+		if m.chat != nil && strings.TrimSpace(m.chat.WorkspaceDir) == "" {
+			return m, bindWorkspaceCmd(m.app.client, m.chat.ID, m.cwdPath)
+		}
+		return m, nil
+
+	case workspaceBoundMsg:
+		if msg.err != nil {
+			return m, m.apiFailed(msg.err, "Could not set the working folder")
+		}
+		if m.chat != nil {
+			m.chat.WorkspaceDir = msg.path
+		}
 		return m, nil
 
 	case chatDeletedMsg:
@@ -180,6 +200,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.advanceSpinner()
 		return m, spinTick()
 
+	case toastMsg:
+		if msg.seq == m.toastSeq {
+			m.toastText = ""
+		}
+		return m, nil
+
+	case holdTickMsg:
+		if msg.seq != m.holdSeq {
+			return m, nil // a newer gesture already replaced this timer
+		}
+		// A short tap can't open the menu: the key must still be repeating.
+		if m.holdCount >= 4 && time.Since(m.holdLast) < 450*time.Millisecond &&
+			!m.modalOpen() && m.prompt.Value() == "" {
+			m.quick.Open()
+			m.holdSeen = true // swallow the rest of the repeats while held
+		}
+		m.holdCount = 0
+		m.holdSeq++
+		return m, nil
+
 	// --- things the dialogs and the prompt report --------------------------------
 	case ListSelectMsg:
 		return m.onListSelect(msg)
@@ -193,6 +233,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.submit(msg.Text)
 	case DialogSelectMsg:
 		return m.onPalette(msg.Command.ID)
+	case QuickSelectMsg:
+		return m.onPalette(msg.ID)
 	case SlashSelectMsg:
 		return m, m.runCommand(msg.Command.Name, "")
 	case PromptSubmitMsg:
@@ -237,6 +279,8 @@ func (m Model) forward(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch {
 	case m.dialog.IsOpen():
 		m.dialog, cmd = m.dialog.Update(msg)
+	case m.quick.IsOpen():
+		m.quick, cmd = m.quick.Update(msg)
 	case m.list.IsOpen():
 		m.list, cmd = m.list.Update(msg)
 	case m.provForm.IsOpen():
@@ -287,11 +331,29 @@ func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Holding ↓ must not move the quick menu while the key is still repeating.
+	if key == "down" && m.holdSeen && m.quick.IsOpen() {
+		return m, nil
+	}
+	if key != "down" {
+		m.holdSeen = false
+		if m.holdCount > 0 {
+			m.holdCount = 0
+			m.holdSeq++ // invalidate the pending hold timer
+		}
+	}
+
 	if key == "ctrl+c" && m.modalOpen() {
 		return m, tea.Quit
 	}
 	var cmd tea.Cmd
 	switch {
+	case m.quick.IsOpen():
+		m.quick, cmd = m.quick.Update(msg)
+		if !m.quick.IsOpen() {
+			m.holdSeen = false
+		}
+		return m, cmd
 	case m.provForm.IsOpen():
 		m.provForm, cmd = m.provForm.Update(msg)
 		return m, cmd
@@ -336,6 +398,20 @@ func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, func() tea.Msg { return SlashSelectMsg{Command: c} }
 			}
 		}
+	}
+
+	// Hold ↓ for two seconds: quick actions. The first press starts the timer;
+	// the terminal's key-repeat events count as "still holding".
+	if key == "down" && !m.modalOpen() && m.prompt.Value() == "" {
+		if m.holdCount == 0 {
+			m.holdSeq++
+			m.holdCount = 1
+			m.holdLast = time.Now()
+			return m, holdTick(m.holdSeq)
+		}
+		m.holdCount++
+		m.holdLast = time.Now()
+		return m, nil
 	}
 
 	switch key {
@@ -440,6 +516,8 @@ func (m Model) onPalette(id string) (tea.Model, tea.Cmd) {
 		return m, m.runCommand("/new", "")
 	case "connect":
 		return m, m.runCommand("/connect", "")
+	case "copy":
+		return m, m.copyLastResponse()
 	case "mcps":
 		return m, m.runCommand("/mcps", "")
 	case "help":
@@ -459,6 +537,7 @@ func (m Model) onListSelect(msg ListSelectMsg) (tea.Model, tea.Cmd) {
 	case "models":
 		provider, model, _ := strings.Cut(msg.Item.ID, "\x00")
 		m.selectModel(provider, model)
+		return m, m.showToast("Model switched to "+m.prompt.Model, false)
 	case "sessions":
 		return m, loadChatCmd(m.app.client, msg.Item.ID)
 	case "mcps":

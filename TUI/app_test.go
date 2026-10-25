@@ -169,7 +169,7 @@ func isAppMsg(msg tea.Msg) bool {
 	switch msg.(type) {
 	case bootDoneMsg, modelsMsg, connectorsMsg, chatsMsg, chatLoadedMsg, providersMsg, providerSavedMsg,
 		chatDeletedMsg, renamedMsg, cdDoneMsg, turnBatchMsg, ListSelectMsg, ListKeyMsg, ProviderSaveMsg,
-		ProviderFormCancelMsg, QuestionsAnsweredMsg, DialogSelectMsg, SlashSelectMsg, PromptSubmitMsg:
+		ProviderFormCancelMsg, QuestionsAnsweredMsg, DialogSelectMsg, QuickSelectMsg, SlashSelectMsg, PromptSubmitMsg:
 		return true
 	}
 	return false
