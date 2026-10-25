@@ -31,12 +31,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.boot = bootReady
-		cmds := []tea.Cmd{loadModelsCmd(m.app.client, false), loadConnectorsCmd(m.app.client)}
+		cmds := []tea.Cmd{loadModelsCmd(m.app.client, false), loadConnectorsCmd(m.app.client), loadSchedulesCmd(m.app.client), schedulePollCmd()}
 		if m.app.resume {
 			m.app.resume = false
 			cmds = append(cmds, loadChatsCmd(m.app.client, true))
 		}
 		return m, tea.Batch(cmds...)
+
+	case schedulePollTick:
+		return m, tea.Batch(loadSchedulesCmd(m.app.client), schedulePollCmd())
 
 	case modelsMsg:
 		if msg.err != nil {
@@ -167,6 +170,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notice("Working in "+msg.path, false)
 		return m, nil
 
+	case schedulesMsg:
+		if msg.err != nil {
+			return m, m.apiFailed(msg.err, "Could not load schedules")
+		}
+		m.schedules = msg.tasks
+		return m, nil
+
+	case scheduleCreatedMsg:
+		if msg.err != nil {
+			return m, m.apiFailed(msg.err, "Could not create schedule")
+		}
+		m.schedules = msg.tasks
+		return m, m.showToast("Schedule created", false)
+
+	case scheduleUpdatedMsg:
+		if msg.err != nil {
+			return m, m.apiFailed(msg.err, "Could not update schedule")
+		}
+		m.schedules = msg.tasks
+		return m, m.showToast("Schedule updated", false)
+
+	case scheduleDeletedMsg:
+		if msg.err != nil {
+			return m, m.apiFailed(msg.err, "Could not delete schedule")
+		}
+		// Remove the deleted schedule from the list
+		filtered := m.schedules[:0]
+		for _, s := range m.schedules {
+			if s.ID != msg.id {
+				filtered = append(filtered, s)
+			}
+		}
+		m.schedules = filtered
+		return m, m.showToast("Schedule deleted", false)
+
 	case turnBatchMsg:
 		if m.turn != msg.ts {
 			return m, nil // an interrupted turn still draining: ignore
@@ -244,6 +282,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.onKey(msg)
 	case tea.MouseWheelMsg:
+		m.clearSelection()
 		if !m.modalOpen() {
 			switch msg.Button {
 			case tea.MouseWheelUp:
@@ -254,13 +293,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.MouseClickMsg:
-		if !m.modalOpen() && msg.Button == tea.MouseLeft {
-			m.handleClick(msg.X, msg.Y)
+		if msg.Button == tea.MouseLeft {
+			m.press(msg.X, msg.Y)
 		}
 		return m, nil
 	case tea.MouseMotionMsg:
+		if msg.Button == tea.MouseLeft {
+			m.drag(msg.X, msg.Y)
+			return m, nil
+		}
 		if !m.modalOpen() {
 			m.handleHover(msg.X, msg.Y)
+		}
+		return m, nil
+	case tea.MouseReleaseMsg:
+		if m.selPressing && (msg.Button == tea.MouseLeft || msg.Button == tea.MouseNone) {
+			m.release(msg.X, msg.Y)
 		}
 		return m, nil
 	}
@@ -331,6 +379,14 @@ func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// ctrl+c is handled before anything else: it copies a selection, or arms a
+	// second press that quits. Every other key drops the selection and the arm.
+	if key == "ctrl+c" {
+		return m.onCtrlC()
+	}
+	m.quitArmed = false
+	m.clearSelection()
+
 	// Holding ↓ must not move the quick menu while the key is still repeating.
 	if key == "down" && m.holdSeen && m.quick.IsOpen() {
 		return m, nil
@@ -343,9 +399,6 @@ func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if key == "ctrl+c" && m.modalOpen() {
-		return m, tea.Quit
-	}
 	var cmd tea.Cmd
 	switch {
 	case m.quick.IsOpen():
@@ -420,12 +473,6 @@ func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.interruptTurn()
 		}
 		return m, nil
-	case "ctrl+c":
-		if m.running() {
-			m.interruptTurn()
-			return m, nil
-		}
-		return m, tea.Quit
 	case keyCommandPalette:
 		return m, m.dialog.Open()
 	case "pgup":
@@ -520,6 +567,8 @@ func (m Model) onPalette(id string) (tea.Model, tea.Cmd) {
 		return m, m.copyLastResponse()
 	case "mcps":
 		return m, m.runCommand("/mcps", "")
+	case "schedules":
+		return m, m.runCommand("/schedules", "")
 	case "help":
 		return m, m.runCommand("/help", "")
 	case "toggle-right":

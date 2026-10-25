@@ -76,6 +76,14 @@ type Model struct {
 	toastErr   bool            // draw the toast in the error color
 	toastSeq   int             // identifies the current toast timer
 
+	// --- mouse selection + ctrl+c ---
+	sel         selection // the highlighted screen range
+	selPress    selPoint  // where the left button went down
+	selPressing bool      // the button is down, so a drag may start
+	selDragging bool      // the drag has moved far enough to be a selection
+	quitArmed   bool      // one ctrl+c was pressed; the next one quits
+	quitAt      time.Time // when the first ctrl+c arrived
+
 	// --- backend state ---
 	app          *appCtx
 	boot         bootState
@@ -93,6 +101,7 @@ type Model struct {
 	usageIn      int // tokens used by turns of this session
 	usageOut     int
 	banner       string // one-line hint on the home screen
+	schedules    []api.ScheduledTask
 }
 
 // NewModel creates a new Model instance.
@@ -166,8 +175,13 @@ func (m Model) View() tea.View {
 	return v
 }
 
-// viewString draws the whole screen as one string.
+// viewString draws the whole screen, with the mouse selection painted on top.
 func (m Model) viewString() string {
+	return m.withSelection(m.renderScreen())
+}
+
+// renderScreen draws the whole screen as one string.
+func (m Model) renderScreen() string {
 	if m.width == 0 || m.height == 0 {
 		return "Initializing..."
 	}

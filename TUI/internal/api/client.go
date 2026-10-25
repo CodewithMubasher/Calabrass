@@ -277,3 +277,37 @@ func (c *Client) SetChatWorkspace(ctx context.Context, id, path string) (Chat, e
 func (c *Client) DeleteChat(ctx context.Context, id string) error {
 	return c.do(ctx, http.MethodDelete, "/api/chats/"+url.PathEscape(id), nil, nil)
 }
+
+// --- schedules ------------------------------------------------------------
+
+// ListSchedules returns all scheduled tasks for the current user.
+func (c *Client) ListSchedules(ctx context.Context) ([]ScheduledTask, error) {
+	var out struct {
+		Tasks []ScheduledTask `json:"tasks"`
+	}
+	err := c.do(ctx, http.MethodGet, "/api/schedules", nil, &out)
+	return out.Tasks, err
+}
+
+// CreateSchedule books a new scheduled task.
+func (c *Client) CreateSchedule(ctx context.Context, input ScheduledTaskInput) ([]ScheduledTask, error) {
+	var out struct {
+		Tasks []ScheduledTask `json:"tasks"`
+	}
+	err := c.do(ctx, http.MethodPost, "/api/schedules", input, &out)
+	return out.Tasks, err
+}
+
+// UpdateSchedule changes a task's prompt, time, or enabled state.
+func (c *Client) UpdateSchedule(ctx context.Context, id string, patch ScheduledTaskPatch) ([]ScheduledTask, error) {
+	var out struct {
+		Tasks []ScheduledTask `json:"tasks"`
+	}
+	err := c.do(ctx, http.MethodPatch, "/api/schedules/"+url.PathEscape(id), patch, &out)
+	return out.Tasks, err
+}
+
+// DeleteSchedule removes a scheduled task.
+func (c *Client) DeleteSchedule(ctx context.Context, id string) error {
+	return c.do(ctx, http.MethodDelete, "/api/schedules/"+url.PathEscape(id), nil, nil)
+}

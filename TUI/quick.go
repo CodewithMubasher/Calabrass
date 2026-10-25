@@ -43,6 +43,7 @@ var quickActions = []quickAction{
 	{ID: "switch-model", Title: "Switch model", Hint: "/models"},
 	{ID: "new-session", Title: "New session", Hint: "/new"},
 	{ID: "mcps", Title: "MCP servers", Hint: "/mcps"},
+	{ID: "schedules", Title: "Schedules", Hint: "/schedules"},
 }
 
 func NewQuickMenu() QuickMenu { return QuickMenu{} }

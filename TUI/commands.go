@@ -85,6 +85,8 @@ func (m *Model) runCommand(name, args string) tea.Cmd {
 		} else {
 			m.notice("Saved "+path, false)
 		}
+	case "/schedules":
+		return loadSchedulesCmd(c)
 	}
 	return nil
 }

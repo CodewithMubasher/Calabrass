@@ -13,6 +13,11 @@ const (
 	dialogMaxWidth   = 64 // widest the dialog gets (in columns)
 	dialogPadX       = 3  // left/right padding inside the dialog
 	dialogChromeRows = 6  // top pad, title, blank, search, blank, bottom pad
+
+	// The ctrl+p palette is roomier than the other dialogs: a little more
+	// padding on every side, without changing the shared dialog metrics.
+	palettePadX    = dialogPadX + 2
+	palettePadRows = 1 // extra blank rows at the top and bottom
 )
 
 // Dialog colors: purple for section headers, blue for the selected row
@@ -51,6 +56,7 @@ func defaultCommands() []Command {
 		{ID: "new-session", Title: "New session", Section: "Session"},
 		{ID: "copy", Title: "Copy last response", Shortcut: "/copy", Section: "Session"},
 		{ID: "mcps", Title: "MCP servers", Section: "Session"},
+		{ID: "schedules", Title: "Schedules", Section: "Session"},
 		{ID: "help", Title: "Help", Section: "Session"},
 	}
 }
@@ -140,7 +146,7 @@ func (d Dialog) width() int {
 }
 
 func (d Dialog) innerWidth() int {
-	return d.width() - 2*dialogPadX
+	return d.width() - 2*palettePadX
 }
 
 // refilter rebuilds `filtered` from the search text.
@@ -198,7 +204,7 @@ func rowsFor(cmds []Command) []dialogRow {
 
 // maxRows is how many list rows fit on screen.
 func (d Dialog) maxRows() int {
-	n := d.screenH - 4 - dialogChromeRows
+	n := d.screenH - 4 - dialogChromeRows - 2*palettePadRows
 	if n > 18 {
 		n = 18
 	}
@@ -311,12 +317,15 @@ func (d Dialog) View() string {
 		if gap < 0 {
 			gap = 0
 		}
-		return base.Render(strings.Repeat(" ", dialogPadX)) +
+		return base.Render(strings.Repeat(" ", palettePadX)) +
 			content +
-			base.Render(strings.Repeat(" ", gap+dialogPadX))
+			base.Render(strings.Repeat(" ", gap+palettePadX))
 	}
 
-	out := []string{blank}
+	out := make([]string, 0, 2+2*palettePadRows)
+	for i := 0; i < 1+palettePadRows; i++ {
+		out = append(out, blank)
+	}
 
 	// Title row: "Commands ........ esc"
 	title := twoCol(
@@ -353,7 +362,7 @@ func (d Dialog) View() string {
 			if r.item == d.cursor {
 				// Selected row: blue bar, edge to edge.
 				sel := lipgloss.NewStyle().Background(dialogBlue).Foreground(dialogDark)
-				pad := sel.Render(strings.Repeat(" ", dialogPadX))
+				pad := sel.Render(strings.Repeat(" ", palettePadX))
 				content := twoCol(sel.Bold(true).Render(c.Title), sel.Render(c.Shortcut), inner, sel)
 				out = append(out, pad+content+pad)
 			} else {
@@ -371,7 +380,9 @@ func (d Dialog) View() string {
 		out = append(out, blank)
 	}
 
-	out = append(out, blank)
+	for i := 0; i < 1+palettePadRows; i++ {
+		out = append(out, blank)
+	}
 	return strings.Join(out, "\n")
 }
 

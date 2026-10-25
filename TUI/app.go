@@ -71,11 +71,36 @@ type cdDoneMsg struct {
 	err  error
 }
 
+// schedulePollTick triggers a refresh of the schedule list.
+type schedulePollTick struct{}
+
 // workspaceBoundMsg reports that a session was quietly bound to the folder the
 // TUI was opened in.
 type workspaceBoundMsg struct {
 	path string
 	err  error
+}
+
+// --- schedules ------------------------------------------------------------
+
+type schedulesMsg struct {
+	tasks []api.ScheduledTask
+	err   error
+}
+
+type scheduleCreatedMsg struct {
+	tasks []api.ScheduledTask
+	err   error
+}
+
+type scheduleUpdatedMsg struct {
+	tasks []api.ScheduledTask
+	err   error
+}
+
+type scheduleDeletedMsg struct {
+	id  string
+	err error
 }
 
 func withTimeout(d time.Duration) (context.Context, context.CancelFunc) {
@@ -206,6 +231,48 @@ func bindWorkspaceCmd(c *api.Client, chatID, path string) tea.Cmd {
 		_, err := c.SetChatWorkspace(ctx, chatID, path)
 		return workspaceBoundMsg{path: path, err: err}
 	}
+}
+
+func loadSchedulesCmd(c *api.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := withTimeout(20 * time.Second)
+		defer cancel()
+		tasks, err := c.ListSchedules(ctx)
+		return schedulesMsg{tasks: tasks, err: err}
+	}
+}
+
+func createScheduleCmd(c *api.Client, input api.ScheduledTaskInput) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := withTimeout(20 * time.Second)
+		defer cancel()
+		tasks, err := c.CreateSchedule(ctx, input)
+		return scheduleCreatedMsg{tasks: tasks, err: err}
+	}
+}
+
+func updateScheduleCmd(c *api.Client, id string, patch api.ScheduledTaskPatch) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := withTimeout(20 * time.Second)
+		defer cancel()
+		tasks, err := c.UpdateSchedule(ctx, id, patch)
+		return scheduleUpdatedMsg{tasks: tasks, err: err}
+	}
+}
+
+func deleteScheduleCmd(c *api.Client, id string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := withTimeout(20 * time.Second)
+		defer cancel()
+		err := c.DeleteSchedule(ctx, id)
+		return scheduleDeletedMsg{id: id, err: err}
+	}
+}
+
+func schedulePollCmd() tea.Cmd {
+	return tea.Tick(30*time.Second, func(t time.Time) tea.Msg {
+		return schedulePollTick{}
+	})
 }
 
 // --- boot screen --------------------------------------------------------------

@@ -190,3 +190,30 @@ type SendRequest struct {
 	Model      string `json:"model,omitempty"`
 	Regenerate bool   `json:"regenerate,omitempty"`
 }
+
+// ScheduledTask is one instruction the scheduler will run, once, at a time of its own.
+type ScheduledTask struct {
+	ID        string `json:"id"`
+	Prompt    string `json:"prompt"`
+	ChatID    string `json:"chatId"`
+	RunAt     int64  `json:"runAt"`
+	Enabled   bool   `json:"enabled"`
+	LastRunAt int64  `json:"lastRunAt"`
+	LastStatus string `json:"lastStatus"`
+	LastError  string `json:"lastError"`
+	CreatedAt int64  `json:"createdAt"`
+	UpdatedAt int64  `json:"updatedAt"`
+}
+
+// ScheduledTaskInput is the fields a new task is booked with.
+type ScheduledTaskInput struct {
+	Prompt string `json:"prompt"`
+	RunAt  int64  `json:"runAt"`
+}
+
+// ScheduledTaskPatch is what an edit can change about a task.
+type ScheduledTaskPatch struct {
+	Prompt  *string `json:"prompt,omitempty"`
+	RunAt   *int64  `json:"runAt,omitempty"`
+	Enabled *bool   `json:"enabled,omitempty"`
+}

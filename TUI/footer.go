@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -159,23 +160,25 @@ func (m Model) sidebarView(inner, innerH int) string {
 		lines = append(lines, title.Render(l))
 	}
 
-	// Model + tokens, as the backend reported them.
+	// Model on its own row, then the name and its provider side by side.
 	model := "none: /connect"
 	if m.prompt.Model != "" {
 		model = m.prompt.Model
 	}
-	lines = append(lines, blank, title.Render("Model"), muted.Render(model))
-	if m.prompt.Provider != "" {
-		lines = append(lines, muted.Render(m.prompt.Provider))
+	provider := m.prompt.Provider
+	if provider != "" {
+		room := inner - lipgloss.Width(muted.Render(provider)) - 1
+		if room < 4 {
+			room = 4
+		}
+		model = ansi.Truncate(model, room, "…")
 	}
-	lines = append(lines, blank, title.Render("Tokens"))
-	if m.sessionTokens() == 0 {
-		lines = append(lines, muted.Render("none used yet"))
-	} else {
-		lines = append(lines,
-			muted.Render(formatInt(m.sessionTokens())+" this session"),
-			muted.Render(formatInt(m.usageIn)+" in · "+formatInt(m.usageOut)+" out"))
-	}
+	lines = append(lines, blank, title.Render("Model"),
+		twoCol(muted.Render(model), muted.Render(provider), inner, base))
+
+	// One total per session: input + output, never split.
+	lines = append(lines, blank,
+		twoCol(title.Render("Tokens"), muted.Render(formatInt(m.sessionTokens())), inner, base))
 
 	// MCP servers.
 	lines = append(lines, blank, title.Render("MCPs"))
@@ -189,6 +192,49 @@ func (m Model) sidebarView(inner, innerH int) string {
 		}
 		left := dot.Render("● ") + title.Render(c.Name)
 		lines = append(lines, twoCol(left, status.Render(label), inner, base))
+	}
+
+	// Schedules.
+	lines = append(lines, blank, title.Render("Schedules"))
+	now := time.Now().UnixMilli()
+	activeSchedules := 0
+	for _, s := range m.schedules {
+		// Skip completed tasks (they vanish after done)
+		if s.LastRunAt > 0 {
+			continue
+		}
+		// Skip disabled tasks
+		if !s.Enabled {
+			continue
+		}
+		// Skip tasks that are in the past (missed)
+		if s.RunAt <= now {
+			continue
+		}
+		activeSchedules++
+
+		// Determine dot color based on status
+		var dotStyle lipgloss.Style
+		switch s.LastStatus {
+		case "ok":
+			dotStyle = base.Foreground(lipgloss.Color("#4ade80")) // green
+		case "error", "missed":
+			dotStyle = base.Foreground(lipgloss.Color("#f87171")) // red
+		default:
+			dotStyle = base.Foreground(promptMuted) // empty/gray for pending
+		}
+
+		// Truncate prompt to fit
+		maxPromptWidth := inner - 4 // "● " + padding
+		prompt := ansi.Truncate(s.Prompt, maxPromptWidth, "…")
+
+		left := dotStyle.Render("● ") + title.Render(prompt)
+		// Show when it's due on the right
+		when := formatScheduleTime(s.RunAt, now)
+		lines = append(lines, twoCol(left, muted.Render(when), inner, base))
+	}
+	if activeSchedules == 0 {
+		lines = append(lines, muted.Render("none scheduled"))
 	}
 
 	// A row wider than the panel would wrap and push the layout down.
@@ -207,4 +253,36 @@ func (m Model) sidebarView(inner, innerH int) string {
 	lines = append(lines, bottom)
 
 	return strings.Join(lines, "\n")
+}
+
+// formatScheduleTime returns a human-readable string for when a schedule runs.
+func formatScheduleTime(runAt, now int64) string {
+	diff := runAt - now
+	if diff <= 0 {
+		return "due"
+	}
+
+	minutes := diff / (1000 * 60)
+	hours := minutes / 60
+	days := hours / 24
+
+	if days > 0 {
+		if days == 1 {
+			return "tomorrow"
+		}
+		return fmt.Sprintf("%d days", days)
+	}
+	if hours > 0 {
+		if hours == 1 {
+			return "in 1 hour"
+		}
+		return fmt.Sprintf("%d hours", hours)
+	}
+	if minutes > 0 {
+		if minutes == 1 {
+			return "in 1 min"
+		}
+		return fmt.Sprintf("%d mins", minutes)
+	}
+	return "soon"
 }
