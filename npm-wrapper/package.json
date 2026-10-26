@@ -7,16 +7,9 @@
   },
   "files": [
     "bin",
+    "binaries",
     "README.md"
   ],
-  "optionalDependencies": {
-    "calabrass-darwin-arm64": "1.0.5",
-    "calabrass-darwin-x64": "1.0.5",
-    "calabrass-linux-arm64": "1.0.5",
-    "calabrass-linux-x64": "1.0.5",
-    "calabrass-win32-arm64": "1.0.5",
-    "calabrass-win32-x64": "1.0.5"
-  },
   "os": [
     "darwin",
     "linux",

@@ -2,13 +2,8 @@
 node_modules
 npm-wrapper/node_modules
 
-# The binary the npm wrapper downloads on install
-npm-wrapper/bin/calabrass-tui
-npm-wrapper/bin/calabrass-tui.exe
-npm-wrapper/.download/
-
-# Platform packages the CLI release workflow assembles (binary + package.json)
-npm-wrapper/platforms/
+# The platform binaries the CLI release workflow assembles for the npm package
+npm-wrapper/binaries/
 
 # Build output
 dist

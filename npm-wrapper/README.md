@@ -20,9 +20,9 @@ Or without installing:
 npx -p calabrass cal
 ```
 
-This package ships no binary itself. The `calabrass-<os>-<arch>` package for
-your platform is installed alongside it (an optional dependency), so there is
-no download step and no install script.
+The package bundles the prebuilt binaries for every supported platform
+(Linux, macOS and Windows on x64 and arm64), so `cal` works immediately — no
+download step and no install script.
 
 ## Usage
 
@@ -54,10 +54,9 @@ First run: type `/connect`, pick a provider, add its API key. Then chat.
 
 ## How it works
 
-`bin/cal.js` is a small shim. It resolves the binary from the platform package
-npm installed (`calabrass-linux-x64`, `calabrass-darwin-arm64`, …), hands it the
-terminal, and mirrors its exit code. The TUI itself is written in Go with
-[Bubble Tea](https://github.com/charmbracelet/bubbletea).
+`bin/cal.js` is a small shim. It picks `binaries/calabrass-<os>-<arch>/`
+for your machine, hands it the terminal, and mirrors its exit code. The TUI
+itself is written in Go with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
 ## Publishing
 
@@ -65,13 +64,13 @@ CLI releases use their own tag namespace, `cli-v*`, so they never create or
 touch a desktop release:
 
 1. Bump the version in `package.json`
-2. Push a tag: `git tag cli-v1.0.5 && git push origin cli-v1.0.5`
-3. The workflow builds every platform, packs one npm package per platform,
-   and publishes them plus `calabrass`
+2. Push a tag: `git tag cli-v1.0.6 && git push origin cli-v1.0.6`
+3. The workflow builds all six targets, bundles them into `binaries/`, and
+   publishes `calabrass` (skipping the publish if that version already exists)
 
 Requires an `NPM_TOKEN` repository secret.
 
-To try the packaging locally:
+To try the packaging locally (after dropping binaries into `binaries/`):
 
 ```bash
 node scripts/prepare.js 1.0.5

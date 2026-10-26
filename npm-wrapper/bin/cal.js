@@ -1,25 +1,23 @@
 #!/usr/bin/env node
 "use strict";
 
-// Thin shim: finds the prebuilt binary in the platform package npm installed
-// (calabrass-<os>-<arch>) and hands the terminal to it. Installed as `cal`.
+// Thin shim: runs the prebuilt binary bundled for this platform and hands it
+// the terminal. Installed as `cal`.
 
+const fs = require("fs");
+const path = require("path");
 const { spawnSync } = require("child_process");
 
 const ext = process.platform === "win32" ? ".exe" : "";
-const packageName = "calabrass-" + process.platform + "-" + process.arch;
+const platformDir = "calabrass-" + process.platform + "-" + process.arch;
+const binary = path.join(__dirname, "..", "binaries", platformDir, "calabrass-tui" + ext);
 
-let binary;
-try {
-  binary = require.resolve(packageName + "/bin/calabrass-tui" + ext);
-} catch {
+if (!fs.existsSync(binary)) {
   console.error(
     "calabrass: no binary for " + process.platform + "/" + process.arch + "."
   );
-  console.error(
-    "Your platform may be unsupported, or npm skipped the optional package."
-  );
-  console.error("Try: npm install -g calabrass --force");
+  console.error("Supported platforms: linux, darwin, win32 (x64 or arm64).");
+  console.error("This install may be incomplete; try: npm install -g calabrass --force");
   process.exit(1);
 }
 

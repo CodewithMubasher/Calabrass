@@ -34,11 +34,11 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           go build -trimpath -buildvcs=false -ldflags "-s -w" \
-            -o "../npm-wrapper/platforms/calabrass-${{ matrix.platform }}/bin/calabrass-tui${{ matrix.ext }}" .
+            -o "../npm-wrapper/binaries/calabrass-${{ matrix.platform }}/calabrass-tui${{ matrix.ext }}" .
       - uses: actions/upload-artifact@v4
         with:
           name: calabrass-${{ matrix.platform }}
-          path: npm-wrapper/platforms/calabrass-${{ matrix.platform }}
+          path: npm-wrapper/binaries/calabrass-${{ matrix.platform }}
           if-no-files-found: error
 
   publish:
@@ -54,18 +54,18 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - uses: actions/download-artifact@v4
         with:
-          path: npm-wrapper/platforms
+          path: npm-wrapper/binaries
           pattern: calabrass-*
       - name: Take the version from the tag
         run: node npm-wrapper/scripts/prepare.js "${GITHUB_REF_NAME#cli-v}"
-      - name: Publish the platform packages
+      - name: Publish to npm
+        working-directory: npm-wrapper
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          for dir in npm-wrapper/platforms/calabrass-*/; do
-            npm publish "$dir" --access public
-          done
-      - name: Publish calabrass
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish npm-wrapper --access public
+          version="${GITHUB_REF_NAME#cli-v}"
+          if npm view "calabrass@$version" version >/dev/null 2>&1; then
+            echo "calabrass@$version is already published; nothing to do"
+            exit 0
+          fi
+          npm publish --access public

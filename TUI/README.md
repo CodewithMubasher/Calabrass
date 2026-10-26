@@ -16,8 +16,8 @@ npm install -g calabrass
 cal
 ```
 
-The right binary for your platform is installed from a companion npm package
-(`calabrass-<os>-<arch>`), so there is nothing to download on first run.
+The package bundles the builds for every supported platform, so there is
+nothing to download on first run.
 
 ### From source
 
