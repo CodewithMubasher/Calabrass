@@ -4,9 +4,24 @@ Terminal client for the Calabrass backend. It talks to the same HTTP API as the
 web and desktop apps (`/api/*`), so sessions, providers and MCP servers are
 shared with them. Nothing in the UI is simulated.
 
-## Run
+## Installation
 
+### Via npm (recommended)
+
+```bash
+# Install the `cal` command globally
+npm install -g calabrass
+
+# Then run it in any folder
+cal
 ```
+
+The right binary for your platform is installed from a companion npm package
+(`calabrass-<os>-<arch>`), so there is nothing to download on first run.
+
+### From source
+
+```bash
 # 1. start the backend (or open the desktop app)
 cd Backend && go run ./cmd/server
 

@@ -1,0 +1,49 @@
+{
+  "name": "calabrass",
+  "version": "1.0.5",
+  "description": "Calabrass — the open source personal AI agent. Terminal client for the Calabrass backend.",
+  "bin": {
+    "cal": "bin/cal.js"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "optionalDependencies": {
+    "calabrass-darwin-arm64": "1.0.5",
+    "calabrass-darwin-x64": "1.0.5",
+    "calabrass-linux-arm64": "1.0.5",
+    "calabrass-linux-x64": "1.0.5",
+    "calabrass-win32-arm64": "1.0.5",
+    "calabrass-win32-x64": "1.0.5"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CodewithMubasher/Calabrass.git",
+    "directory": "npm-wrapper"
+  },
+  "keywords": [
+    "calabrass",
+    "tui",
+    "terminal",
+    "cli",
+    "ai",
+    "agent",
+    "coding",
+    "bubbletea"
+  ],
+  "author": "Mubasher",
+  "license": "MIT"
+}

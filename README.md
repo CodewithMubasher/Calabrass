@@ -96,7 +96,16 @@ Calabrass is a **local-first, single-user AI assistant** that runs entirely on y
 3. On first launch, click **Sign up**, create your account, then open **Providers** and add at least one provider (base URL + API key).
 4. Start chatting.
 
-### Option B — Run from source (development)
+### Option B — Install the terminal app (npm)
+```bash
+npm install -g calabrass
+cal
+```
+`cal` is the terminal client. It talks to the same backend as the desktop and
+web apps, so sessions, providers and MCP servers are shared. The backend must
+be running (start the desktop app, or `cd Backend && go run ./cmd/server`).
+
+### Option C — Run from source (development)
 ```powershell
 # 1. Frontend deps
 cd Frontend; pnpm install
@@ -136,6 +145,8 @@ Calabrass/
 │  ├─ internal/connectors/  MCP server pool, bundled server registry
 │  └─ desktop/           Wails v2 shell (Go + embedded React)
 ├─ Frontend/             React 19 + Vite + Tailwind v4 + Base UI
+├─ TUI/                  Go terminal client (`cal`), Bubble Tea
+├─ npm-wrapper/          npm package `calabrass` → installs the `cal` binary
 ├─ MCP/                  MCP server sources (excel, win-control)
 ├─ installer/            Inno Setup script + build script
 ├─ dev.ps1 / dev.cmd     One-command dev stack

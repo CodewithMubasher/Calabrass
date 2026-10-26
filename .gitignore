@@ -1,5 +1,14 @@
 # Dependencies
 node_modules
+npm-wrapper/node_modules
+
+# The binary the npm wrapper downloads on install
+npm-wrapper/bin/calabrass-tui
+npm-wrapper/bin/calabrass-tui.exe
+npm-wrapper/.download/
+
+# Platform packages the CLI release workflow assembles (binary + package.json)
+npm-wrapper/platforms/
 
 # Build output
 dist
@@ -63,3 +72,7 @@ Frontend/package.json.md5
 # The Windows installer, as built. The script and its Inno Setup source are the
 # source; the setup executable is the product of them.
 installer/out/
+
+# TUI build output
+TUI/calabrass-tui
+TUI/calabrass-tui.exe
