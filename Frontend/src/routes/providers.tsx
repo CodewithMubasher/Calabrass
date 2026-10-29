@@ -182,20 +182,20 @@ function ProvidersPage() {
                     <button
                       type="button"
                       onClick={() => {
-                        if (!provider.enabled && !provider.apiKey) {
+                        if (!provider.enabled && !provider.hasKey) {
                           void setEditing(provider)
                         } else {
                           void setProviderEnabled(provider.id, !provider.enabled)
                         }
                       }}
                       disabled={pending.includes(provider.id)}
-                      title={provider.enabled ? "Disable" : provider.apiKey ? "Enable" : "Add API key to enable"}
-                      aria-label={`Turn ${provider.name} ${provider.enabled ? "off" : provider.apiKey ? "on" : "on (needs API key)"}`}
+                      title={provider.enabled ? "Disable" : provider.hasKey ? "Enable" : "Add API key to enable"}
+                      aria-label={`Turn ${provider.name} ${provider.enabled ? "off" : provider.hasKey ? "on" : "on (needs API key)"}`}
                       className={cn(
                         "cursor-pointer rounded-lg p-1.5 transition-colors disabled:pointer-events-none disabled:opacity-50",
                         provider.enabled
                           ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
-                          : provider.apiKey
+                          : provider.hasKey
                           ? "bg-white/5 text-white/30 hover:bg-white/10"
                           : "bg-amber-500/10 text-amber-400 hover:bg-amber-500/20"
                       )}

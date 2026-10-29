@@ -25,8 +25,25 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-          cache-dependency-path: TUI/go.sum
-      - name: Build
+          cache-dependency-path: Backend/go.sum
+      # The host serves the web interface itself, so the same build that ships
+      # the API ships the page. It is built for the web (same-origin /api), not
+      # for the desktop shell.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build web interface
+        working-directory: Frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+          rm -rf ../Backend/internal/webui/dist
+          mkdir -p ../Backend/internal/webui/dist
+          cp -r dist/. ../Backend/internal/webui/dist/
+      - name: Build TUI
         working-directory: TUI
         env:
           GOOS: ${{ matrix.goos }}
@@ -35,6 +52,16 @@ jobs:
         run: |
           go build -trimpath -buildvcs=false -ldflags "-s -w" \
             -o "../npm-wrapper/binaries/calabrass-${{ matrix.platform }}/calabrass-tui${{ matrix.ext }}" .
+      - name: Build Backend
+        working-directory: Backend
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          go build -trimpath -buildvcs=false \
+            -ldflags "-s -w -X github.com/CodewithMubasher/Calabrass/backend/internal/version.Version=${GITHUB_REF_NAME#cli-v}" \
+            -o "../npm-wrapper/binaries/calabrass-${{ matrix.platform }}/calabrass-backend${{ matrix.ext }}" ./cmd/server
       - uses: actions/upload-artifact@v4
         with:
           name: calabrass-${{ matrix.platform }}

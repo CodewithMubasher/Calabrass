@@ -11,7 +11,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { createSchedule, deleteSchedule, updateSchedule } from "@/lib/schedule-store"
 import { notifyError } from "@/lib/toast"
-import type { ScheduledTask } from "@/types/chat"
+import type { ScheduledTask, TaskScope } from "@/types/chat"
 
 // The dialogs sit on the same dark panel as the reference project's, with our
 // own popover token standing in for its neutral-900.
@@ -54,6 +54,9 @@ export function ScheduleDialog({
   const [runAt, setRunAt] = useState(() => toInputValue(task?.runAt ?? defaultRunAt()))
   const [confirming, setConfirming] = useState(false)
   const [saving, setSaving] = useState(false)
+  // One command pattern per line. Empty means the task may read and edit files
+  // in the project and run nothing.
+  const [commands, setCommands] = useState(() => commandsOf(task?.scope).join("\n"))
 
   const at = fromInputValue(runAt)
   const ready = prompt.trim() !== "" && at > 0
@@ -65,9 +68,9 @@ export function ScheduleDialog({
     setSaving(true)
     try {
       if (task) {
-        await updateSchedule(task.id, { prompt: prompt.trim(), runAt: at })
+        await updateSchedule(task.id, { prompt: prompt.trim(), runAt: at, scope: scopeOf(commands) })
       } else {
-        await createSchedule({ prompt: prompt.trim(), runAt: at })
+        await createSchedule({ prompt: prompt.trim(), runAt: at, scope: scopeOf(commands) })
       }
       onOpenChange(false)
     } catch (err) {
@@ -113,14 +116,15 @@ export function ScheduleDialog({
                 <textarea
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
-                  placeholder="Shut the laptop down"
+                  placeholder="Run the tests and summarise any failures"
                   autoFocus
                   rows={3}
                   className="w-full resize-none rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 placeholder:text-white/30 focus:border-white/20 outline-none"
                 />
               </Field>
               <p className="mt-2 text-xs text-white/30">
-                Run in this conversation when the time comes, with every tool.
+                Runs in this conversation when the time comes, with nobody watching. It can read and
+                edit files in the project, and run only the commands you list below.
               </p>
             </div>
             <Field label="Run at">
@@ -131,6 +135,23 @@ export function ScheduleDialog({
                 className={FIELD}
               />
             </Field>
+            <div className="mt-4">
+              <Field label="Commands it may run (optional)">
+                <textarea
+                  value={commands}
+                  onChange={(event) => setCommands(event.target.value)}
+                  placeholder={"npm test\ngo build *"}
+                  rows={3}
+                  spellCheck={false}
+                  className="w-full resize-none rounded-2xl border border-white/10 bg-white/5 px-3 py-2 font-mono text-xs text-white/80 placeholder:text-white/30 focus:border-white/20 outline-none"
+                />
+              </Field>
+              <p className="mt-2 text-xs text-white/30">
+                One per line. “npm test” allows that command; “go *” allows any go command. Anything
+                else is refused. Nothing unattended can reach outside the project or act on the
+                outside world.
+              </p>
+            </div>
           </div>
 
           <DialogFooter className="gap-2">
@@ -191,4 +212,24 @@ function toInputValue(ms: number): string {
 function fromInputValue(value: string): number {
   const at = new Date(value).getTime()
   return Number.isNaN(at) ? 0 : at
+}
+
+/** The commands a stored scope allows, one pattern each. */
+function commandsOf(scope: string | undefined): string[] {
+  if (!scope) return []
+  try {
+    const parsed = JSON.parse(scope) as { commands?: string[] }
+    return parsed.commands ?? []
+  } catch {
+    return []
+  }
+}
+
+/** The scope a list of command patterns means. No commands is the default. */
+function scopeOf(text: string): TaskScope {
+  const commands = text
+    .split("\n")
+    .map((line) => line.trim().toLowerCase())
+    .filter(Boolean)
+  return { maxTier: commands.length > 0 ? 2 : 1, commands }
 }

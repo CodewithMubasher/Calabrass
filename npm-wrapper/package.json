@@ -1,12 +1,13 @@
 {
   "name": "calabrass",
-  "version": "1.0.5",
-  "description": "Calabrass — the open source personal AI agent. Terminal client for the Calabrass backend.",
+  "version": "1.0.7",
+  "description": "Calabrass \u2014 the open source personal AI agent. Terminal client for the Calabrass backend.",
   "bin": {
     "cal": "bin/cal.js"
   },
   "files": [
     "bin",
+    "lib",
     "binaries",
     "README.md"
   ],
@@ -38,5 +39,8 @@
     "bubbletea"
   ],
   "author": "Mubasher",
-  "license": "MIT"
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test"
+  }
 }

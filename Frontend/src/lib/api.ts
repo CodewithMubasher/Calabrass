@@ -1,4 +1,6 @@
 import type {
+  Approval,
+  ApprovalDecision,
   AgentInput,
   AgentRow,
   Chat,
@@ -291,6 +293,28 @@ export const api = {
     if (token) params.set("access_token", token)
     const query = params.toString()
     return `${BASE}/schedules/stream${query ? `?${query}` : ""}`
+  },
+
+  /** What the agent is waiting on a person to allow. */
+  listApprovals: () =>
+    request<{ approvals: Approval[] }>("/approvals").then((r) => r.approvals ?? []),
+
+  decideApproval: (id: string, decision: ApprovalDecision) =>
+    request<{ approvals: Approval[] }>(`/approvals/${id}`, {
+      method: "POST",
+      body: JSON.stringify({ decision }),
+    }).then((r) => r.approvals ?? []),
+
+  /** Forget every "allow this kind of command" answer. */
+  forgetApprovals: () => request<{ ok: boolean }>("/approvals/remembered", { method: "DELETE" }),
+
+  /** Waiting approvals as a stream: complete on connect, and again on every change. */
+  approvalStreamUrl: () => {
+    const params = new URLSearchParams()
+    const token = getToken()
+    if (token) params.set("access_token", token)
+    const query = params.toString()
+    return `${BASE}/approvals/stream${query ? `?${query}` : ""}`
   },
 
   deleteChat: (chatId: string) =>

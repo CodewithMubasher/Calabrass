@@ -113,10 +113,13 @@ export interface ProviderRow {
   /** The OpenAI-compatible endpoint, for a provider the user added. */
   baseUrl: string
   /**
-   * The provider's credential. It lives with the provider row, and is only ever
-   * sent to this local API.
+   * Whether a key is saved. The key itself is never sent back to the page: a key
+   * shown in a page is a key a script on that page can read. It can be replaced
+   * or removed, not read.
    */
-  apiKey: string
+  hasKey: boolean
+  /** The last four characters of a long saved key, to tell two keys apart. */
+  keyHint?: string
   /** An endpoint is configured for this provider. */
   connected: boolean
   /** Whether the provider may be used; turning it off hides its models. */
@@ -291,12 +294,24 @@ export interface ScheduledTask {
   lastError: string
   createdAt: number
   updatedAt: number
+  /**
+   * What the person allowed this task to do while nobody is watching, as JSON.
+   * Empty means the default: read and edit files in the project, run nothing.
+   */
+  scope?: string
 }
 
 /** The fields a new task is booked with. */
+/** What a task may do unattended. Only a person sets it. */
+export interface TaskScope {
+  maxTier: number
+  commands: string[]
+}
+
 export interface ScheduledTaskInput {
   prompt: string
   runAt: number
+  scope?: TaskScope
 }
 
 /** What an edit can change about a task. */
@@ -304,7 +319,26 @@ export interface ScheduledTaskPatch {
   prompt?: string
   runAt?: number
   enabled?: boolean
+  scope?: TaskScope
 }
+
+/** The agent asking permission to do something. */
+export interface Approval {
+  id: string
+  chatId: string
+  tool: string
+  /** 2 run a command · 3 reach outside the workspace · 4 act on the outside world */
+  tier: number
+  tierName: string
+  summary: string
+  detail?: string
+  /** False for actions that are asked every time. */
+  canRemember: boolean
+  pattern?: string
+  expiresAt: string
+}
+
+export type ApprovalDecision = "allow_once" | "allow_pattern" | "allow_run" | "deny"
 
 export interface Usage {
   inputTokens: number

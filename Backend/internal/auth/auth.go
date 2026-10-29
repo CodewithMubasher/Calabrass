@@ -40,6 +40,8 @@ var (
 	ErrInvalidCredentials = errors.New("that email and password do not match")
 	// ErrUnauthorized means the bearer token is missing, expired or revoked.
 	ErrUnauthorized = errors.New("your session has expired; log in again")
+	// ErrNoOwner means nobody has an account on this machine yet.
+	ErrNoOwner = errors.New("no one has an account on this machine yet")
 )
 
 // ValidationError is a problem with what the person typed, safe to show as-is.
@@ -95,6 +97,44 @@ func (s *Service) SignIn(ctx context.Context, email, password string) (Session, 
 		return Session{}, ErrInvalidCredentials
 	}
 	return s.newSession(ctx, user)
+}
+
+// OwnerEmail is the address of the account the host creates for a person who
+// has never signed up anywhere, such as someone who only ever uses the terminal.
+const OwnerEmail = "owner@calabrass.local"
+
+// SignInAsOwner starts a session for the machine's owner: the first account
+// ever made here. It is for callers that have already proved they are the
+// machine's owner another way (the host secret in the data folder), so there is
+// no password to check.
+//
+// When no account exists yet and create is true, the owner account is made, with
+// a random password nobody needs to know. Someone who later signs up in the
+// desktop app gets a second account; the owner account stays what the terminal
+// uses until they choose otherwise.
+func (s *Service) SignInAsOwner(ctx context.Context, create bool) (Session, bool, error) {
+	user, err := s.store.OwnerUser(ctx)
+	if err == nil {
+		session, err := s.newSession(ctx, user)
+		return session, false, err
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return Session{}, false, err
+	}
+	if !create {
+		return Session{}, false, ErrNoOwner
+	}
+
+	raw := make([]byte, 24)
+	if _, err := rand.Read(raw); err != nil {
+		return Session{}, false, fmt.Errorf("auth: owner password: %w", err)
+	}
+	created, err := s.createUser(ctx, "Owner", OwnerEmail, hex.EncodeToString(raw))
+	if err != nil {
+		return Session{}, false, err
+	}
+	session, err := s.newSession(ctx, created)
+	return session, true, err
 }
 
 // UserForToken resolves a bearer token, or returns ErrUnauthorized.

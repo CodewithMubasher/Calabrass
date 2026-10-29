@@ -12,6 +12,7 @@ import (
 
 	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/ai"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/permission"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
 )
 
@@ -136,7 +137,10 @@ func (s *Server) delegateWork(ctx context.Context, userID string, chat store.Cha
 	}
 
 	workspace := s.workspaceForUser(userID, chat.Chat)
-	setup := s.setupTurnFor(ctx, userID, workspace, chat.ID, chat.AgentID)
+	// A person is talking to this, so what needs a yes is put to them on any
+	// open face. The voice socket itself has no way to show it.
+	turnCtx := permission.WithSession(ctx, s.interactiveSession(userID, chat.ID, "", nil))
+	setup := s.setupTurnFor(turnCtx, userID, workspace, chat.ID, chat.AgentID)
 
 	// The worker continues the conversation, so it knows what has been said
 	// already, and the task is its instruction.

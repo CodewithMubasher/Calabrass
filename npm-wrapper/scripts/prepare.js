@@ -31,8 +31,18 @@ const targets = [
 const missing = [];
 for (const target of targets) {
   const dir = path.join(binariesDir, target);
-  const exe = path.join(dir, "calabrass-tui" + (target.includes("win32") ? ".exe" : ""));
-  if (!fs.existsSync(exe)) missing.push(path.relative(root, exe));
+  
+  // Check TUI binary
+  const tuiExe = path.join(dir, "calabrass-tui" + (target.includes("win32") ? ".exe" : ""));
+  if (!fs.existsSync(tuiExe)) {
+    missing.push(path.relative(root, tuiExe));
+  }
+  
+  // Check backend binary
+  const backendExe = path.join(dir, "calabrass-backend" + (target.includes("win32") ? ".exe" : ""));
+  if (!fs.existsSync(backendExe)) {
+    missing.push(path.relative(root, backendExe));
+  }
 }
 if (missing.length) {
   console.error("prepare: missing binaries:\n  " + missing.join("\n  "));

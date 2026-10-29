@@ -9,6 +9,7 @@ import (
 
 	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/ai"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/permission"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
 )
 
@@ -128,7 +129,10 @@ func (s *Server) runScheduledTask(ctx context.Context, task store.ScheduledTask)
 	}
 	turns = append(turns, ai.Message{Role: ai.RoleUser, Content: task.Prompt})
 
-	setup := s.setupTurnFor(ctx, task.UserID, s.workspaceForUser(task.UserID, chat.Chat), chatID, chat.AgentID)
+	// Nobody is here to ask. The task runs inside the scope the person gave it
+	// when they set it up; anything beyond that is refused, not guessed at.
+	turnCtx := permission.WithSession(ctx, s.unattendedSession(task.UserID, chatID, "", permission.ParseScope(task.Scope)))
+	setup := s.setupTurnFor(turnCtx, task.UserID, s.workspaceForUser(task.UserID, chat.Chat), chatID, chat.AgentID)
 
 	started := time.Now()
 	reply, genErr := s.registryFor(task.UserID).Stream(ctx, ai.StreamRequest{

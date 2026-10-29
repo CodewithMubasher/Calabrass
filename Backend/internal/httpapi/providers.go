@@ -17,15 +17,18 @@ var ErrUnknownProvider = errors.New("unknown provider")
 
 // providerPayload is one row of the providers page.
 //
-// The API key is included so the detail dialog can show and edit it. This is a
-// local, single-user app whose API is bound to the loopback interface, so the
-// key never leaves the machine; the CORS middleware still refuses non-local
-// origins.
+// The API key is never sent back. A key is write-only: the page learns whether
+// one is saved, and the last few characters so a person can tell which one it
+// is, and can replace it, but cannot read it. A key shown in a page is a key an
+// extension, a screenshot or a script on that page can take.
 type providerPayload struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	BaseURL      string `json:"baseUrl"`
-	APIKey       string `json:"apiKey"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	BaseURL string `json:"baseUrl"`
+	// HasKey is true when a key is saved. KeyHint is its last four characters,
+	// and only for a key long enough that four characters give nothing away.
+	HasKey       bool   `json:"hasKey"`
+	KeyHint      string `json:"keyHint,omitempty"`
 	Connected    bool   `json:"connected"`
 	Enabled      bool   `json:"enabled"`
 	DefaultModel string `json:"defaultModel"`
@@ -57,7 +60,8 @@ func (s *Server) providerRows(ctx context.Context, userID string) ([]providerPay
 			ID:        p.ID,
 			Name:      p.Name,
 			BaseURL:   p.BaseURL,
-			APIKey:    p.APIKey,
+			HasKey:    strings.TrimSpace(p.APIKey) != "",
+			KeyHint:   keyHint(p.APIKey),
 			Connected: p.Connected,
 			Enabled:   p.Enabled,
 		}
@@ -268,4 +272,14 @@ func deref(value *string) string {
 		return ""
 	}
 	return *value
+}
+
+// keyHint is the tail of a key, for telling two saved keys apart. Short keys
+// show nothing: four characters of a short key is a large part of it.
+func keyHint(key string) string {
+	key = strings.TrimSpace(key)
+	if len(key) < 16 {
+		return ""
+	}
+	return key[len(key)-4:]
 }

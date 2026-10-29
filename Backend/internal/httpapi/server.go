@@ -19,9 +19,13 @@ import (
 	"github.com/CodewithMubasher/Calabrass/backend/internal/ai"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/auth"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/connectors"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/host"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/netguard"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/permission"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/quota"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/voice"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/webui"
 )
 
 // Deps are the collaborators the HTTP layer needs.
@@ -56,6 +60,22 @@ type Deps struct {
 	// Nil means no limits are known, which is how a missing file is handled.
 	Quotas *quota.Catalog
 	Logger *slog.Logger
+
+	// ListenAddr is where the host listens. It decides whether the network guard
+	// treats this as a machine-only host or one open to paired devices.
+	ListenAddr string
+	// PairingCode is the shared secret other devices must present. Empty means
+	// nothing but this machine may connect.
+	PairingCode string
+	// HostInfo is what this host announced about itself, secret included. The
+	// secret is what lets the machine owner sign in without a password.
+	HostInfo host.Info
+	// WebUI is the built web interface to serve beside the API. Nil serves none.
+	WebUI http.Handler
+	// KeyBackend names where the master key for provider keys is kept.
+	KeyBackend string
+	// OnShutdown stops the host when the owner asks it to.
+	OnShutdown func()
 }
 
 // Server holds the HTTP handlers.
@@ -74,6 +94,15 @@ type Server struct {
 	bundled       []connectors.Bundled
 	quotas        *quota.Catalog
 	log           *slog.Logger
+	// broker holds the approvals waiting for a person and what they chose to
+	// remember. It is nil in tests that build a bare Server, which then refuse
+	// anything above editing files.
+	broker     *permission.Broker
+	hostInfo   host.Info
+	webUI      http.Handler
+	keyBackend string
+	pairingOn  bool
+	onShutdown func()
 	// registries and libraries cache the per-account views, so each account
 	// keeps its own model catalog and workspace folders.
 	registryMu sync.Mutex
@@ -131,14 +160,28 @@ func NewServer(deps Deps) *Server {
 		log:           log,
 		registries:    map[string]*ai.Registry{},
 		libraries:     map[string]*agent.Library{},
+		broker:        permission.NewBroker(),
+		hostInfo:      deps.HostInfo,
+		webUI:         deps.WebUI,
+		keyBackend:    deps.KeyBackend,
+		pairingOn:     strings.TrimSpace(deps.PairingCode) != "",
+		onShutdown:    deps.OnShutdown,
 	}
+	s.broker.Audit = s.logPermission
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("POST /api/auth/signup", s.handleSignUp)
 	mux.HandleFunc("POST /api/auth/login", s.handleSignIn)
 	mux.HandleFunc("GET /api/auth/me", s.handleMe)
+	mux.HandleFunc("POST /api/auth/local", s.handleLocalSignIn)
 	mux.HandleFunc("POST /api/auth/logout", s.handleSignOut)
+	mux.HandleFunc("GET /api/host", s.handleHostInfo)
+	mux.HandleFunc("POST /api/host/shutdown", s.handleHostShutdown)
+	mux.HandleFunc("GET /api/approvals", s.handleListApprovals)
+	mux.HandleFunc("GET /api/approvals/stream", s.handleApprovalStream)
+	mux.HandleFunc("DELETE /api/approvals/remembered", s.handleForgetApprovals)
+	mux.HandleFunc("POST /api/approvals/{approvalID}", s.handleDecideApproval)
 	mux.HandleFunc("GET /api/models", s.handleModels)
 	mux.HandleFunc("GET /api/usage", s.handleUsage)
 	mux.HandleFunc("GET /api/providers", s.handleListProviders)
@@ -184,7 +227,15 @@ func NewServer(deps Deps) *Server {
 	mux.HandleFunc("PATCH /api/schedules/{taskID}", s.handleUpdateSchedule)
 	mux.HandleFunc("DELETE /api/schedules/{taskID}", s.handleDeleteSchedule)
 
-	s.handler = s.withCORS(s.withLogging(s.withAuth(mux)))
+	// The API, wrapped for logging, CORS and sign-in; then the page that goes
+	// with it, when one is compiled in; then the network guard around both, so a
+	// request from outside never reaches either.
+	api := s.withCORS(s.withLogging(s.withAuth(mux)))
+	loopback := netguard.IsLoopbackAddr(deps.ListenAddr)
+	if strings.TrimSpace(deps.ListenAddr) == "" {
+		loopback = true // no listener of its own: tests, or mounted elsewhere
+	}
+	s.handler = netguard.Guard(webui.Mount(api, s.webUI), loopback, deps.PairingCode)
 	return s
 }
 
@@ -245,7 +296,7 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, "+netguard.PairingHeader)
 			w.Header().Set("Access-Control-Max-Age", "600")
 		}
 		if r.Method == http.MethodOptions {
@@ -256,21 +307,7 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 	})
 }
 
-func isLocalOrigin(origin string) bool {
-	if origin == "" {
-		return false
-	}
-	for _, prefix := range []string{
-		"http://localhost:", "http://127.0.0.1:", "http://[::1]:",
-		// The Wails desktop shell serves the UI from its own local origin.
-		"http://wails.localhost", "https://wails.localhost", "wails://",
-	} {
-		if strings.HasPrefix(origin, prefix) {
-			return true
-		}
-	}
-	return false
-}
+func isLocalOrigin(origin string) bool { return netguard.IsLocalOrigin(origin) }
 
 // --- accounts ---------------------------------------------------------------
 
@@ -298,7 +335,9 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 
 func isPublicPath(path string) bool {
 	switch path {
-	case "/api/health", "/api/auth/signup", "/api/auth/login":
+	// /api/auth/local and /api/host/shutdown prove themselves with the host
+	// secret, which is why they need no session.
+	case "/api/health", "/api/auth/signup", "/api/auth/login", "/api/auth/local", "/api/host/shutdown":
 		return true
 	default:
 		return false
@@ -418,6 +457,10 @@ func titleFrom(text string) string {
 type sseWriter struct {
 	w  http.ResponseWriter
 	fl http.Flusher
+	// mu serialises writes: the model's tokens, a tool's progress and an
+	// approval can all be written from different goroutines of one turn.
+	mu     sync.Mutex
+	closed bool
 }
 
 // newSSEWriter starts a text/event-stream response.
@@ -438,10 +481,40 @@ func newSSEWriter(w http.ResponseWriter) (*sseWriter, error) {
 	return &sseWriter{w: w, fl: fl}, nil
 }
 
+// errStreamClosed is returned for a write after the handler has finished.
+var errStreamClosed = errors.New("the stream is closed")
+
+// close ends the stream for writers. A tool that outlives its request must not
+// write to a response that has already been returned.
+func (s *sseWriter) close() {
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+}
+
+// comment writes an SSE comment, which keeps an idle connection open.
+func (s *sseWriter) comment(text string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return errStreamClosed
+	}
+	if _, err := fmt.Fprintf(s.w, ": %s\n\n", text); err != nil {
+		return err
+	}
+	s.fl.Flush()
+	return nil
+}
+
 func (s *sseWriter) event(name string, payload any) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return errStreamClosed
 	}
 	if _, err := fmt.Fprintf(s.w, "event: %s\ndata: %s\n\n", name, data); err != nil {
 		return err

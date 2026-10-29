@@ -12,3 +12,16 @@ import "os/exec"
 // Hide readies a command to run without a console window of its own. It is a
 // no-op on systems where console windows are not a thing.
 func Hide(cmd *exec.Cmd) { hide(cmd) }
+
+// Detach makes cmd outlive the process that starts it: no console, no shared
+// process group or session. A background host is started this way, so closing
+// the window or terminal that launched it does not take it down.
+func Detach(cmd *exec.Cmd) { detach(cmd) }
+
+// KillTree makes cancelling cmd end the whole command, not just the shell that
+// started it. A `sh -c "sleep 30"` that is killed leaves the sleep running, still
+// holding the output pipe, so Wait would block until the sleep ends and a
+// timeout would not time anything out. On Unix the command gets a process group
+// that is killed as one; everywhere, Wait gives up on a held pipe soon after the
+// kill.
+func KillTree(cmd *exec.Cmd) { killTree(cmd) }

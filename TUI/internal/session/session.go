@@ -1,6 +1,7 @@
 // Package session gets the TUI a valid backend session without any screen of
 // its own: it reuses a saved token, signs in with credentials from the
-// environment, or creates a local account for itself.
+// environment, signs in as the machine's owner, or (against an older host)
+// creates a local account for itself.
 package session
 
 import (
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"calabrass-tui/internal/api"
+	"calabrass-tui/internal/hostfile"
 	"calabrass-tui/internal/settings"
 )
 
@@ -71,7 +73,24 @@ func Ensure(ctx context.Context, c *api.Client, st *settings.Settings) (api.User
 		st.Email, st.Password = "", ""
 	}
 
-	// 4. Create a local account.
+	// 4. The machine's owner. The host leaves a secret in the data folder that
+	//    only this user can read; holding it proves this terminal is on the
+	//    owner's machine, and it lands in the same account the desktop app and
+	//    the web page use, so chats and providers are the same everywhere.
+	if info, err := hostfile.Read(); err == nil && info.Secret != "" {
+		sess, err := c.LocalSignIn(ctx, info.Secret, true)
+		if err == nil {
+			return adopt(c, st, sess), nil
+		}
+		if !api.IsAPIError(err) {
+			return api.User{}, wrap(err)
+		}
+		// Refused (an older host, or a secret that went stale): fall through to
+		// an account of this terminal's own, as before.
+	}
+
+	// 5. Create a local account of this terminal's own. This is the path of an
+	//    older host; with a current one the owner account above is used instead.
 	suffix, err := randomHex(4)
 	if err != nil {
 		return api.User{}, err

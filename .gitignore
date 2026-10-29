@@ -71,3 +71,11 @@ installer/out/
 # TUI build output
 TUI/calabrass-tui
 TUI/calabrass-tui.exe
+
+# The web interface is built from Frontend/ and copied in before the backend is
+# compiled (see build-all.ps1 and the release workflow). Only the placeholder
+# that keeps `go:embed` valid is tracked.
+Backend/internal/webui/dist/*
+!Backend/internal/webui/dist/.gitkeep
+Backend/desktop/dist/*
+!Backend/desktop/dist/.gitkeep

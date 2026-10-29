@@ -11,6 +11,7 @@ import (
 
 	goai "github.com/zendev-sh/goai"
 
+	"github.com/CodewithMubasher/Calabrass/backend/internal/permission"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
 )
 
@@ -31,6 +32,9 @@ func (s *Server) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Prompt string `json:"prompt"`
 		RunAt  int64  `json:"runAt"`
+		// Scope is what the person pre-approves for this run. The model cannot
+		// set it: a task it books gets the default.
+		Scope *permission.Scope `json:"scope"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -52,6 +56,7 @@ func (s *Server) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 		Prompt:  prompt,
 		RunAt:   req.RunAt,
 		Enabled: true,
+		Scope:   scopeJSON(req.Scope),
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -65,6 +70,8 @@ func (s *Server) handleUpdateSchedule(w http.ResponseWriter, r *http.Request) {
 		Prompt  *string `json:"prompt"`
 		RunAt   *int64  `json:"runAt"`
 		Enabled *bool   `json:"enabled"`
+		// Scope replaces what the task may do while no one is watching.
+		Scope *permission.Scope `json:"scope"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -100,6 +107,9 @@ func (s *Server) handleUpdateSchedule(w http.ResponseWriter, r *http.Request) {
 	if req.Enabled != nil {
 		task.Enabled = *req.Enabled
 	}
+	if req.Scope != nil {
+		task.Scope = scopeJSON(req.Scope)
+	}
 
 	if _, err := s.store.UpdateScheduledTask(ctx, task); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -120,6 +130,15 @@ func (s *Server) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeSchedules(w, r)
+}
+
+// scopeJSON is the stored form of a scope a person chose. No scope stores
+// nothing, which reads back as the default.
+func scopeJSON(scope *permission.Scope) string {
+	if scope == nil {
+		return ""
+	}
+	return scope.JSON()
 }
 
 // handleScheduleStream pushes the whole list whenever it changes, and once when
@@ -202,7 +221,9 @@ func (s *Server) scheduleTool(chatID, userID string) goai.Tool {
 		"Set a timer that runs one instruction later — in a few minutes, or at a clock time. "+
 			"Use it whenever the user asks for something to happen after a delay or at a given time, "+
 			"including anything about their own machine, which the instruction can still do when it runs. "+
-			"The instruction runs in this conversation with every tool available to you. "+
+			"The instruction runs in this conversation later, with nobody watching, so it can read and edit "+
+				"files in the project but cannot run commands or reach outside it unless the user has allowed "+
+				"that for the task on the Schedules page. If the instruction needs a command, say so when you tell the user. "+
 			"Tell the user the time it is set for, in their own clock.",
 		func(ctx context.Context, args scheduleTaskArgs) (string, error) {
 			return s.scheduleFromTool(ctx, chatID, userID, args)

@@ -217,3 +217,25 @@ type ScheduledTaskPatch struct {
 	RunAt   *int64  `json:"runAt,omitempty"`
 	Enabled *bool   `json:"enabled,omitempty"`
 }
+
+// Approval is the agent asking to do something that needs a person's say-so.
+type Approval struct {
+	ID       string `json:"id"`
+	ChatID   string `json:"chatId"`
+	Tool     string `json:"tool"`
+	Tier     int    `json:"tier"`
+	TierName string `json:"tierName"`
+	Summary  string `json:"summary"`
+	Detail   string `json:"detail"`
+	// CanRemember is false for actions that are asked every time.
+	CanRemember bool   `json:"canRemember"`
+	Pattern     string `json:"pattern"`
+}
+
+// Approval answers the backend understands.
+const (
+	AllowOnce    = "allow_once"
+	AllowPattern = "allow_pattern"
+	AllowRun     = "allow_run"
+	Deny         = "deny"
+)

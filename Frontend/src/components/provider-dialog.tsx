@@ -50,20 +50,35 @@ function KeyField({
   onChange,
   revealed,
   onReveal,
+  saved = false,
+  savedHint,
+  removing = false,
+  onRemove,
 }: {
   value: string
   onChange: (value: string) => void
   revealed: boolean
   onReveal: () => void
+  /** A key is already stored. It cannot be shown, only replaced or removed. */
+  saved?: boolean
+  savedHint?: string
+  removing?: boolean
+  onRemove?: (remove: boolean) => void
 }) {
+  const hint = !saved
+    ? "Leave empty for a local server that takes no key."
+    : removing
+      ? "The saved key will be removed when you save."
+      : "A key is saved and stored protected on this computer. Leave this empty to keep it, or type a new one to replace it."
   return (
-    <Field label="API key" hint="Leave empty for a local server that takes no key.">
+    <Field label="API key" hint={hint}>
       <div className="relative">
         <Input
           value={value}
           onChange={(event) => onChange(event.target.value)}
           type={revealed ? "text" : "password"}
-          placeholder="sk-…"
+          placeholder={saved ? `Saved${savedHint ? ` ••••${savedHint}` : ""}` : "sk-…"}
+          disabled={removing}
           autoComplete="off"
           spellCheck={false}
           className="h-9 border-white/10 bg-white/5 pr-8 font-mono text-xs text-white/80 placeholder:text-white/30"
@@ -81,6 +96,15 @@ function KeyField({
           />
         </button>
       </div>
+      {saved && onRemove ? (
+        <button
+          type="button"
+          onClick={() => onRemove(!removing)}
+          className="mt-1.5 text-xs text-white/45 underline-offset-2 transition-colors hover:text-white/80 hover:underline"
+        >
+          {removing ? "Keep the saved key" : "Remove the saved key"}
+        </button>
+      ) : null}
     </Field>
   )
 }
@@ -205,7 +229,10 @@ export function ProviderDetailDialog({
 }) {
   const [name, setName] = useState(provider.name)
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl)
-  const [apiKey, setApiKey] = useState(provider.apiKey)
+  // The saved key is never sent to the page, so this starts empty and means
+  // "replace it with this". Empty keeps the saved one.
+  const [apiKey, setApiKey] = useState("")
+  const [removeKey, setRemoveKey] = useState(false)
   const [revealed, setRevealed] = useState(false)
   const [saving, setSaving] = useState(false)
 
@@ -218,7 +245,8 @@ export function ProviderDetailDialog({
     setSaving(true)
     try {
       await saveProvider(provider.id, {
-        apiKey: apiKey.trim(),
+        // Left out unless the person changed it, so an untouched key stays put.
+        ...(removeKey ? { apiKey: "" } : apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
         name: name.trim(),
         baseUrl: baseUrl.trim(),
       })
@@ -284,6 +312,10 @@ export function ProviderDetailDialog({
               onChange={setApiKey}
               revealed={revealed}
               onReveal={() => setRevealed((shown) => !shown)}
+              saved={provider.hasKey}
+              savedHint={provider.keyHint}
+              removing={removeKey}
+              onRemove={setRemoveKey}
             />
           </div>
 

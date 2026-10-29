@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -391,6 +392,8 @@ func (s *Server) handleWorkspaceCommand(w http.ResponseWriter, r *http.Request) 
 	var body struct {
 		Command string `json:"command"`
 	}
+	// A command is a line of text. Anything much bigger is not one.
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, errors.New("the request body is not valid JSON"))
 		return
@@ -404,7 +407,8 @@ func (s *Server) handleWorkspaceCommand(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "cmd", "/C", command)
+	name, args := userShell(command)
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = path
 	proc.Hide(cmd)
 
@@ -422,4 +426,18 @@ func (s *Server) handleWorkspaceCommand(w http.ResponseWriter, r *http.Request) 
 		"output":    string(out),
 		"exitCode":  exitCode,
 	})
+}
+
+// userShell is how a command the person typed into the workspace's command box
+// is run on this machine: the Windows command interpreter there, the system
+// shell everywhere else. It used to be cmd.exe unconditionally, which does not
+// exist on macOS or Linux, where the command line ships too.
+//
+// This is the person's own command, typed by them, so it is not put through the
+// agent's approval step; the agent's run_command is.
+func userShell(command string) (string, []string) {
+	if runtime.GOOS == "windows" {
+		return "cmd", []string{"/C", command}
+	}
+	return "/bin/sh", []string{"-c", command}
 }

@@ -120,6 +120,7 @@ func (w *Workspace) runCommand(ctx context.Context, args runCommandArgs) (string
 	cmd.Env = env
 
 	proc.Hide(cmd)
+	proc.KillTree(cmd)
 
 	var out bytes.Buffer
 	cmd.Stdout = &out

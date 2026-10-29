@@ -1,5 +1,8 @@
-// Command desktop is the Wails shell for Calabrass. It runs the same backend
-// the web app talks to, on loopback, and embeds the built React frontend.
+// Command desktop is the Wails shell for Calabrass. It is a face of the host,
+// not the host itself: it looks for the host that is already running on this
+// machine and attaches to it, starts a background host when there is none (so
+// scheduled tasks keep running after the window closes), and only hosts the
+// backend in-process as a last resort. It embeds the built React frontend.
 package main
 
 import (
@@ -14,10 +17,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/CodewithMubasher/Calabrass/backend/internal/app"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/config"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/host"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -41,11 +46,21 @@ var assets embed.FS
 var embeddedQuotas []byte
 
 type desktop struct {
-	log      *slog.Logger
-	cfg      config.Config
-	backend  *app.App
-	server   *http.Server
-	cancel   context.CancelFunc
+	log     *slog.Logger
+	cfg     config.Config
+	dataDir string
+	prefs   *prefs
+
+	// How this window relates to the host.
+	attached host.Info // the host we are a guest of; zero when we host in-process
+	spawned  bool      // we started that host, so closing the window is our question to ask
+
+	// Only when the host is in this process (the last resort).
+	backend *app.App
+	server  *http.Server
+	cancel  context.CancelFunc
+
+	ctx      context.Context // the window's, set at startup
 	startErr error
 }
 
@@ -54,7 +69,8 @@ func main() {
 	log, closeLog := newLogger(logPath)
 	defer closeLog()
 
-	d := &desktop{log: log, cfg: cfg}
+	dataDir := config.DataDir()
+	d := &desktop{log: log, cfg: cfg, dataDir: dataDir, prefs: loadPrefs(dataDir)}
 	d.startErr = d.start()
 	defer d.stop()
 
@@ -73,6 +89,7 @@ func main() {
 			Assets: assets,
 		},
 		OnStartup: func(ctx context.Context) {
+			d.ctx = ctx
 			if d.startErr == nil {
 				return
 			}
@@ -83,11 +100,25 @@ func main() {
 			})
 			runtime.Quit(ctx)
 		},
+		// Closing the window is where a person decides whether the host they
+		// started keeps running behind it.
+		OnBeforeClose: func(ctx context.Context) (prevent bool) {
+			d.beforeClose(ctx)
+			return false
+		},
 		OnShutdown: func(ctx context.Context) {
 			d.stop()
 		},
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId: "calabrass-desktop",
+			// Opening Calabrass a second time brings the window back instead
+			// of doing nothing, which matters once the host runs without one.
+			OnSecondInstanceLaunch: func(options.SecondInstanceData) {
+				if d.ctx != nil {
+					runtime.WindowUnminimise(d.ctx)
+					runtime.Show(d.ctx)
+				}
+			},
 		},
 		Windows: &windows.Options{
 			WebviewIsTransparent: false,
@@ -119,12 +150,7 @@ func resolveConfig() (config.Config, string) {
 		cfg.WorkspacesDir = filepath.Join(dataDir, "workspace")
 	}
 
-	// The quota file travels with the app, so the installed build has limits
-	// without the checkout it was built from.
-	quotaPath := filepath.Join(dataDir, "model_free_tier_quotas.md")
-	if err := os.WriteFile(quotaPath, embeddedQuotas, 0o644); err == nil {
-		cfg.QuotasPath = quotaPath
-	}
+	cfg.QuotasPath = installQuotas(dataDir, embeddedQuotas)
 	return cfg, filepath.Join(dataDir, "desktop.log")
 }
 
@@ -148,27 +174,112 @@ func newLogger(path string) (*slog.Logger, func()) {
 	}
 }
 
-// start brings the API up before the webview loads. If another Calabrass
-// backend already owns the port — the web dev server, usually — it reuses that
-// one instead of failing, so both windows share the same data.
+// installQuotas puts the free-tier limits where the backend reads them, and
+// returns that path.
+//
+// Two copies, on purpose. model_free_tier_quotas.default.md is the one that
+// ships with this build and is refreshed on every start, so an update brings
+// new limits. model_free_tier_quotas.md is the person's own: it is created from
+// the shipped one only when it does not exist, and is never overwritten, so a
+// hand edit survives every launch and every update. The backend reads the
+// person's copy.
+func installQuotas(dataDir string, shipped []byte) string {
+	defaultPath := filepath.Join(dataDir, "model_free_tier_quotas.default.md")
+	userPath := filepath.Join(dataDir, "model_free_tier_quotas.md")
+
+	if err := os.WriteFile(defaultPath, shipped, 0o644); err != nil {
+		return userPath
+	}
+	if _, err := os.Stat(userPath); errors.Is(err, os.ErrNotExist) {
+		if err := os.WriteFile(userPath, shipped, 0o644); err != nil {
+			return defaultPath
+		}
+	}
+	return userPath
+}
+
+// start makes sure a host is running and this window is its guest.
+//
+//  1. A host is already running (the CLI started one, or a background host from
+//     an earlier session): attach to it.
+//  2. None is, and the background host's executable is installed beside the
+//     app: start it detached, so it keeps running, schedules and all, after this
+//     window closes, and attach to that.
+//  3. Otherwise host the backend in this process, as every earlier version did.
+//     It ends with the window.
 func (d *desktop) start() error {
+	cfg := d.cfg
+
+	if err := cfg.ValidateBind(); err != nil {
+		return err
+	}
+
+	if info, ok := host.Discover(context.Background(), d.dataDir); ok {
+		d.attach(info, false)
+		return nil
+	}
+	// A host from before hosts announced themselves: still a host, so share it.
+	if host.Healthy(context.Background(), cfg.Addr) {
+		d.log.Info("using the backend already running", "addr", cfg.Addr)
+		return nil
+	}
+
+	if d.prefs.backgroundAllowed() {
+		if exe, err := os.Executable(); err == nil {
+			if bin, found := host.FindBinary(filepath.Dir(exe)); found {
+				info, spawnErr := host.Spawn(context.Background(), bin, d.dataDir, 20*time.Second)
+				if spawnErr == nil {
+					d.attach(info, true)
+					return nil
+				}
+				d.log.Warn("could not start the background host; hosting in this window instead", "error", spawnErr)
+			}
+		}
+	}
+
+	return d.hostInProcess()
+}
+
+func (d *desktop) attach(info host.Info, spawned bool) {
+	d.attached = info
+	d.spawned = spawned
+	d.log.Info("attached to the Calabrass host",
+		"addr", info.Addr, "pid", info.PID, "owner", info.Owner, "version", info.Version, "startedByThisWindow", spawned)
+}
+
+// hostInProcess is the fallback: the backend lives in this process and ends
+// with it. It still announces itself, so the terminal attaches instead of
+// starting a second one.
+func (d *desktop) hostInProcess() error {
 	cfg := d.cfg
 
 	listener, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {
-		if backendHealthy(cfg.Addr) {
+		if host.Healthy(context.Background(), cfg.Addr) {
 			d.log.Info("using the backend already running", "addr", cfg.Addr)
 			return nil
 		}
 		return fmt.Errorf("Calabrass could not start its local API on %s.\n\nClose the other process using that port and try again.\n\n%v", cfg.Addr, err)
 	}
 
-	application, err := app.New(context.Background(), cfg, d.log)
+	application, err := app.New(context.Background(), cfg, d.log, app.Options{
+		Owner: host.OwnerDesktop,
+		// `calabrass-server stop` closes the window, which ends the host.
+		OnShutdown: func() {
+			if d.ctx != nil {
+				runtime.Quit(d.ctx)
+			}
+		},
+	})
 	if err != nil {
 		_ = listener.Close()
 		return err
 	}
 	d.backend = application
+
+	if err := host.Claim(context.Background(), d.dataDir, application.Host); err != nil {
+		d.log.Warn("could not announce this window's host to other faces", "error", err)
+	}
 
 	schedulerCtx, cancel := context.WithCancel(context.Background())
 	d.cancel = cancel
@@ -182,7 +293,7 @@ func (d *desktop) start() error {
 	}
 	d.server = server
 
-	d.log.Info("calabrass desktop API listening", "addr", cfg.Addr, "db", cfg.DatabasePath)
+	d.log.Info("calabrass desktop API listening", "addr", cfg.Addr, "db", cfg.DatabasePath, "keys", application.KeyBackend)
 	go func() {
 		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			d.log.Error("desktop API failed", "error", err)
@@ -191,8 +302,54 @@ func (d *desktop) start() error {
 	return nil
 }
 
-// stop shuts the API and its scheduler down. It is safe to call twice: Wails
-// calls it at shutdown, and main defers it for the case Wails never started.
+// beforeClose asks, once, whether a host this window started should keep
+// running. The answer is remembered; delete desktop.json to be asked again.
+func (d *desktop) beforeClose(ctx context.Context) {
+	if d.attached.PID == 0 || !d.spawned || d.attached.Owner != host.OwnerDaemon {
+		return // not our host to decide about
+	}
+	switch d.prefs.OnClose {
+	case "keep":
+		return
+	case "quit":
+		d.stopBackgroundHost()
+		return
+	}
+
+	const keep, quit = "Keep running", "Quit completely"
+	choice, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
+		Type:  runtime.QuestionDialog,
+		Title: appName,
+		Message: "Keep Calabrass running in the background?\n\n" +
+			"Scheduled tasks only happen while it is running. You can open Calabrass again at any time, " +
+			"and the `calabrass-backend stop` command (also in the Start menu) stops it.\n\n" +
+			"Your choice is remembered. Delete desktop.json in Calabrass's data folder to be asked again.",
+		Buttons:       []string{keep, quit},
+		DefaultButton: keep,
+		CancelButton:  keep,
+	})
+	if err != nil || choice == keep || choice == "" {
+		d.prefs.OnClose = "keep"
+		d.prefs.save(d.dataDir)
+		return
+	}
+	d.prefs.OnClose = "quit"
+	d.prefs.save(d.dataDir)
+	d.stopBackgroundHost()
+}
+
+func (d *desktop) stopBackgroundHost() {
+	if d.attached.PID == 0 {
+		return
+	}
+	if err := host.Stop(context.Background(), d.attached); err != nil {
+		d.log.Warn("could not stop the background host", "error", err)
+	}
+}
+
+// stop ends what this window owns. A host that runs on its own is left alone:
+// the window was only its guest. It is safe to call twice: Wails calls it at
+// shutdown, and main defers it for the case Wails never started.
 func (d *desktop) stop() {
 	if d.cancel != nil {
 		d.cancel()
@@ -205,36 +362,41 @@ func (d *desktop) stop() {
 		d.server = nil
 	}
 	if d.backend != nil {
+		host.Remove(d.dataDir, d.backend.Host.PID)
 		d.backend.Close()
 		d.backend = nil
 	}
 }
 
-// backendHealthy asks the process already on addr whether it is Calabrass.
-func backendHealthy(addr string) bool {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return false
-	}
-	if host == "" || host == "0.0.0.0" || host == "::" {
-		host = "127.0.0.1"
-	}
+// --- preferences -------------------------------------------------------------
 
-	client := &http.Client{Timeout: time.Second}
-	res, err := client.Get("http://" + net.JoinHostPort(host, port) + "/api/health")
-	if err != nil {
-		return false
-	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode != http.StatusOK {
-		return false
-	}
+// prefs are the few things the window remembers about itself.
+type prefs struct {
+	// OnClose is what to do with a host this window started: "" asks, "keep"
+	// leaves it running, "quit" stops it.
+	OnClose string `json:"onClose,omitempty"`
+}
 
-	var health struct {
-		Status string `json:"status"`
+func loadPrefs(dataDir string) *prefs {
+	p := &prefs{}
+	if raw, err := os.ReadFile(filepath.Join(dataDir, "desktop.json")); err == nil {
+		_ = json.Unmarshal(raw, p)
 	}
-	if err := json.NewDecoder(res.Body).Decode(&health); err != nil {
+	return p
+}
+
+func (p *prefs) save(dataDir string) {
+	if raw, err := json.MarshalIndent(p, "", "  "); err == nil {
+		_ = os.WriteFile(filepath.Join(dataDir, "desktop.json"), raw, 0o600)
+	}
+}
+
+// backgroundAllowed is false when the person turned the background host off,
+// with CALABRASS_BACKGROUND=off, and the window should host in-process instead.
+func (p *prefs) backgroundAllowed() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("CALABRASS_BACKGROUND"))) {
+	case "off", "0", "false", "no":
 		return false
 	}
-	return health.Status == "ok"
+	return true
 }

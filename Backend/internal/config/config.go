@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/CodewithMubasher/Calabrass/backend/internal/netguard"
 )
 
 const defaultSystemPrompt = "You are Calabrass, a helpful AI assistant. Answer clearly and use Markdown when it helps."
@@ -19,6 +21,11 @@ const appName = "Calabrass"
 // update can move or delete the source tree without taking someone's chats and
 // files with it.
 func DataDir() string {
+	// An explicit folder wins everywhere, which lets tests, portable installs and
+	// a second profile keep their own host apart from the everyday one.
+	if v := strings.TrimSpace(os.Getenv("CALABRASS_DATA_DIR")); v != "" {
+		return v
+	}
 	// %LOCALAPPDATA% is where a Windows program's own data belongs. It is not
 	// %APPDATA%: that one roams, and a database of workspaces should stay put.
 	if runtime.GOOS == "windows" {
@@ -50,6 +57,16 @@ type Config struct {
 	// QuotasPath points at the free-tier limits file. Empty means "use the one
 	// in the project root". The desktop shell sets it to the copy it carries.
 	QuotasPath string
+	// PairingCode is the shared secret that lets another device use this host.
+	// Empty (the default) means nothing but this machine may connect, and the
+	// host will refuse to listen on anything but loopback.
+	PairingCode string
+}
+
+// ValidateBind refuses a listen address that would put the agent, which can run
+// commands, in reach of the network without a pairing code.
+func (c Config) ValidateBind() error {
+	return netguard.ValidateBind(c.Addr, c.PairingCode)
 }
 
 // Load reads configuration from the environment, after hydrating it from the
@@ -77,7 +94,8 @@ func LoadFrom(envPath string) Config {
 			os.Getenv("CALABRASS_WORKSPACE"),
 			"workspace",
 		)),
-		QuotasPath: strings.TrimSpace(os.Getenv("CALABRASS_QUOTAS")),
+		QuotasPath:  strings.TrimSpace(os.Getenv("CALABRASS_QUOTAS")),
+		PairingCode: strings.TrimSpace(os.Getenv("CALABRASS_PAIRING_CODE")),
 	}
 }
 

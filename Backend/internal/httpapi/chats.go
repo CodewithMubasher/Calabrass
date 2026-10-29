@@ -15,6 +15,7 @@ import (
 	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/ai"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/crew"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/permission"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
 )
 
@@ -24,7 +25,16 @@ import (
 // desktop shell probes it before a person has signed in, and it says nothing
 // about any account's providers.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+	// A face uses this to decide whether to attach to what it found, so it says
+	// what is running and who owns it. Nothing here is secret.
+	pub := s.hostPublic()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":     "ok",
+		"version":    pub.Version,
+		"owner":      pub.Owner,
+		"background": pub.Background,
+		"pid":        pub.PID,
+	})
 }
 
 // --- models -----------------------------------------------------------------
@@ -603,6 +613,9 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	// Tools may still be finishing when this handler returns; they must not
+	// write to a response that has gone.
+	defer stream.close()
 
 	if err := stream.event("chat", updated); err != nil {
 		return
@@ -627,7 +640,10 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	// The harness: the prompt that explains what the model is working with — the
 	// project, and the machine the connectors reach — and the tools it may call.
-	setup := s.setupTurnFor(ctx, user.ID, s.workspaceForUser(user.ID, chat.Chat), chatID, chat.AgentID)
+	// A person is watching this turn, so what needs their say-so is put to them
+	// on this very stream, and can be answered from any other face as well.
+	turnCtx := permission.WithSession(ctx, s.interactiveSession(user.ID, chatID, "", stream))
+	setup := s.setupTurnFor(turnCtx, user.ID, s.workspaceForUser(user.ID, chat.Chat), chatID, chat.AgentID)
 
 	started := time.Now()
 	var lastTrace ai.Trace

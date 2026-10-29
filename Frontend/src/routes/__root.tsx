@@ -13,6 +13,7 @@ import {
 } from "@hugeicons/core-free-icons"
 
 import { AppSidebar } from "@/components/app-sidebar"
+import { ApprovalDialog } from "@/components/approval-dialog"
 import { ArtifactsPanel } from "@/components/artifacts-panel"
 import { CrewPanel } from "@/components/crew-panel"
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts"
@@ -25,6 +26,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
+import { watchApprovals } from "@/lib/approval-store"
 import { hydrate } from "@/lib/chat-store"
 import { refreshSession, session, useSession } from "@/lib/auth"
 import { loadModels } from "@/lib/model-store"
@@ -117,6 +119,13 @@ function RootLayout() {
     }
   }, [navigate, signedIn])
 
+  // Follow what the agent is waiting on a person to allow, for as long as
+  // someone is signed in. Whichever window or turn raised it, it lands here.
+  useEffect(() => {
+    if (!signedIn) return
+    return watchApprovals()
+  }, [signedIn])
+
   // The login page stands on its own: nothing from the shell is around it, not
   // even the surface the rest of the app sits in. Its page brings its own.
   if (isStandalone(pathname)) {
@@ -206,6 +215,7 @@ function RootLayout() {
       </SidebarProvider>
       {/* The notices: every error and every bit of feedback says itself here
           rather than on the page it happened on. */}
+      <ApprovalDialog />
       <Toaster />
     </>
   )

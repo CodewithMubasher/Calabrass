@@ -174,3 +174,26 @@ func TestBaseURL(t *testing.T) {
 		}
 	}
 }
+
+func TestPairingCodeIsSentWhenSetInTheEnvironment(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("X-Calabrass-Pairing")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("CALABRASS_PAIRING_CODE", "a-long-enough-pairing-secret")
+	if err := New(srv.URL).Health(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got != "a-long-enough-pairing-secret" {
+		t.Fatalf("pairing header = %q", got)
+	}
+	t.Setenv("CALABRASS_PAIRING_CODE", "")
+	got = "unset"
+	_ = New(srv.URL).Health(context.Background())
+	if got != "" {
+		t.Fatalf("no code configured, but header = %q", got)
+	}
+}

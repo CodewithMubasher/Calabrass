@@ -3,6 +3,7 @@ package connectors
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -51,6 +52,9 @@ func TestResolveTakesAWholePathWithSpaces(t *testing.T) {
 }
 
 func TestResolveFindsACommandInsideTheCheckout(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("the checkout layout and the backslash path it resolves are Windows-shaped")
+	}
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "MCP", "win-control", "win-control-mcp.exe"))
 

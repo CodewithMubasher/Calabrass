@@ -40,6 +40,16 @@ func (s *Store) UserByEmail(ctx context.Context, email string) (UserRecord, erro
 		FROM users WHERE email = ? COLLATE NOCASE`, email))
 }
 
+// OwnerUser returns the machine's owner: the first account ever made here. A
+// single-user install has exactly one, and every face that signs in as "the
+// owner" lands on it, so chats and providers are the same whichever face made
+// them.
+func (s *Store) OwnerUser(ctx context.Context) (UserRecord, error) {
+	return scanUser(s.db.QueryRowContext(ctx, `
+		SELECT id, name, email, password_hash, created_at
+		FROM users ORDER BY created_at ASC, rowid ASC LIMIT 1`))
+}
+
 // UserByID returns the account with this ID.
 func (s *Store) UserByID(ctx context.Context, id string) (UserRecord, error) {
 	return scanUser(s.db.QueryRowContext(ctx, `

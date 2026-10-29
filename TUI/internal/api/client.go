@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -111,6 +112,11 @@ func (c *Client) authorize(req *http.Request) {
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
+	// A host on another machine only answers paired devices. The code is read
+	// from the environment, so it is never written to this terminal's settings.
+	if code := strings.TrimSpace(os.Getenv("CALABRASS_PAIRING_CODE")); code != "" {
+		req.Header.Set("X-Calabrass-Pairing", code)
+	}
 }
 
 func readAPIError(resp *http.Response) error {
@@ -149,6 +155,22 @@ func (c *Client) Login(ctx context.Context, email, password string) (Session, er
 	err := c.do(ctx, http.MethodPost, "/api/auth/login",
 		map[string]string{"email": email, "password": password}, &s)
 	return s, err
+}
+
+// LocalSignIn signs in as the machine's owner, proving it with the secret the
+// host wrote to the data folder. create makes the owner account when nobody has
+// one yet.
+func (c *Client) LocalSignIn(ctx context.Context, secret string, create bool) (Session, error) {
+	var s Session
+	err := c.do(ctx, http.MethodPost, "/api/auth/local",
+		map[string]any{"secret": secret, "create": create}, &s)
+	return s, err
+}
+
+// DecideApproval answers an approval the agent is waiting on.
+func (c *Client) DecideApproval(ctx context.Context, id, decision string) error {
+	return c.do(ctx, http.MethodPost, "/api/approvals/"+url.PathEscape(id),
+		map[string]string{"decision": decision}, nil)
 }
 
 // Me resolves the token to its account.

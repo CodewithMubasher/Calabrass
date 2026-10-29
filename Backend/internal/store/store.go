@@ -88,6 +88,76 @@ type ChatDetail struct {
 // Store is a SQLite-backed persistence layer.
 type Store struct {
 	db *sql.DB
+	// sealer protects provider API keys at rest. Nil keeps them as plain text,
+	// which is what tests and a database opened without a host get.
+	sealer Sealer
+}
+
+// Sealer turns a secret into text that is safe to keep in the database, and
+// back. Open must return legacy plain text unchanged, so a database written
+// before sealing existed keeps working until SealLegacySecrets migrates it.
+type Sealer interface {
+	Seal(plain string) (string, error)
+	Open(stored string) (string, error)
+}
+
+// SetSealer protects provider keys from now on. Call it once, right after Open.
+func (s *Store) SetSealer(sealer Sealer) { s.sealer = sealer }
+
+func (s *Store) sealSecret(plain string) (string, error) {
+	if s.sealer == nil {
+		return plain, nil
+	}
+	return s.sealer.Seal(plain)
+}
+
+func (s *Store) openSecret(stored string) (string, error) {
+	if s.sealer == nil {
+		return stored, nil
+	}
+	return s.sealer.Open(stored)
+}
+
+// SealLegacySecrets seals every provider key that is still stored as plain
+// text. It is safe to run on every start: sealed rows are left alone. It
+// returns how many rows it protected.
+func (s *Store) SealLegacySecrets(ctx context.Context) (int, error) {
+	if s.sealer == nil {
+		return 0, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT user_id, id, api_key FROM providers WHERE api_key <> ''`)
+	if err != nil {
+		return 0, fmt.Errorf("store: read provider keys: %w", err)
+	}
+	type row struct{ user, id, key string }
+	var todo []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.user, &r.id, &r.key); err != nil {
+			_ = rows.Close()
+			return 0, fmt.Errorf("store: read provider keys: %w", err)
+		}
+		if !strings.HasPrefix(r.key, "cal1:") {
+			todo = append(todo, r)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, err
+	}
+	_ = rows.Close()
+
+	for _, r := range todo {
+		sealed, err := s.sealer.Seal(r.key)
+		if err != nil {
+			return 0, fmt.Errorf("store: seal a provider key: %w", err)
+		}
+		if _, err := s.db.ExecContext(ctx,
+			`UPDATE providers SET api_key = ? WHERE user_id = ? AND id = ?`, sealed, r.user, r.id); err != nil {
+			return 0, fmt.Errorf("store: save a sealed provider key: %w", err)
+		}
+	}
+	return len(todo), nil
 }
 
 // Open opens (and migrates) the database at path.
@@ -355,6 +425,7 @@ CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_events(provider_id, creat
 		{"workspaces", "user_id", "user_id TEXT NOT NULL DEFAULT ''"},
 		{"connectors", "user_id", "user_id TEXT NOT NULL DEFAULT ''"},
 		{"scheduled_tasks", "user_id", "user_id TEXT NOT NULL DEFAULT ''"},
+		{"scheduled_tasks", "scope", "scope TEXT NOT NULL DEFAULT ''"},
 		{"agents", "user_id", "user_id TEXT NOT NULL DEFAULT ''"},
 		{"usage_events", "user_id", "user_id TEXT NOT NULL DEFAULT ''"},
 	}
@@ -1023,6 +1094,14 @@ func (s *Store) ListProviders(ctx context.Context, userID ...string) ([]Provider
 		}
 		rec.Enabled = enabled != 0
 		rec.Custom = custom != 0
+		// A key that cannot be opened (the master key was lost) reads as "no
+		// key set": the provider stays listed and the person re-enters it,
+		// instead of the whole page failing.
+		if plain, openErr := s.openSecret(rec.APIKey); openErr == nil {
+			rec.APIKey = plain
+		} else {
+			rec.APIKey = ""
+		}
 		records = append(records, rec)
 	}
 	return records, rows.Err()
@@ -1046,13 +1125,22 @@ func (s *Store) GetProvider(ctx context.Context, id string, userID ...string) (P
 	}
 	rec.Enabled = enabled != 0
 	rec.Custom = custom != 0
+	if plain, openErr := s.openSecret(rec.APIKey); openErr == nil {
+		rec.APIKey = plain
+	} else {
+		rec.APIKey = ""
+	}
 	return rec, nil
 }
 
 // UpsertProvider writes a provider row in full for an account.
 func (s *Store) UpsertProvider(ctx context.Context, rec ProviderRecord, userID ...string) error {
 	owner := ownerOf(userID)
-	_, err := s.db.ExecContext(ctx, `
+	storedKey, err := s.sealSecret(rec.APIKey)
+	if err != nil {
+		return fmt.Errorf("store: protect the key for %s: %w", rec.ID, err)
+	}
+	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO providers (user_id, id, name, base_url, api_key, enabled, custom, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(user_id, id) DO UPDATE SET
@@ -1062,7 +1150,7 @@ func (s *Store) UpsertProvider(ctx context.Context, rec ProviderRecord, userID .
 			enabled = excluded.enabled,
 			custom = excluded.custom,
 			updated_at = excluded.updated_at`,
-		owner, rec.ID, rec.Name, rec.BaseURL, rec.APIKey,
+		owner, rec.ID, rec.Name, rec.BaseURL, storedKey,
 		boolToInt(rec.Enabled), boolToInt(rec.Custom), time.Now().UnixMilli())
 	if err != nil {
 		return fmt.Errorf("store: save provider %s: %w", rec.ID, err)

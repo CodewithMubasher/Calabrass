@@ -25,6 +25,11 @@ type ScheduledTask struct {
 	// RunAt is when it is due, in Unix milliseconds.
 	RunAt   int64 `json:"runAt"`
 	Enabled bool  `json:"enabled"`
+	// Scope is what the person pre-approved for this run, as JSON: the highest
+	// kind of action it may take and the commands it may run. Empty means the
+	// default, which is reading and editing files in the workspace and nothing
+	// else. Only a person sets it; the model never does.
+	Scope string `json:"scope"`
 	// LastRunAt is when it last ran, zero while it has not. LastStatus is "ok",
 	// "error" or "missed" and LastError is what went wrong.
 	LastRunAt  int64  `json:"lastRunAt"`
@@ -38,7 +43,7 @@ type ScheduledTask struct {
 func (t ScheduledTask) HasRun() bool { return t.LastRunAt > 0 }
 
 const scheduledTaskColumns = `id, user_id, prompt, chat_id, run_at, enabled,
-	last_run_at, last_status, last_error, created_at, updated_at`
+	last_run_at, last_status, last_error, created_at, updated_at, scope`
 
 func scanScheduledTask(row interface{ Scan(...any) error }) (ScheduledTask, error) {
 	var (
@@ -48,7 +53,7 @@ func scanScheduledTask(row interface{ Scan(...any) error }) (ScheduledTask, erro
 	if err := row.Scan(
 		&task.ID, &task.UserID, &task.Prompt, &task.ChatID, &task.RunAt, &enabled,
 		&task.LastRunAt, &task.LastStatus, &task.LastError,
-		&task.CreatedAt, &task.UpdatedAt,
+		&task.CreatedAt, &task.UpdatedAt, &task.Scope,
 	); err != nil {
 		return ScheduledTask{}, err
 	}
@@ -102,11 +107,11 @@ func (s *Store) CreateScheduledTask(ctx context.Context, task ScheduledTask) (Sc
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO scheduled_tasks (
 			id, user_id, prompt, chat_id, run_at, enabled,
-			last_run_at, last_status, last_error, created_at, updated_at
+			last_run_at, last_status, last_error, created_at, updated_at, scope
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		task.ID, task.UserID, task.Prompt, task.ChatID, task.RunAt, boolToInt(task.Enabled),
-		task.LastRunAt, task.LastStatus, task.LastError, task.CreatedAt, task.UpdatedAt,
+		task.LastRunAt, task.LastStatus, task.LastError, task.CreatedAt, task.UpdatedAt, task.Scope,
 	); err != nil {
 		return ScheduledTask{}, fmt.Errorf("store: create scheduled task: %w", err)
 	}
@@ -123,10 +128,10 @@ func (s *Store) UpdateScheduledTask(ctx context.Context, task ScheduledTask) (Sc
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE scheduled_tasks SET
 			prompt = ?, chat_id = ?, run_at = ?, enabled = ?,
-			last_run_at = ?, last_status = ?, last_error = ?, updated_at = ?
+			last_run_at = ?, last_status = ?, last_error = ?, updated_at = ?, scope = ?
 		WHERE id = ? AND user_id = ?`,
 		task.Prompt, task.ChatID, task.RunAt, boolToInt(task.Enabled),
-		task.LastRunAt, task.LastStatus, task.LastError, task.UpdatedAt, task.ID, task.UserID)
+		task.LastRunAt, task.LastStatus, task.LastError, task.UpdatedAt, task.Scope, task.ID, task.UserID)
 	if err != nil {
 		return ScheduledTask{}, fmt.Errorf("store: update scheduled task: %w", err)
 	}

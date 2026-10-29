@@ -11,6 +11,7 @@ import (
 	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/connectors"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/crew"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/permission"
 )
 
 // turnSetup is what a turn takes from the harness: the prompt to think with, and
@@ -161,6 +162,15 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 		tools = append(tools, s.scheduleTool(chatID, userID))
 	}
 
+	// The permission gate goes on first, so a refused action is what the loop
+	// guard sees fail, and an approval wait is not counted as a retry. Every
+	// tool passes through it, built-in or from a connector.
+	workspaceRoot := ""
+	if workspace != nil {
+		workspaceRoot = workspace.Root()
+	}
+	tools = permission.Gate(tools, s.sessionFor(ctx, userID, chatID, workspaceRoot))
+
 	// Wrap ALL tools with budget middleware for loop guard (once, after merging)
 	budget := agent.DefaultBudget(mode)
 	runState := agent.NewRunState(budget)
@@ -207,13 +217,17 @@ func (s *Server) orchestratorTurn(ctx context.Context, userID string, workspace 
 		s.log.Warn("could not list workers for the Orchestrator", "error", err)
 	}
 
+	// The Orchestrator has no tool that changes anything itself. What it hands
+	// to a worker runs under the same permission session as this turn, captured
+	// now: the context a tool is later called with may never have seen the request.
+	session := s.sessionFor(ctx, userID, chatID, workspaceRoot)
 	tools := []goai.Tool{s.askQuestionsTool()}
 	if len(workers) > 0 {
 		tools = append(tools, agent.DelegateTaskTool(workers, func(toolCtx context.Context, args agent.DelegateTaskArgs) (string, error) {
 			if workspaceRoot == "" {
 				return "", errors.New("this chat has no workspace, so there is nowhere to run a worker")
 			}
-			return s.delegateTask(toolCtx, userID, chatID, workspaceRoot, args)
+			return s.delegateTask(permission.WithSession(toolCtx, session), userID, chatID, workspaceRoot, args)
 		}))
 	}
 

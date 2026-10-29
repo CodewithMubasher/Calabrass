@@ -92,12 +92,33 @@ if (-not $SkipFrontend) {
     pnpm exec tsc -b
     pnpm run build:desktop
     Pop-Location
+
+    # The background host serves the web interface itself, so the page is built
+    # for the web (same-origin /api) and compiled into the host.
+    Write-Step "Frontend: web build for the background host"
+    Push-Location (Join-Path $repoRoot "Frontend")
+    pnpm run build
+    Pop-Location
+    $webDist = Join-Path $repoRoot "Backend\internal\webui\dist"
+    if (Test-Path $webDist) { Remove-Item $webDist -Recurse -Force }
+    New-Item -ItemType Directory -Path $webDist | Out-Null
+    Copy-Item (Join-Path $repoRoot "Frontend\dist\*") $webDist -Recurse -Force
 }
 
 if (-not $SkipBackend) {
     Write-Step "Backend + Desktop (Wails build)"
     Push-Location (Join-Path $repoRoot "Backend\desktop")
     wails build -clean
+    Pop-Location
+
+    # The background host: the same backend, as its own program, so scheduled
+    # tasks keep running after the window closes and the terminal and the web
+    # page can use it too. The installer puts it beside Calabrass.exe.
+    Write-Step "Background host (calabrass-backend.exe)"
+    Push-Location (Join-Path $repoRoot "Backend")
+    $hostVersion = $versionMatch.Matches.Groups[1].Value
+    go build -trimpath -ldflags "-s -w -X github.com/CodewithMubasher/Calabrass/backend/internal/version.Version=$hostVersion" `
+        -o (Join-Path $repoRoot "Backend\desktop\build\bin\calabrass-backend.exe") .\cmd\server
     Pop-Location
 }
 

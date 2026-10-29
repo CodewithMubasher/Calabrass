@@ -1,0 +1,372 @@
+﻿+-- .github/
+|   +-- workflows/
+|   |   +-- release.yml
++-- Backend/
+|   +-- cmd/
+|   |   +-- server/
+|   |   |   +-- main.go
+|   +-- desktop/
+|   |   +-- assets/
+|   |   |   +-- model_free_tier_quotas.md
+|   |   +-- wailsjs/
+|   |   |   +-- wailsjs/
+|   |   +-- main.go
+|   |   +-- quota_test.go
+|   |   +-- wails.json
+|   +-- internal/
+|   |   +-- agent/
+|   |   |   +-- budget.go
+|   |   |   +-- budget_test.go
+|   |   |   +-- crew_journal.go
+|   |   |   +-- crew_journal_test.go
+|   |   |   +-- delegate.go
+|   |   |   +-- delegate_task.go
+|   |   |   +-- delegate_task_test.go
+|   |   |   +-- errors.go
+|   |   |   +-- library.go
+|   |   |   +-- library_test.go
+|   |   |   +-- lines.go
+|   |   |   +-- lines_test.go
+|   |   |   +-- mode.go
+|   |   |   +-- projectmap.go
+|   |   |   +-- prompt.go
+|   |   |   +-- prompt_test.go
+|   |   |   +-- read.go
+|   |   |   +-- read_test.go
+|   |   |   +-- shell.go
+|   |   |   +-- shell_test.go
+|   |   |   +-- skills.go
+|   |   |   +-- skills_default.go
+|   |   |   +-- template.go
+|   |   |   +-- template_test.go
+|   |   |   +-- tools.go
+|   |   |   +-- workspace.go
+|   |   |   +-- workspace_test.go
+|   |   |   +-- write.go
+|   |   +-- ai/
+|   |   |   +-- ai.go
+|   |   |   +-- limited_test.go
+|   |   |   +-- models.go
+|   |   |   +-- ratelimit.go
+|   |   |   +-- retry.go
+|   |   |   +-- retry_test.go
+|   |   |   +-- trace.go
+|   |   |   +-- trace_test.go
+|   |   +-- app/
+|   |   |   +-- app.go
+|   |   +-- auth/
+|   |   |   +-- auth.go
+|   |   +-- config/
+|   |   |   +-- config.go
+|   |   |   +-- config_test.go
+|   |   +-- connectors/
+|   |   |   +-- bundled.go
+|   |   |   +-- bundled_test.go
+|   |   |   +-- command_test.go
+|   |   |   +-- connectors.go
+|   |   |   +-- connectors_test.go
+|   |   +-- crew/
+|   |   |   +-- prompts/
+|   |   |   +-- crew.go
+|   |   +-- httpapi/
+|   |   |   +-- agents.go
+|   |   |   +-- agents_test.go
+|   |   |   +-- artifacts.go
+|   |   |   +-- artifacts_test.go
+|   |   |   +-- auth.go
+|   |   |   +-- auth_test.go
+|   |   |   +-- chat_modes_test.go
+|   |   |   +-- chat_reliability_test.go
+|   |   |   +-- chats.go
+|   |   |   +-- chats_test.go
+|   |   |   +-- connectors.go
+|   |   |   +-- crew.go
+|   |   |   +-- crew_test.go
+|   |   |   +-- providers.go
+|   |   |   +-- questions.go
+|   |   |   +-- questions_test.go
+|   |   |   +-- scheduler.go
+|   |   |   +-- schedules.go
+|   |   |   +-- schedules_test.go
+|   |   |   +-- server.go
+|   |   |   +-- skills.go
+|   |   |   +-- tools.go
+|   |   |   +-- tools_test.go
+|   |   |   +-- usage.go
+|   |   |   +-- usage_test.go
+|   |   |   +-- voice.go
+|   |   |   +-- voice_ws.go
+|   |   |   +-- workspace_git.go
+|   |   |   +-- workspace_git_test.go
+|   |   |   +-- workspaces.go
+|   |   +-- proc/
+|   |   |   +-- proc.go
+|   |   |   +-- proc_other.go
+|   |   |   +-- proc_windows.go
+|   |   +-- providers/
+|   |   |   +-- presets.go
+|   |   +-- quota/
+|   |   |   +-- quota.go
+|   |   |   +-- quota_test.go
+|   |   +-- store/
+|   |   |   +-- schedules.go
+|   |   |   +-- store.go
+|   |   |   +-- store_test.go
+|   |   |   +-- usage.go
+|   |   |   +-- users.go
+|   |   +-- voice/
+|   |   |   +-- session.go
+|   |   |   +-- stt.go
+|   |   |   +-- transcribe.go
+|   |   |   +-- tts.go
+|   +-- .env.example
+|   +-- go.mod
+|   +-- go.sum
++-- Frontend/
+|   +-- public/
+|   |   +-- vite.svg
+|   +-- src/
+|   |   +-- assets/
+|   |   |   +-- react.svg
+|   |   +-- components/
+|   |   |   +-- ui/
+|   |   |   +-- agent-dialog.tsx
+|   |   |   +-- agent-trace.tsx
+|   |   |   +-- app-sidebar.tsx
+|   |   |   +-- artifact-card.tsx
+|   |   |   +-- artifact-detail.tsx
+|   |   |   +-- artifacts-panel.tsx
+|   |   |   +-- attachment.tsx
+|   |   |   +-- cal-live-orb.css
+|   |   |   +-- cal-live-orb.tsx
+|   |   |   +-- chat-thread.tsx
+|   |   |   +-- code-block.tsx
+|   |   |   +-- connector-dialog.tsx
+|   |   |   +-- crew-panel.tsx
+|   |   |   +-- crew-work.tsx
+|   |   |   +-- image-generation-placeholder.tsx
+|   |   |   +-- keyboard-shortcuts.tsx
+|   |   |   +-- login-form.tsx
+|   |   |   +-- markdown-renderer.tsx
+|   |   |   +-- message-bubble.css
+|   |   |   +-- message-bubble.tsx
+|   |   |   +-- nav-main.tsx
+|   |   |   +-- nav-recents.tsx
+|   |   |   +-- nav-user.tsx
+|   |   |   +-- page-shell.tsx
+|   |   |   +-- prompt-input.css
+|   |   |   +-- prompt-input.tsx
+|   |   |   +-- provider-dialog.tsx
+|   |   |   +-- questionnaire-panel.tsx
+|   |   |   +-- reasoning-trace.tsx
+|   |   |   +-- rename-chat-dialog.tsx
+|   |   |   +-- schedule-dialog.tsx
+|   |   |   +-- signup-form.tsx
+|   |   |   +-- theme-provider.tsx
+|   |   |   +-- timeline-node.tsx
+|   |   |   +-- tool-timeline.tsx
+|   |   |   +-- wave-background.css
+|   |   |   +-- wave-background.tsx
+|   |   |   +-- workspace-badge.tsx
+|   |   |   +-- workspace-dialog.tsx
+|   |   +-- hooks/
+|   |   |   +-- use-mobile.ts
+|   |   +-- lib/
+|   |   |   +-- markdown/
+|   |   |   +-- voice/
+|   |   |   +-- agent-store.ts
+|   |   |   +-- api.ts
+|   |   |   +-- artifact-drag.ts
+|   |   |   +-- artifacts.ts
+|   |   |   +-- artifact-store.ts
+|   |   |   +-- attachments.ts
+|   |   |   +-- auth.ts
+|   |   |   +-- chat-store.ts
+|   |   |   +-- connector-icons.ts
+|   |   |   +-- connector-store.ts
+|   |   |   +-- crew-store.ts
+|   |   |   +-- model-store.ts
+|   |   |   +-- mode-store.ts
+|   |   |   +-- navigation.ts
+|   |   |   +-- panel-store.ts
+|   |   |   +-- provider-store.ts
+|   |   |   +-- questionnaire.ts
+|   |   |   +-- routes.ts
+|   |   |   +-- schedule-store.ts
+|   |   |   +-- session.ts
+|   |   |   +-- toast.ts
+|   |   |   +-- tool-registry.tsx
+|   |   |   +-- usage-store.ts
+|   |   |   +-- utils.ts
+|   |   |   +-- voice.ts
+|   |   |   +-- workspace-store.ts
+|   |   +-- routes/
+|   |   |   +-- __root.tsx
+|   |   |   +-- agents.tsx
+|   |   |   +-- agent-view.tsx
+|   |   |   +-- cal-live.tsx
+|   |   |   +-- chat.tsx
+|   |   |   +-- connectors.tsx
+|   |   |   +-- conversation.tsx
+|   |   |   +-- crew.tsx
+|   |   |   +-- index.tsx
+|   |   |   +-- login.tsx
+|   |   |   +-- providers.tsx
+|   |   |   +-- schedules.tsx
+|   |   |   +-- signup.tsx
+|   |   |   +-- usage.tsx
+|   |   |   +-- workspaces.tsx
+|   |   |   +-- workspace-view.tsx
+|   |   +-- types/
+|   |   |   +-- chat.ts
+|   |   +-- index.css
+|   |   +-- main.tsx
+|   |   +-- router.tsx
+|   |   +-- typeset.css
+|   |   +-- vite-env.d.ts
+|   +-- .env.desktop
+|   +-- .gitignore
+|   +-- .prettierignore
+|   +-- .prettierrc
+|   +-- components.json
+|   +-- eslint.config.js
+|   +-- index.html
+|   +-- package.json
+|   +-- package.json.md5
+|   +-- pnpm-workspace.yaml
+|   +-- README.md
+|   +-- tsconfig.app.json
+|   +-- tsconfig.json
+|   +-- tsconfig.node.json
+|   +-- vite.config.ts
++-- installer/
+|   +-- build-installer.ps1
+|   +-- Calabrass.iss
++-- MCP/
+|   +-- excel/
+|   |   +-- internal/
+|   |   |   +-- protocol/
+|   |   |   +-- tools/
+|   |   |   +-- workbook/
+|   |   +-- excel-mcp.exe
+|   |   +-- go.mod
+|   |   +-- go.sum
+|   |   +-- main.go
+|   |   +-- README.md
+|   +-- gmail/
+|   |   +-- internal/
+|   |   |   +-- gmail/
+|   |   |   +-- protocol/
+|   |   |   +-- tools/
+|   |   +-- gmail.exe
+|   |   +-- gmail-mcp.exe
+|   |   +-- gmail-mcp.exe~
+|   |   +-- go.mod
+|   |   +-- go.sum
+|   |   +-- main.go
+|   |   +-- README.md
+|   +-- win-control/
+|   |   +-- internal/
+|   |   |   +-- desktop/
+|   |   |   +-- protocol/
+|   |   |   +-- tools/
+|   |   |   +-- wininput/
+|   |   +-- go.mod
+|   |   +-- go.sum
+|   |   +-- main.go
+|   |   +-- README.md
+|   |   +-- win-control-mcp.exe
++-- npm-wrapper/
+|   +-- binaries/
+|   |   +-- calabrass-darwin-amd64/
+|   |   |   +-- calabrass-backend
+|   |   +-- calabrass-darwin-arm64/
+|   |   |   +-- calabrass-backend
+|   |   |   +-- calabrass-tui
+|   |   +-- calabrass-darwin-x64/
+|   |   |   +-- calabrass-backend
+|   |   |   +-- calabrass-tui
+|   |   +-- calabrass-linux-amd64/
+|   |   |   +-- calabrass-backend
+|   |   +-- calabrass-linux-arm64/
+|   |   |   +-- calabrass-backend
+|   |   |   +-- calabrass-tui
+|   |   +-- calabrass-linux-x64/
+|   |   |   +-- calabrass-backend
+|   |   |   +-- calabrass-tui
+|   |   +-- calabrass-win32-amd64/
+|   |   |   +-- calabrass-backend.exe
+|   |   +-- calabrass-win32-arm64/
+|   |   |   +-- calabrass-backend.exe
+|   |   |   +-- calabrass-tui.exe
+|   |   +-- calabrass-win32-x64/
+|   |   |   +-- calabrass-backend.exe
+|   |   |   +-- calabrass-tui.exe
+|   +-- scripts/
+|   |   +-- prepare.js
+|   +-- calabrass-1.0.7.tgz
+|   +-- package.json
+|   +-- README.md
+|   +-- test-cli.js
+|   +-- test-cli-commands.js
+|   +-- test-parse.js
+|   +-- test-race-fix.js
+|   +-- test-regression.js
++-- TUI/
+|   +-- internal/
+|   |   +-- api/
+|   |   |   +-- api_test.go
+|   |   |   +-- client.go
+|   |   |   +-- stream.go
+|   |   |   +-- types.go
+|   |   +-- session/
+|   |   |   +-- session.go
+|   |   |   +-- session_test.go
+|   |   +-- settings/
+|   |   |   +-- settings.go
+|   |   |   +-- settings_test.go
+|   +-- app.go
+|   +-- app_test.go
+|   +-- calabrass-tui.exe
+|   +-- card.go
+|   +-- chat.go
+|   +-- commands.go
+|   +-- copy.go
+|   +-- dialog.go
+|   +-- explore.go
+|   +-- footer.go
+|   +-- forms.go
+|   +-- go.mod
+|   +-- go.sum
+|   +-- home.go
+|   +-- list_dialog.go
+|   +-- main.go
+|   +-- markdown.go
+|   +-- message_bubble.go
+|   +-- panel.go
+|   +-- prompt_input.go
+|   +-- questions.go
+|   +-- quick.go
+|   +-- README.md
+|   +-- selection.go
+|   +-- slash_menu.go
+|   +-- spinner.go
+|   +-- timeline.go
+|   +-- toast.go
+|   +-- tool_node.go
+|   +-- trace_parts.go
+|   +-- turn.go
+|   +-- ui_features_test.go
+|   +-- update.go
++-- .gitignore
++-- build-all.ps1
++-- build-backend.ps1
++-- build-backend.sh
++-- dev.cmd
++-- dev.ps1
++-- homescreen.png
++-- LICENSE
++-- logo-preview.png
++-- model_free_tier_quotas.md
++-- README.md
++-- tree.txt

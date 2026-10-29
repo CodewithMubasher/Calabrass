@@ -209,6 +209,18 @@ func (m *Model) applyTurnEvent(te turnEvent) bool {
 			ts.mirror.setTrace(*ev.Trace)
 			m.rebuildLive(msg)
 		}
+	case api.EventApproval:
+		if ev.Approval != nil {
+			m.approval = ev.Approval
+		}
+	case api.EventApprovalResolved:
+		// Answered, here or from another face: the prompt goes away.
+		if ev.Approval != nil && m.approval != nil && m.approval.ID == ev.Approval.ID {
+			m.approval = nil
+			if m.list.IsOpen() && m.list.Kind == "approval" {
+				m.list.Close()
+			}
+		}
 	case api.EventDone:
 		ts.done = ev.Done
 	case api.EventError:
@@ -218,9 +230,40 @@ func (m *Model) applyTurnEvent(te turnEvent) bool {
 	return false
 }
 
+// showApproval puts the agent's question in front of the person. It is the
+// same list dialog the other pickers use: the agent is waiting, so there is no
+// way to dismiss it without answering, and it comes back if it is closed.
+func (m *Model) showApproval() tea.Cmd {
+	a := m.approval
+	if a == nil || m.list.IsOpen() {
+		return nil
+	}
+	items := []ListItem{{ID: api.AllowOnce, Title: "Allow once"}}
+	if a.CanRemember {
+		if a.Pattern != "" {
+			items = append(items, ListItem{ID: api.AllowPattern, Title: "Always allow \"" + a.Pattern + "\" here", Desc: "in this folder"})
+		}
+		items = append(items, ListItem{ID: api.AllowRun, Title: "Allow commands for this session", Desc: "asks again for anything riskier"})
+	}
+	items = append(items, ListItem{ID: api.Deny, Title: "Deny"})
+
+	title := "Allow?  " + a.Summary
+	if a.TierName != "" {
+		title += "  [" + a.TierName + "]"
+	}
+	cmd := m.list.Show("approval", title, items)
+	m.list.Empty = ""
+	m.list.HintLeft = "enter choose · the agent is waiting for you"
+	return cmd
+}
+
 // finishTurn settles the answer once the stream is over, however it ended.
 func (m *Model) finishTurn(msg *Message, endErr error) {
 	ts := m.turn
+	m.approval = nil // nothing is waiting once the turn is over
+	if m.list.IsOpen() && m.list.Kind == "approval" {
+		m.list.Close()
+	}
 	tr := ts.mirror.trace
 	interrupted := true
 	content := ""

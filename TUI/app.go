@@ -35,6 +35,9 @@ type modelsMsg struct {
 	providers []api.ProviderInfo
 	err       error
 }
+// approvalAnsweredMsg reports whether the answer to an approval got through.
+type approvalAnsweredMsg struct{ err error }
+
 type connectorsMsg struct {
 	list []api.Connector
 	err  error
@@ -136,6 +139,14 @@ func loadConnectorsCmd(c *api.Client) tea.Cmd {
 		defer cancel()
 		l, err := c.Connectors(ctx)
 		return connectorsMsg{list: l, err: err}
+	}
+}
+
+func decideApprovalCmd(c *api.Client, id, decision string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := withTimeout(20 * time.Second)
+		defer cancel()
+		return approvalAnsweredMsg{err: c.DecideApproval(ctx, id, decision)}
 	}
 }
 

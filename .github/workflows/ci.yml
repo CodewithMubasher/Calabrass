@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    # Windows too: parts of the agent harness and the connector tests are
+    # written for the Windows shell.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: Backend/go.sum
+      - name: Vet
+        working-directory: Backend
+        run: go vet ./internal/... ./cmd/...
+      - name: Test
+        working-directory: Backend
+        run: go test -race ./internal/... ./cmd/...
+      - name: Cross-build the host for every platform it ships on
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: Backend
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            GOOS=${t%/*} GOARCH=${t#*/} go build -o /dev/null ./cmd/server
+          done
+
+  tui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - working-directory: TUI
+        run: |
+          go vet ./...
+          go test ./...
+
+  launcher:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - working-directory: npm-wrapper
+        run: npm test
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - working-directory: Frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec tsc -b
+          pnpm run build

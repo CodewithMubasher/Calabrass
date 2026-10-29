@@ -20,6 +20,12 @@ const (
 	EventTrace     = "trace"     // the whole turn so far
 	EventDone      = "done"      // the stored assistant message
 	EventError     = "error"     // generation failed
+
+	// EventApproval is the agent asking permission for something that needs a
+	// person's say-so. EventApprovalResolved says it was answered, from here or
+	// from another face, and the prompt should go away.
+	EventApproval         = "approval"
+	EventApprovalResolved = "approval_resolved"
 )
 
 // Event is one decoded server-sent event.
@@ -30,6 +36,8 @@ type Event struct {
 	Text    string // token / reasoning delta, or the error message
 	Trace   *Trace
 	Done    *Done
+	// Approval is set for EventApproval and EventApprovalResolved.
+	Approval *Approval
 }
 
 // Send posts one user turn and delivers the streamed reply to emit, in order.
@@ -107,6 +115,12 @@ func decodeEvent(name, data string) (Event, bool) {
 			return ev, false
 		}
 		ev.Done = &d
+	case EventApproval, EventApprovalResolved:
+		var a Approval
+		if json.Unmarshal([]byte(data), &a) != nil || a.ID == "" {
+			return ev, false
+		}
+		ev.Approval = &a
 	case EventError:
 		var p struct {
 			Message string `json:"message"`

@@ -7,19 +7,36 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/ai"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/auth"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/config"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/connectors"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/host"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/httpapi"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/quota"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/secrets"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/version"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/webui"
 )
+
+// Options say how this host was started. The zero value is a plain server.
+type Options struct {
+	// Owner is what started the host (host.OwnerDaemon, OwnerDesktop,
+	// OwnerServer), which decides whether it outlives the window that opened it.
+	Owner string
+	// OnShutdown is called when the owner asks the host to stop.
+	OnShutdown func()
+	// NoWebUI leaves the web interface out, for a host that only serves the API.
+	NoWebUI bool
+}
 
 // App is a ready backend without an HTTP listener: the caller decides where it
 // listens, or mounts the handler somewhere else.
@@ -28,15 +45,60 @@ type App struct {
 	Store   *store.Store
 	Handler *httpapi.Server
 	pool    *connectors.Pool
+	// Host is what this host announces about itself. Its secret is what lets the
+	// machine owner sign in from the terminal without a password.
+	Host host.Info
+	// KeyBackend says where provider keys are protected.
+	KeyBackend string
 }
 
 // New opens the store and builds everything a turn, a schedule or the usage
 // page needs. A missing workspace folder, provider or quota file is logged and
 // tolerated; only a database that cannot be opened is fatal.
-func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error) {
+func New(ctx context.Context, cfg config.Config, log *slog.Logger, opts ...Options) (*App, error) {
+	var opt Options
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+
 	st, err := store.Open(cfg.DatabasePath)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
+	}
+
+	// Provider keys are sealed under a master key the operating system holds, so
+	// the database file alone is not enough to read them. A database from an
+	// older build has its keys sealed here, once.
+	keyBackend := "none: provider keys are stored unprotected"
+	if sealer, sealErr := secrets.New(filepath.Dir(cfg.DatabasePath)); sealErr != nil {
+		log.Error("provider keys are NOT protected: the system key store could not be used", "error", sealErr)
+	} else {
+		st.SetSealer(sealer)
+		keyBackend = sealer.Backend()
+		if n, migrateErr := st.SealLegacySecrets(ctx); migrateErr != nil {
+			log.Error("could not protect the provider keys already saved", "error", migrateErr)
+		} else if n > 0 {
+			log.Info("protected provider keys that were saved as plain text", "count", n, "keystore", keyBackend)
+		}
+	}
+
+	hostInfo := host.Info{
+		Addr:      cfg.Addr,
+		PID:       os.Getpid(),
+		Version:   version.Version,
+		Owner:     opt.Owner,
+		StartedAt: time.Now(),
+		Secret:    host.NewSecret(),
+	}
+	if hostInfo.Owner == "" {
+		hostInfo.Owner = host.OwnerServer
+	}
+
+	var webHandler http.Handler
+	if !opt.NoWebUI {
+		if site, ok := webui.Embedded(); ok {
+			webHandler = webui.Handler(site)
+		}
 	}
 
 	// Accounts live in the same database as the chats. Nothing is created here:
@@ -133,13 +195,21 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error)
 		Bundled:       connectors.BundledAt(mcpRoot),
 		Quotas:        quotas,
 		Logger:        log,
+		ListenAddr:    cfg.Addr,
+		PairingCode:   cfg.PairingCode,
+		HostInfo:      hostInfo,
+		WebUI:         webHandler,
+		KeyBackend:    keyBackend,
+		OnShutdown:    opt.OnShutdown,
 	})
 
 	return &App{
-		Config:  cfg,
-		Store:   st,
-		Handler: handler,
-		pool:    pool,
+		Config:     cfg,
+		Store:      st,
+		Handler:    handler,
+		pool:       pool,
+		Host:       hostInfo,
+		KeyBackend: keyBackend,
 	}, nil
 }
 

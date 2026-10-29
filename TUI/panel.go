@@ -97,6 +97,7 @@ type Model struct {
 	allChats     []api.Chat
 	sessionsAll  bool   // sessions list shows every folder
 	confirmDel   string // session id waiting for a second ctrl+d
+	approval     *api.Approval // the agent is waiting for a yes or a no on this
 	turn         *turnState
 	usageIn      int // tokens used by turns of this session
 	usageOut     int

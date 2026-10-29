@@ -51,6 +51,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case approvalAnsweredMsg:
+		if msg.err != nil {
+			return m, m.showToast("Could not send your answer: "+msg.err.Error(), true)
+		}
+		return m, nil
+
 	case connectorsMsg:
 		if msg.err != nil {
 			if m.list.IsOpen() && m.list.Kind == "mcps" {
@@ -217,7 +223,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if !finished {
-			return m, waitTurn(msg.ts)
+			// Computed first: it opens a dialog on m, and the return below copies m.
+			approvalCmd := m.showApproval()
+			return m, tea.Batch(waitTurn(msg.ts), approvalCmd)
 		}
 		return m, m.afterTurn()
 
@@ -236,7 +244,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.advanceSpinner()
-		return m, spinTick()
+		// A dialog closed with Esc while the agent still waits comes back.
+		approvalCmd := m.showApproval()
+		return m, tea.Batch(spinTick(), approvalCmd)
 
 	case toastMsg:
 		if msg.seq == m.toastSeq {
@@ -586,6 +596,13 @@ func (m Model) onPalette(id string) (tea.Model, tea.Cmd) {
 // onListSelect handles Enter on a dialog row.
 func (m Model) onListSelect(msg ListSelectMsg) (tea.Model, tea.Cmd) {
 	switch msg.Kind {
+	case "approval":
+		a := m.approval
+		if a == nil {
+			return m, nil
+		}
+		m.approval = nil
+		return m, decideApprovalCmd(m.app.client, a.ID, msg.Item.ID)
 	case "models":
 		provider, model, _ := strings.Cut(msg.Item.ID, "\x00")
 		m.selectModel(provider, model)

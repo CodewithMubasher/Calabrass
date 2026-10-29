@@ -18,6 +18,7 @@ import (
 	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/ai"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/crew"
+	"github.com/CodewithMubasher/Calabrass/backend/internal/permission"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
 )
 
@@ -172,7 +173,10 @@ func (s *Server) handleCrewDelegate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	report, err := s.delegateTask(r.Context(), user.ID, chatID, workspace.Root(), agent.DelegateTaskArgs{
+	// Nobody is streaming this request, but a person started it: what a worker
+	// needs approval for is listed for them at /api/approvals.
+	delegateCtx := permission.WithSession(r.Context(), s.interactiveSession(user.ID, chatID, workspace.Root(), nil))
+	report, err := s.delegateTask(delegateCtx, user.ID, chatID, workspace.Root(), agent.DelegateTaskArgs{
 		WorkerID: req.WorkerID,
 		Task:     req.Task,
 		Context:  req.Context,

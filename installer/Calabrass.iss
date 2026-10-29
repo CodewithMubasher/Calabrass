@@ -80,6 +80,10 @@ Name: "mcp"; Description: "Include the MCP servers (Excel and Windows control), 
 
 [Files]
 Source: "..\Backend\desktop\build\bin\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; The background host. Calabrass.exe starts it when no host is running, so
+; scheduled tasks keep running after the window closes; `calabrass-backend stop`
+; ends it.
+Source: "..\Backend\desktop\build\bin\calabrass-backend.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 ; Only the built servers ship. Their source, and every server the installer was
 ; not asked to include, stays in the repository.
@@ -88,11 +92,16 @@ Source: "..\MCP\win-control\win-control-mcp.exe"; DestDir: "{app}\MCP\win-contro
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
+Name: "{group}\Stop Calabrass in the background"; Filename: "{app}\calabrass-backend.exe"; Parameters: "stop"; Comment: "Stops the Calabrass host. Scheduled tasks stop with it."
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+; A host left running would hold its own files open and block their removal.
+Filename: "{app}\calabrass-backend.exe"; Parameters: "stop"; Flags: runhidden; RunOnceId: "StopCalabrassHost"
 
 [UninstallDelete]
 ; Setup removes the files it copied, but not a folder the servers filled in
