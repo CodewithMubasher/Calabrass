@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -167,15 +166,4 @@ func (s *Server) handleApprovalStream(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-}
-
-// logPermission is the audit trail: every decision at the Execute tier or
-// above, in the host's log. A run ledger the person can read is a later stage;
-// this makes sure the record exists from the first day.
-func (s *Server) logPermission(e permission.Entry) {
-	s.log.Info("permission",
-		"user", e.UserID, "chat", e.ChatID, "tool", e.Tool,
-		"tier", int(e.Tier), "outcome", e.Outcome,
-		"decision", string(e.Decision), "unattended", e.Unattended,
-		"action", fmt.Sprint(e.Summary))
 }

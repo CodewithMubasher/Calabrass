@@ -84,3 +84,36 @@ test("never starts a local host for an address on another machine", async () => 
 test("says so when there is no host and nothing to start one with", async () => {
   await assert.rejects(L.ensureHost({ dir: tmp(), backendBinary: "/does/not/exist", explicitAddr: "127.0.0.1:1" }), /no host binary/);
 });
+
+test("the launcher never writes to stdout while starting (stdout belongs to `cal run`)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "bin", "cal.js"), "utf8");
+  // Everything after the informational commands (--version, help, status, stop).
+  const main = src.slice(src.indexOf("if (!fs.existsSync(tuiBinary))"));
+  assert.ok(!/console\.log/.test(main), "console.log in the launch path would pollute a piped answer");
+});
+
+test("the first-run hint appears only when no model is ready", async () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, "host.json"), JSON.stringify({ addr: "127.0.0.1:1", secret: "s" }));
+  const reply = (providers) => async (addr, method, p) =>
+    p === "/api/auth/local" ? { status: 200, body: { token: "t" } } : { status: 200, body: { providers } };
+
+  const none = await L.modelSetupHint({ addr: "127.0.0.1:8787", dir, request: reply([{ id: "openai", enabled: false, hasKey: false, baseUrl: "https://api.openai.com/v1" }]) });
+  assert.match(none, /No model is set up yet/);
+  assert.match(none, /\/connect/);
+  assert.match(none, /CALABRASS_PROVIDER/);
+
+  assert.strictEqual(await L.modelSetupHint({ addr: "a:1", dir, request: reply([{ id: "groq", enabled: true, hasKey: true, baseUrl: "https://api.groq.com/openai/v1" }]) }), null);
+  // A local server needs no key.
+  assert.strictEqual(await L.modelSetupHint({ addr: "a:1", dir, request: reply([{ id: "ollama", enabled: true, hasKey: false, baseUrl: "http://localhost:11434/v1" }]) }), null);
+  // A provider that is on but has no key is not ready.
+  assert.match(await L.modelSetupHint({ addr: "a:1", dir, request: reply([{ id: "openai", enabled: true, hasKey: false, baseUrl: "https://api.openai.com/v1" }]) }), /No model/);
+});
+
+test("the first-run hint never breaks a launch", async () => {
+  assert.strictEqual(await L.modelSetupHint({ addr: "a:1", dir: tmp() }), null); // no host.json
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, "host.json"), JSON.stringify({ secret: "s" }));
+  assert.strictEqual(await L.modelSetupHint({ addr: "a:1", dir, request: async () => { throw new Error("boom"); } }), null);
+  assert.strictEqual(await L.modelSetupHint({ addr: "a:1", dir, request: async () => ({ status: 500, body: null }) }), null);
+});

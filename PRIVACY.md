@@ -22,6 +22,8 @@ Calabrass is an agent, so it has to talk to a model. These are the cases, and th
 | Voice audio from Cal Live | **Mistral or Groq**, whichever you configured, for transcription | Only while you use Cal Live |
 | Whatever a connector does | **Whatever service the connector talks to**: Gmail goes to Google, a web search goes to a search engine | Only when you add a connector and the agent uses it |
 
+The agent is also told, at the start of each turn in a folder, a one-line git summary of it (branch, whether there is uncommitted work, the last commit's subject). That goes to your model provider with the rest of the conversation.
+
 Two consequences worth knowing:
 
 - Anything the agent can read in your project, it may send to your model provider as part of working on it. Do not point it at a folder holding things you would not paste into that provider's chat window.
@@ -35,4 +37,5 @@ By default nothing but this machine can reach Calabrass. You can allow other dev
 
 - **Delete your data:** close Calabrass (`cal stop`) and delete the data folder.
 - **Reset what the agent is allowed to do without asking:** restart the host (`cal stop`, then start it again). Remembered approvals live in memory only.
-- **See what ran:** the host log (`host.log`, `desktop.log` in the data folder) records every command the agent asked to run, how it was decided, and who or what decided it.
+- **See what ran:** the **Ledger** page shows every command the agent asked to run, how it was decided, and how unattended runs ended. Credentials are removed before anything is written. The host log (`host.log`, `desktop.log`) records the same decisions.
+- Desktop notifications and dialogs are local: they are drawn by your own computer from what the host tells the window, and nothing about them leaves your machine.

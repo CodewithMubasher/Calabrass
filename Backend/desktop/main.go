@@ -62,6 +62,9 @@ type desktop struct {
 
 	ctx      context.Context // the window's, set at startup
 	startErr error
+
+	// stopHome ends Home Base (approval watching, run notices, the hotkey).
+	stopHome func()
 }
 
 func main() {
@@ -91,6 +94,8 @@ func main() {
 		OnStartup: func(ctx context.Context) {
 			d.ctx = ctx
 			if d.startErr == nil {
+				// Home Base is an extra: the window is already usable without it.
+				d.stopHome = d.startHomeBase(ctx)
 				return
 			}
 			_, _ = runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
@@ -106,7 +111,13 @@ func main() {
 			d.beforeClose(ctx)
 			return false
 		},
+		// Dropping a folder on the window opens a chat in it (see homebase.go).
+		DragAndDrop: &options.DragAndDrop{EnableFileDrop: true},
 		OnShutdown: func(ctx context.Context) {
+			if d.stopHome != nil {
+				d.stopHome()
+				d.stopHome = nil
+			}
 			d.stop()
 		},
 		SingleInstanceLock: &options.SingleInstanceLock{

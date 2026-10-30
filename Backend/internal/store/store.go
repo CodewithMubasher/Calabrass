@@ -283,6 +283,27 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
 
 CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_tasks(enabled, last_run_at, run_at);
 
+-- The run ledger: one row for every decision about something the agent wanted to
+-- do that needed trust (a command, an action outside the project, a connector
+-- call), and one for the outcome of every unattended run. It answers "what did
+-- the agent do while I was away?" and is written by the host, not by the model.
+-- Credentials in a command are removed before a row is written.
+CREATE TABLE IF NOT EXISTS ledger (
+	id         TEXT PRIMARY KEY,
+	user_id    TEXT NOT NULL,
+	at         INTEGER NOT NULL,
+	kind       TEXT NOT NULL DEFAULT 'action',
+	chat_id    TEXT NOT NULL DEFAULT '',
+	tool       TEXT NOT NULL DEFAULT '',
+	tier       INTEGER NOT NULL DEFAULT 0,
+	summary    TEXT NOT NULL DEFAULT '',
+	outcome    TEXT NOT NULL DEFAULT '',
+	decision   TEXT NOT NULL DEFAULT '',
+	unattended INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_ledger_user_at ON ledger(user_id, at DESC);
+
 -- One row per sub-agent: a named instruction, the mode it runs in, the MCP
 -- connector it may use, and the model it prefers with a fallback beside it.
 -- system_prompt is the explicit system prompt replacement; when empty, prompt is

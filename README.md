@@ -26,6 +26,8 @@ Calabrass is a **local-first, single-user AI assistant** that runs on your machi
 
 **One host, many faces.** One Calabrass host runs per machine and owns your data, keys, schedules and approvals. The desktop app, the terminal (`cal`) and the web page are all faces of it: they find the host that is already running and share it, so they show the same chats, providers and schedules.
 
+**Each face does what it is best at.** The *desktop app* is your home base: it tells you when the agent is waiting on you or a scheduled run finishes, even with the window minimised; drop a folder on it to work in that folder; `Ctrl+Alt+Space` brings it to the front (Windows). The *terminal* is your workbench: folder-native, scriptable, works over SSH. The *web page* is your control room: the **Ledger** shows what the agent did while you were away, with credentials removed.
+
 **The agent asks before it acts.** It reads and edits files in your project freely. It asks before it runs a command, before it reaches outside the project, and before anything that affects the outside world. See [How permissions work](docs/PERMISSIONS.md).
 
 ## 📸 Screenshots
@@ -119,6 +121,17 @@ so scheduled tasks still happen.
 cal status      # is the host running, and who started it
 cal stop        # stop it (scheduled tasks stop with it)
 ```
+
+### Scripts and CI: `cal run`
+
+One task, no screen. The answer goes to stdout, progress to stderr, and the exit code says how it ended:
+
+```bash
+git diff | cal run "write a commit message for this"
+cal run "make the failing tests pass" --allow "npm test"
+```
+
+It can read and edit files in the folder and run only the commands you `--allow`; it exits `3` if it needed something it was not given. See [Using Calabrass in scripts and CI](docs/CI.md).
 
 If you used an earlier version, `cal` keeps using the separate account it made
 for itself, so your old terminal sessions stay visible. To switch to the owner

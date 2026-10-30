@@ -11,6 +11,7 @@ import { Route as agentsRoute } from "@/routes/agents"
 import { Route as schedulesRoute } from "@/routes/schedules"
 import { Route as providersRoute } from "@/routes/providers"
 import { Route as usageRoute } from "@/routes/usage"
+import { Route as ledgerRoute } from "@/routes/ledger"
 import { Route as calLiveRoute } from "@/routes/cal-live"
 import { Route as chatRoute } from "@/routes/chat"
 import { Route as crewRoute } from "@/routes/crew"
@@ -29,6 +30,7 @@ const routeTree = rootRoute.addChildren([
   schedulesRoute,
   providersRoute,
   usageRoute,
+  ledgerRoute,
 ])
 
 export const router = createRouter({

@@ -395,3 +395,22 @@ export interface UsageSnapshot {
   /** When the backend assembled the snapshot, in Unix milliseconds. */
   generatedAt: number
 }
+
+/** One line of the run ledger: something the agent wanted to do that needed trust. */
+export interface LedgerEntry {
+  id: string
+  /** When it happened, in milliseconds. */
+  at: number
+  /** "action" is one decision; "run" is how an unattended run ended. */
+  kind: "action" | "run"
+  chatId: string
+  tool: string
+  /** 2 run a command · 3 reach outside the project · 4 act on the outside world */
+  tier: number
+  summary: string
+  /** allowed, remembered, approved, refused, unattended-refused, timed-out, completed, failed, missed */
+  outcome: string
+  decision?: string
+  /** True when nobody was watching. */
+  unattended: boolean
+}

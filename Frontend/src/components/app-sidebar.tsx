@@ -5,6 +5,7 @@ import {
   AiSpeechIcon,
   ApertureIcon,
   ChartRelationshipIcon,
+  File02Icon,
   Folder01Icon,
   PieChartIcon,
   ThreeDScaleIcon,
@@ -67,6 +68,11 @@ const data = {
       title: "Usage",
       to: "/usage",
       icon: PieChartIcon,
+    },
+    {
+      title: "Ledger",
+      to: "/ledger",
+      icon: File02Icon,
     },
   ] as NavItem[],
 }

@@ -1,4 +1,5 @@
 import type {
+  LedgerEntry,
   Approval,
   ApprovalDecision,
   AgentInput,
@@ -188,6 +189,13 @@ export const api = {
   getChat: (chatId: string) =>
     request<{ chat: ChatDetail }>(`/chats/${chatId}`).then((r) => r.chat),
 
+  /** Start a chat that works in a folder on this computer (dropped on the desktop window). */
+  createChatInFolder: (workspacePath: string) =>
+    request<{ chat: Chat }>("/chats", {
+      method: "POST",
+      body: JSON.stringify({ workspacePath }),
+    }).then((r) => r.chat),
+
   createChat: (selection?: ModelSelection | null, workspaceId?: string, agentId?: string, mode?: ChatMode) =>
     request<{ chat: Chat }>("/chats", {
       method: "POST",
@@ -293,6 +301,17 @@ export const api = {
     if (token) params.set("access_token", token)
     const query = params.toString()
     return `${BASE}/schedules/stream${query ? `?${query}` : ""}`
+  },
+
+  /** What the agent did that needed trust, newest first. */
+  listLedger: (query: { before?: number; limit?: number; unattended?: boolean; refused?: boolean } = {}) => {
+    const params = new URLSearchParams()
+    if (query.before) params.set("before", String(query.before))
+    if (query.limit) params.set("limit", String(query.limit))
+    if (query.unattended) params.set("unattended", "1")
+    if (query.refused) params.set("refused", "1")
+    const qs = params.toString()
+    return request<{ entries: LedgerEntry[] }>(`/ledger${qs ? `?${qs}` : ""}`).then((r) => r.entries ?? [])
   },
 
   /** What the agent is waiting on a person to allow. */

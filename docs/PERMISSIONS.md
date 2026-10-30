@@ -31,6 +31,14 @@ A scheduled task has no one to ask, so it runs inside a **scope you write when y
 
 **The scope is set by you, never by the model.** A task the agent books for you gets the default scope (files only, no commands); you can widen it on the Schedules page.
 
+## The ledger
+
+Every decision at tier 2 or above, and how every unattended run ended, is written to the **run ledger** (the Ledger page in the app, `GET /api/ledger`). It answers "what did the agent do while I was away?": what it asked to do, whether you allowed it, a pre-approved scope allowed it, or it was refused. Credentials in a command (`--token ...`, `Authorization: Bearer ...`, `PASSWORD=...`, keys in URLs, well-known token shapes) are removed before a row is written. The newest 5,000 rows are kept.
+
+## Headless runs
+
+`cal run` is an unattended run whose scope comes from `--allow` flags (see [CI](CI.md)). It follows exactly the rules above: tiers 0 and 1, plus the commands you listed, and nothing else.
+
 ## What this does *not* do
 
 Be honest about the limits:

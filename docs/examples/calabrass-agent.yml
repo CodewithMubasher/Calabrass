@@ -1,0 +1,71 @@
+# Two ways to use `cal run` in GitHub Actions. Copy to .github/workflows/ and adjust.
+#
+# Add a repository secret named GROQ_API_KEY (or change the provider below).
+# The agent can only read and edit files in the checkout, and run only what is
+# listed with --allow. It cannot push, publish or reach outside the workspace.
+
+name: Calabrass agent
+
+on:
+  pull_request:
+
+env:
+  CALABRASS_PROVIDER: groq
+  CALABRASS_API_KEY: ${{ secrets.GROQ_API_KEY }}
+  CALABRASS_MODEL: llama-3.3-70b-versatile
+
+jobs:
+  review:
+    name: Review the diff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install -g calabrass
+
+      - name: Review
+        run: |
+          git diff "origin/${{ github.base_ref }}...HEAD" \
+            | cal run "Review this diff. List real bugs and risky changes only, most serious first. Say so if it looks fine." -q \
+            > review.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: review
+          path: review.md
+
+  fix-tests:
+    name: Try to fix failing tests
+    runs-on: ubuntu-latest
+    # Only when the tests actually fail, so the agent is not run for nothing.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - run: npm install -g calabrass
+
+      - name: Run the tests
+        id: tests
+        continue-on-error: true
+        run: npm test
+
+      - name: Ask the agent to fix them
+        if: steps.tests.outcome == 'failure'
+        run: |
+          set +e
+          cal run "The tests are failing. Find the cause and fix it. Run the tests to check." \
+            --allow "npm test" --timeout 20m
+          code=$?
+          # 3 means it needed a command we did not pre-approve: report it, do not fail the job.
+          if [ "$code" -eq 3 ]; then echo "::warning::The agent needed a command that was not pre-approved."; exit 0; fi
+          exit "$code"
+
+      - name: Show what it changed
+        if: steps.tests.outcome == 'failure'
+        run: git diff --stat

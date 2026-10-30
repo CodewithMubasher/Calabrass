@@ -199,6 +199,11 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 	}
 	// Scan project map fresh each run (depth 2)
 	projectMap := agent.ScanProjectMap(ctx, workspace.Root()).ProjectMapString()
+	// Where the tree stands in git, so the agent starts from the real state and
+	// does not mistake the user's unfinished work for its own.
+	if snapshot := agent.GitSnapshot(ctx, workspace.Root()); snapshot != "" {
+		projectMap = strings.TrimRight(projectMap, "\n") + "\n" + snapshot + "\n"
+	}
 	return turnSetup{system: agent.SystemPrompt(workspace, systemPrompt, described, mode, projectMap), tools: tools, origins: origins, runState: runState, mode: mode}
 }
 

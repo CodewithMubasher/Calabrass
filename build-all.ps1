@@ -20,7 +20,11 @@ param(
     [switch]$SkipBackend,
     [switch]$SkipMcp,
     [switch]$SkipInstaller,
-    [switch]$NoCopy
+    [switch]$NoCopy,
+    # Sign every program and the installer. Needs a code-signing certificate, given
+    # in the environment (see "Signing" below). A build asked to sign that cannot
+    # fails; it never quietly ships unsigned.
+    [switch]$Sign
 )
 
 $ErrorActionPreference = "Stop"
@@ -73,6 +77,45 @@ if (-not $ISCC) {
     exit 1
 }
 Write-Host "  ISCC:    $ISCC"
+
+# --- Signing -----------------------------------------------------------------
+# An unsigned installer shows Windows SmartScreen's "unknown publisher" warning,
+# which is a poor first impression for a program that can act on your computer.
+# Give signtool one certificate, either:
+#   CALABRASS_SIGN_PFX + CALABRASS_SIGN_PFX_PASSWORD   a .pfx file and its password
+#   CALABRASS_SIGN_THUMBPRINT                          a certificate in the Windows store
+# and optionally CALABRASS_SIGN_TIMESTAMP (default: DigiCert's timestamp server).
+$script:SignArgs = $null
+$script:SignTool = $null
+if ($Sign) {
+    $script:SignTool = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+        Sort-Object FullName -Descending | Select-Object -First 1).FullName
+    if (-not $script:SignTool) { $script:SignTool = (Get-Command signtool -ErrorAction SilentlyContinue).Source }
+    if (-not $script:SignTool) { Write-Error "-Sign needs signtool.exe (Windows SDK)."; exit 1 }
+
+    $timestamp = if ($env:CALABRASS_SIGN_TIMESTAMP) { $env:CALABRASS_SIGN_TIMESTAMP } else { "http://timestamp.digicert.com" }
+    if ($env:CALABRASS_SIGN_PFX) {
+        if (-not (Test-Path $env:CALABRASS_SIGN_PFX)) { Write-Error "CALABRASS_SIGN_PFX does not exist."; exit 1 }
+        $script:SignArgs = @("sign", "/fd", "SHA256", "/tr", $timestamp, "/td", "SHA256", "/f", $env:CALABRASS_SIGN_PFX, "/p", $env:CALABRASS_SIGN_PFX_PASSWORD)
+    } elseif ($env:CALABRASS_SIGN_THUMBPRINT) {
+        $script:SignArgs = @("sign", "/fd", "SHA256", "/tr", $timestamp, "/td", "SHA256", "/sha1", $env:CALABRASS_SIGN_THUMBPRINT)
+    } else {
+        Write-Error "-Sign needs CALABRASS_SIGN_PFX (+ CALABRASS_SIGN_PFX_PASSWORD) or CALABRASS_SIGN_THUMBPRINT."
+        exit 1
+    }
+    Write-Host "  Signing: $($script:SignTool)"
+}
+
+function Sign-Files([string[]]$Paths) {
+    if (-not $script:SignArgs) { return }
+    foreach ($path in $Paths) {
+        if (-not (Test-Path $path)) { continue }
+        & $script:SignTool @script:SignArgs $path
+        if ($LASTEXITCODE -ne 0) { Write-Error "Signing failed: $path"; exit 1 }
+        & $script:SignTool verify /pa $path | Out-Null
+        if ($LASTEXITCODE -ne 0) { Write-Error "Signature did not verify: $path"; exit 1 }
+    }
+}
 
 $goVer = (go version)
 $pnpmVer = (pnpm --version)
@@ -138,7 +181,22 @@ if (-not $SkipInstaller) {
     Write-Step "Installer: Inno Setup"
     $iss = $issPath
     if (-not (Test-Path $iss)) { Write-Error "Missing $iss"; exit 1 }
-    & $ISCC $iss
+
+    # Sign the programs first, so the installer carries signed files, then let
+    # Inno Setup sign the installer and its uninstaller.
+    Sign-Files @(
+        (Join-Path $repoRoot "Backend\desktop\build\bin\Calabrass.exe"),
+        (Join-Path $repoRoot "Backend\desktop\build\bin\calabrass-backend.exe"),
+        (Join-Path $repoRoot "MCP\excel\excel-mcp.exe"),
+        (Join-Path $repoRoot "MCP\win-control\win-control-mcp.exe")
+    )
+    if ($script:SignArgs) {
+        $quotedArgs = ($script:SignArgs | ForEach-Object { if ($_ -match "\s") { "`"$_`"" } else { $_ } }) -join " "
+        & $ISCC "/DSign" "/Scalabrass=`"$($script:SignTool)`" $quotedArgs `$f" $iss
+    } else {
+        & $ISCC $iss
+    }
+    if ($LASTEXITCODE -ne 0) { Write-Error "Inno Setup failed."; exit 1 }
 }
 
 if (Test-Path $setupSrc) {

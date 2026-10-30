@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"calabrass-tui/internal/api"
+	"calabrass-tui/internal/headless"
 	"calabrass-tui/internal/settings"
 )
 
@@ -30,6 +31,11 @@ var (
 )
 
 func main() {
+	// `cal run ...` is the headless mode: one task, no screen, for scripts and CI.
+	if len(os.Args) > 1 && os.Args[1] == "run" {
+		os.Exit(headless.Main(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
+
 	addr := flag.String("addr", "", "backend address (default: $CALABRASS_ADDR, the saved one, or "+api.DefaultAddr+")")
 	cont := flag.Bool("c", false, "continue the latest session of this folder")
 	flag.BoolVar(cont, "continue", false, "continue the latest session of this folder")

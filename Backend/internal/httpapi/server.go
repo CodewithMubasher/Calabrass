@@ -167,7 +167,7 @@ func NewServer(deps Deps) *Server {
 		pairingOn:     strings.TrimSpace(deps.PairingCode) != "",
 		onShutdown:    deps.OnShutdown,
 	}
-	s.broker.Audit = s.logPermission
+	s.broker.Audit = s.recordPermission
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.handleHealth)
@@ -178,6 +178,7 @@ func NewServer(deps Deps) *Server {
 	mux.HandleFunc("POST /api/auth/logout", s.handleSignOut)
 	mux.HandleFunc("GET /api/host", s.handleHostInfo)
 	mux.HandleFunc("POST /api/host/shutdown", s.handleHostShutdown)
+	mux.HandleFunc("GET /api/ledger", s.handleListLedger)
 	mux.HandleFunc("GET /api/approvals", s.handleListApprovals)
 	mux.HandleFunc("GET /api/approvals/stream", s.handleApprovalStream)
 	mux.HandleFunc("DELETE /api/approvals/remembered", s.handleForgetApprovals)

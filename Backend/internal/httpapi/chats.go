@@ -365,6 +365,13 @@ type sendRequest struct {
 	// Regenerate drops the trailing assistant reply and writes a new one from
 	// the same user turn, instead of storing a second user message.
 	Regenerate bool `json:"regenerate"`
+	// Unattended says nobody is watching this turn: it is a script, a pipeline
+	// or `cal run`. Nothing is put to a person for approval; the turn runs
+	// inside Scope instead, and anything beyond it is refused and reported.
+	Unattended bool `json:"unattended"`
+	// Scope is what an unattended turn may do. Empty means the default: read and
+	// edit files in the project and run nothing.
+	Scope *permission.Scope `json:"scope"`
 }
 
 // deltaPayload carries one incremental chunk of either answer text or
@@ -642,7 +649,17 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	// project, and the machine the connectors reach — and the tools it may call.
 	// A person is watching this turn, so what needs their say-so is put to them
 	// on this very stream, and can be answered from any other face as well.
-	turnCtx := permission.WithSession(ctx, s.interactiveSession(user.ID, chatID, "", stream))
+	var session *permission.Session
+	if req.Unattended {
+		scope := permission.DefaultScope()
+		if req.Scope != nil {
+			scope = req.Scope.Normalized()
+		}
+		session = s.unattendedSession(user.ID, chatID, "", scope)
+	} else {
+		session = s.interactiveSession(user.ID, chatID, "", stream)
+	}
+	turnCtx := permission.WithSession(ctx, session)
 	setup := s.setupTurnFor(turnCtx, user.ID, s.workspaceForUser(user.ID, chat.Chat), chatID, chat.AgentID)
 
 	started := time.Now()
@@ -742,10 +759,31 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if req.Unattended {
+		outcome := "completed"
+		if genErr != nil {
+			outcome = "failed"
+		}
+		s.writeLedger(store.LedgerEntry{
+			UserID: user.ID, Kind: "run", ChatID: chatID, Tool: "run",
+			Summary: "Headless run: " + clipText(req.Content, 120), Outcome: outcome, Unattended: true,
+		})
+	}
+
 	if genErr != nil {
 		s.log.Warn("generation failed", "chat", chatID, "provider", providerID, "model", modelID, "error", genErr)
 		_ = stream.event("error", errorPayload{Message: genErr.Error()})
 	}
+}
+
+// clipText shortens s to n characters for a one-line record.
+func clipText(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 // resolveModel picks the provider/model for the shipped admin account. Handlers

@@ -189,6 +189,17 @@ type SendRequest struct {
 	Provider   string `json:"provider,omitempty"`
 	Model      string `json:"model,omitempty"`
 	Regenerate bool   `json:"regenerate,omitempty"`
+	// Unattended says nobody is watching: nothing is put to a person for
+	// approval, and the turn runs inside Scope.
+	Unattended bool       `json:"unattended,omitempty"`
+	Scope      *TaskScope `json:"scope,omitempty"`
+}
+
+// TaskScope is what an unattended turn may do, beyond reading and editing files
+// in the project. Only a person sets it.
+type TaskScope struct {
+	MaxTier  int      `json:"maxTier"`
+	Commands []string `json:"commands,omitempty"`
 }
 
 // ScheduledTask is one instruction the scheduler will run, once, at a time of its own.

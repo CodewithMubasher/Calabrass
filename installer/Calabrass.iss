@@ -21,6 +21,12 @@
 #define AppId "{{1D7CF26E-0CB4-474A-975D-893EDDEEB779}"
 
 [Setup]
+; Signing is on only when the build asks for it (ISCC /DSign /Scalabrass=...).
+; See build-all.ps1 -Sign.
+#ifdef Sign
+SignTool=calabrass
+SignedUninstaller=yes
+#endif
 AppId={#AppId}
 AppName={#AppName}
 AppVersion={#AppVersion}

@@ -127,4 +127,63 @@ async function ensureHost({ explicitAddr = "", dir, backendBinary, spawnFn = spa
   throw new Error(`the Calabrass host did not start within ${Math.round(timeoutMs / 1000)}s. See ${path.join(dir, "host.log")}`);
 }
 
-module.exports = { DEFAULT_ADDR, COMMANDS, dataDir, readHostFile, isLoopback, addrFromArgs, parseArgs, healthy, ensureHost, spawn };
+// One small JSON request to the host. Resolves { status, body }, never throws.
+function requestJSON(addr, method, urlPath, { headers = {}, body, timeoutMs = 3000 } = {}) {
+  return new Promise((resolve) => {
+    const payload = body === undefined ? null : JSON.stringify(body);
+    const req = http.request(
+      {
+        host: addr.replace(/:\d+$/, "").replace(/^\[|\]$/g, ""),
+        port: Number(addr.split(":").pop()),
+        path: urlPath,
+        method,
+        timeout: timeoutMs,
+        headers: { ...headers, ...(payload ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } : {}) },
+      },
+      (res) => {
+        let text = "";
+        res.on("data", (d) => (text += d));
+        res.on("end", () => {
+          let parsed = null;
+          try { parsed = JSON.parse(text); } catch { /* not JSON */ }
+          resolve({ status: res.statusCode, body: parsed });
+        });
+      },
+    );
+    req.on("timeout", () => { req.destroy(); resolve({ status: 0, body: null }); });
+    req.on("error", () => resolve({ status: 0, body: null }));
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+// The first thing a new person needs is a model. When none is set up, this says
+// so before the terminal UI opens, and says what to do. It returns the message,
+// or null when a model is ready or when it cannot tell: it must never block or
+// break a launch, so every failure is "no hint".
+async function modelSetupHint({ addr, dir, request = requestJSON }) {
+  try {
+    const info = readHostFile(dir);
+    if (!info || !info.secret) return null;
+    const signedIn = await request(addr, "POST", "/api/auth/local", { body: { secret: info.secret, create: true } });
+    if (signedIn.status !== 200 || !signedIn.body || !signedIn.body.token) return null;
+    const list = await request(addr, "GET", "/api/providers", { headers: { Authorization: "Bearer " + signedIn.body.token } });
+    if (list.status !== 200 || !list.body || !Array.isArray(list.body.providers)) return null;
+
+    // Ready means a provider is on and either has a key or is a server on this
+    // machine (Ollama, vLLM), which takes none.
+    const ready = list.body.providers.some((p) => p.enabled && (p.hasKey || isLoopback(String(p.baseUrl || "").replace(/^https?:\/\//, "").replace(/\/.*$/, ""))));
+    if (ready) return null;
+    return [
+      "No model is set up yet, so there is nothing for the agent to talk to.",
+      "  - In this terminal: type /connect, pick a provider and paste its API key.",
+      "  - Or in a browser:   http://" + addr + "/providers",
+      "  - Or for scripts/CI: CALABRASS_PROVIDER=openai CALABRASS_API_KEY=... cal run \"...\"",
+      "Free tiers are listed in the README. A local server (Ollama) needs no key.",
+    ].join("\n");
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { DEFAULT_ADDR, COMMANDS, dataDir, readHostFile, isLoopback, addrFromArgs, parseArgs, healthy, ensureHost, requestJSON, modelSetupHint, spawn };

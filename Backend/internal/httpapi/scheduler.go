@@ -198,6 +198,20 @@ func (s *Server) recordRun(ctx context.Context, task store.ScheduledTask, status
 	); err != nil {
 		s.log.Error("could not record a scheduled run", "task", task.ID, "error", err)
 	}
+
+	// The ledger is where a person finds out what happened while they were away.
+	outcome := map[string]string{"ok": "completed", "error": "failed", "missed": "missed"}[status]
+	if outcome == "" {
+		outcome = status
+	}
+	summary := "Scheduled task: " + clipText(task.Prompt, 120)
+	if message != "" && status != "ok" {
+		summary += " (" + clipText(message, 100) + ")"
+	}
+	s.writeLedger(store.LedgerEntry{
+		UserID: task.UserID, Kind: "run", ChatID: task.ChatID, Tool: "scheduled task",
+		Summary: summary, Outcome: outcome, Unattended: true,
+	})
 }
 
 func statusFor(err error) string {

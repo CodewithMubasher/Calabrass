@@ -32,6 +32,8 @@ Terminal client for Calabrass — the open source personal AI agent.
 
 Usage:
   cal [flags]                 Open the terminal UI (starts the host if needed)
+  cal run "<task>" [flags]    Run one task and exit: for scripts, pipes and CI
+                              (see: cal run --help)
   cal status                  Show whether the Calabrass host is running
   cal stop                    Stop the host (scheduled tasks stop with it)
   cal --version, -v           Show the version
@@ -50,7 +52,8 @@ Closing the terminal leaves the host running, so scheduled tasks still happen;
 'cal stop' ends it.
 
 The agent asks before it runs commands. Answer in the terminal, or from any
-other open Calabrass window.
+other open Calabrass window. 'cal run' has nobody to ask, so it runs only the
+commands you pre-approve with --allow, and exits 3 if it needed more.
 
 Reaching a host on another machine needs its pairing code:
   CALABRASS_PAIRING_CODE=... on the host, and the same code in this terminal's
@@ -105,14 +108,22 @@ async function main() {
       explicitAddr: launcher.addrFromArgs(args),
       dir: launcher.dataDir(),
       backendBinary,
-      log: (m) => console.log("calabrass: " + m),
+      log: (m) => console.error("calabrass: " + m),
     });
   } catch (err) {
     console.error("calabrass: " + err.message);
     process.exit(1);
   }
   if (host.started) {
-    console.log("calabrass: the host keeps running after you close this terminal, so scheduled tasks still happen. Stop it with: cal stop");
+    // stderr, not stdout: `cal run` is piped, and the answer is all stdout may carry.
+    console.error("calabrass: the host keeps running after you close this terminal, so scheduled tasks still happen. Stop it with: cal stop");
+  }
+
+  // First run: tell a person with no model what to do, before the screen opens.
+  // Only for the interactive UI; `cal run` reports it through its exit code.
+  if (args[0] !== "run" && process.stderr.isTTY) {
+    const hint = await launcher.modelSetupHint({ addr: host.addr, dir: launcher.dataDir() });
+    if (hint) console.error("\ncalabrass: " + hint.split("\n").join("\ncalabrass: ") + "\n");
   }
 
   const tui = spawn(tuiBinary, args, {

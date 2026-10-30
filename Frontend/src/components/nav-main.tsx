@@ -19,6 +19,7 @@ export type NavTo =
   | "/schedules"
   | "/providers"
   | "/usage"
+  | "/ledger"
 
 export interface NavItem {
   title: string
