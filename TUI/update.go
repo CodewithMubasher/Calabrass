@@ -574,6 +574,20 @@ func (m *Model) submit(text string) tea.Cmd {
 	return m.startTurn(text, false)
 }
 
+// isGroupStart reports whether parts[i] is the first part of a folded row.
+// renderTimeline folds a run of thoughts/edits/tools into one row, and a run of
+// read/search/list calls into its own "Explored" row; the open/closed state is
+// stored on the first part of each run, so toggling must use the same edges.
+func isGroupStart(parts []Part, i int) bool {
+	if parts[i].Kind == PartText {
+		return false
+	}
+	if i == 0 || parts[i-1].Kind == PartText {
+		return true
+	}
+	return isExplore(parts[i-1]) != isExplore(parts[i])
+}
+
 // toggleRows opens every folded row, or closes them all when all are open.
 func (m *Model) toggleRows() {
 	allOpen := true
@@ -581,9 +595,10 @@ func (m *Model) toggleRows() {
 		for mi := range m.messages {
 			msg := &m.messages[mi]
 			for i := range msg.Parts {
-				if msg.Parts[i].Kind != PartText && (i == 0 || msg.Parts[i-1].Kind == PartText) {
-					f(msg, i)
+				if !isGroupStart(msg.Parts, i) {
+					continue
 				}
+				f(msg, i)
 			}
 		}
 	}

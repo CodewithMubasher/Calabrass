@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -141,8 +142,12 @@ func TestASuccessfulRunPutsTheAnswerOnStdoutAndProgressOnStderr(t *testing.T) {
 	if !h.sent.Unattended || h.sent.Scope == nil || h.sent.Scope.MaxTier != 2 || h.sent.Scope.Commands[0] != "go test *" {
 		t.Fatalf("request = %+v scope=%+v", h.sent, h.sent.Scope)
 	}
-	if h.created.WorkspacePath != "/work" {
-		t.Fatalf("workspace = %q", h.created.WorkspacePath)
+	wantDir, err := filepath.Abs("/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.created.WorkspacePath != wantDir {
+		t.Fatalf("workspace = %q, want %q", h.created.WorkspacePath, wantDir)
 	}
 }
 

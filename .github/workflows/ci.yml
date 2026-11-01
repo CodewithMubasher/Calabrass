@@ -43,6 +43,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
+          cache-dependency-path: TUI/go.sum
       - working-directory: TUI
         run: |
           go vet ./...
