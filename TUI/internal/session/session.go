@@ -26,14 +26,39 @@ const (
 // ErrUnreachable means the backend did not answer at all.
 type ErrUnreachable struct{ Err error }
 
-func (e *ErrUnreachable) Error() string { return e.Err.Error() }
+func (e *ErrUnreachable) Error() string { return api.Explain(e.Err) }
 func (e *ErrUnreachable) Unwrap() error { return e.Err }
+
+// EnvToken carries the token of a paired device. `cal` sets it when this machine
+// is paired with a host somewhere else.
+const EnvToken = "CALABRASS_TOKEN"
+
+// ErrNotPaired means the host no longer accepts this device: it was removed
+// there, or its pairing ran out. Trying again would not help; pairing again does.
+var ErrNotPaired = errors.New("this device is no longer paired with the host. Pair it again: cal connect <address> <code>  (or cal disconnect to use this machine's own host)")
 
 // Ensure leaves c with a working token and returns the account. It updates st
 // (the caller saves it) when it signs in or creates the local account.
 func Ensure(ctx context.Context, c *api.Client, st *settings.Settings) (api.User, error) {
 	if err := c.Health(ctx); err != nil {
 		return api.User{}, &ErrUnreachable{Err: err}
+	}
+
+	// 0. This terminal is a paired device of a host on another machine, and `cal`
+	//    gave it that device's token. It is used as it is and never written to this
+	//    terminal's settings, so removing the device on the host ends it everywhere.
+	if token := strings.TrimSpace(os.Getenv(EnvToken)); token != "" {
+		c.Token = token
+		user, err := c.Me(ctx)
+		if err == nil {
+			return user, nil
+		}
+		c.Token = ""
+		var ae *api.APIError
+		if errors.As(err, &ae) && (ae.Status == 401 || ae.Status == 403) {
+			return api.User{}, ErrNotPaired
+		}
+		return api.User{}, wrap(err)
 	}
 
 	// 1. A saved token that still works.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"calabrass-tui/internal/api"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,7 +48,7 @@ func (m *Model) runCommand(name, args string) tea.Cmd {
 	case "/cd":
 		path, err := resolveDir(m.cwdPath, args)
 		if err != nil {
-			m.notice(err.Error(), true)
+			m.notice(api.Explain(err), true)
 			return nil
 		}
 		id := ""
@@ -81,7 +82,7 @@ func (m *Model) runCommand(name, args string) tea.Cmd {
 	case "/export":
 		path, err := m.exportSession(args)
 		if err != nil {
-			m.notice("Export failed: "+err.Error(), true)
+			m.notice("Export failed: "+api.Explain(err), true)
 		} else {
 			m.notice("Saved "+path, false)
 		}

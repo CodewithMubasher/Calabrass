@@ -31,6 +31,7 @@ func (s *Server) handleHostInfo(w http.ResponseWriter, r *http.Request) {
 		"webUI":      s.webUI != nil,
 		"keyStorage": s.keyBackend,
 		"pairing":    s.pairingOn,
+		"remote":     s.remoteOn,
 		"time":       time.Now(),
 	})
 }

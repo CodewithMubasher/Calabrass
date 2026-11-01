@@ -3,10 +3,12 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"calabrass-tui/internal/api"
@@ -103,5 +105,54 @@ func TestNoHostFileMeansTheOldBehaviour(t *testing.T) {
 	}
 	if signups != 1 {
 		t.Fatalf("signups = %d", signups)
+	}
+}
+
+// pairedBackend answers like a host that only knows one device token.
+func pairedBackend(t *testing.T, goodToken string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`{"status":"ok"}`)) })
+	mux.HandleFunc("GET /api/auth/me", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+goodToken {
+			// A removed device is refused by the network guard, before sign-in.
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":"this Calabrass only accepts paired devices"}`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"user": api.User{ID: "owner", Email: "o@x"}})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestAPairedDeviceUsesItsTokenAndSavesNothing(t *testing.T) {
+	t.Setenv(EnvToken, "device-token")
+	t.Setenv("CALABRASS_DATA_DIR", t.TempDir())
+	srv := pairedBackend(t, "device-token")
+
+	c := api.New(srv.URL)
+	st := &settings.Settings{}
+	user, err := Ensure(context.Background(), c, st)
+	if err != nil || user.ID != "owner" {
+		t.Fatalf("%+v %v", user, err)
+	}
+	if st.Token != "" || st.Email != "" || st.Password != "" {
+		t.Fatalf("a device token must never be written to the settings: %+v", st)
+	}
+}
+
+func TestARemovedDeviceGetsAClearInstructionNotARawError(t *testing.T) {
+	t.Setenv(EnvToken, "stale")
+	t.Setenv("CALABRASS_DATA_DIR", t.TempDir())
+	srv := pairedBackend(t, "something-else")
+
+	_, err := Ensure(context.Background(), api.New(srv.URL), &settings.Settings{})
+	if !errors.Is(err, ErrNotPaired) {
+		t.Fatalf("got %v", err)
+	}
+	if len(err.Error()) > 200 || !strings.Contains(err.Error(), "cal connect") {
+		t.Fatalf("the instruction must fit the screen and say what to do: %q", err.Error())
 	}
 }

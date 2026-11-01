@@ -351,6 +351,27 @@ CREATE TABLE IF NOT EXISTS sessions (
 	expires_at INTEGER NOT NULL
 );
 
+-- Paired devices: another machine allowed to use this host. A device is a person's
+-- trust in one machine; its sessions die with it, so revoking it signs it out at once.
+CREATE TABLE IF NOT EXISTS devices (
+	id           TEXT PRIMARY KEY,
+	user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	name         TEXT NOT NULL DEFAULT '',
+	created_at   INTEGER NOT NULL,
+	last_seen_at INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id);
+
+-- One-time pairing codes. Only a hash is kept, a code is used once, and it expires.
+CREATE TABLE IF NOT EXISTS pairing_codes (
+	code_hash  TEXT PRIMARY KEY,
+	user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	created_at INTEGER NOT NULL,
+	expires_at INTEGER NOT NULL,
+	used_at    INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
 
@@ -447,6 +468,7 @@ CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_events(provider_id, creat
 		{"connectors", "user_id", "user_id TEXT NOT NULL DEFAULT ''"},
 		{"scheduled_tasks", "user_id", "user_id TEXT NOT NULL DEFAULT ''"},
 		{"scheduled_tasks", "scope", "scope TEXT NOT NULL DEFAULT ''"},
+		{"sessions", "device_id", "device_id TEXT NOT NULL DEFAULT ''"},
 		{"agents", "user_id", "user_id TEXT NOT NULL DEFAULT ''"},
 		{"usage_events", "user_id", "user_id TEXT NOT NULL DEFAULT ''"},
 	}

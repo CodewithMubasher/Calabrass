@@ -401,8 +401,8 @@ export interface LedgerEntry {
   id: string
   /** When it happened, in milliseconds. */
   at: number
-  /** "action" is one decision; "run" is how an unattended run ended. */
-  kind: "action" | "run"
+  /** "action" is one decision; "run" is how an unattended run ended; "device" is a pairing or removal. */
+  kind: "action" | "run" | "device"
   chatId: string
   tool: string
   /** 2 run a command · 3 reach outside the project · 4 act on the outside world */

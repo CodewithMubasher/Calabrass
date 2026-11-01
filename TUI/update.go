@@ -27,9 +27,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// --- the backend answers ---------------------------------------------
 	case bootDoneMsg:
 		if msg.err != nil {
-			m.boot, m.bootErr = bootFailed, msg.err.Error()
-			return m, nil
+			m.boot, m.bootErr = bootFailed, api.Explain(msg.err)
+			// Not being able to reach the host is something to keep trying at,
+			// without asking: it may be starting, or about to be started.
+			return m, m.connLost(msg.err)
 		}
+		m.conn.down = false
 		m.boot = bootReady
 		cmds := []tea.Cmd{loadModelsCmd(m.app.client, false), loadConnectorsCmd(m.app.client), loadSchedulesCmd(m.app.client), schedulePollCmd()}
 		if m.app.resume {
@@ -39,7 +42,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case schedulePollTick:
+		if m.conn.down {
+			// Nothing to ask while the host is away; the reconnect loop is looking.
+			return m, schedulePollCmd()
+		}
 		return m, tea.Batch(loadSchedulesCmd(m.app.client), schedulePollCmd())
+
+	case reconnectTickMsg:
+		return m, m.onReconnectTick(msg)
+
+	case probeMsg:
+		return m, m.onProbe(msg)
 
 	case modelsMsg:
 		if msg.err != nil {
@@ -53,14 +66,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case approvalAnsweredMsg:
 		if msg.err != nil {
-			return m, m.showToast("Could not send your answer: "+msg.err.Error(), true)
+			if cmd := m.connLost(msg.err); cmd != nil {
+				return m, cmd
+			}
+			return m, m.showToast("Could not send your answer: "+api.Explain(msg.err), true)
 		}
 		return m, nil
 
 	case connectorsMsg:
 		if msg.err != nil {
 			if m.list.IsOpen() && m.list.Kind == "mcps" {
-				m.list.SetNotice(msg.err.Error(), true)
+				m.list.SetNotice(api.Explain(msg.err), true)
 				return m, nil
 			}
 			return m, m.apiFailed(msg.err, "Could not load MCP servers")
@@ -87,7 +103,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if api.IsUnauthorized(msg.err) {
 				return m, m.apiFailed(msg.err, "Could not save the provider")
 			}
-			m.provForm.Err, m.provForm.Saving = msg.err.Error(), false
+			m.provForm.Err, m.provForm.Saving = api.Explain(msg.err), false
 			return m, nil
 		}
 		m.provForm.Close()
@@ -137,7 +153,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case chatDeletedMsg:
 		m.confirmDel = ""
 		if msg.err != nil {
-			m.list.SetNotice(msg.err.Error(), true)
+			m.list.SetNotice(api.Explain(msg.err), true)
 			return m, nil
 		}
 		kept := m.allChats[:0:0]
@@ -224,8 +240,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if !finished {
 			// Computed first: it opens a dialog on m, and the return below copies m.
-			approvalCmd := m.showApproval()
-			return m, tea.Batch(waitTurn(msg.ts), approvalCmd)
+			if approvalCmd := m.showApproval(); approvalCmd != nil {
+				return m, tea.Batch(waitTurn(msg.ts), approvalCmd)
+			}
+			return m, waitTurn(msg.ts)
 		}
 		return m, m.afterTurn()
 
@@ -245,8 +263,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.advanceSpinner()
 		// A dialog closed with Esc while the agent still waits comes back.
-		approvalCmd := m.showApproval()
-		return m, tea.Batch(spinTick(), approvalCmd)
+		if approvalCmd := m.showApproval(); approvalCmd != nil {
+			return m, tea.Batch(spinTick(), approvalCmd)
+		}
+		return m, spinTick()
 
 	case toastMsg:
 		if msg.seq == m.toastSeq {
@@ -359,7 +379,12 @@ func (m *Model) apiFailed(err error, what string) tea.Cmd {
 		m.boot = bootConnecting
 		return bootCmd(m.app)
 	}
-	m.notice(what+": "+err.Error(), true)
+	// The host being away is not a message in the conversation: the footer says
+	// so once and the reconnect loop takes it from here.
+	if api.IsConnError(err) {
+		return m.connLost(err)
+	}
+	m.notice(what+": "+api.Explain(err), true)
 	return nil
 }
 
@@ -369,6 +394,14 @@ func (m *Model) afterTurn() tea.Cmd {
 	cmds := []tea.Cmd{}
 	if qs := pendingQuestions(m.messages); len(qs) > 0 {
 		cmds = append(cmds, m.qform.Open(qs))
+	}
+	// The host went away during the turn: look for it, instead of asking it for more.
+	if err := m.lostErr; err != nil {
+		m.lostErr = nil
+		if cmd := m.connLost(err); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return tea.Batch(cmds...)
 	}
 	// Refresh schedules in case the agent booked one via schedule_task tool
 	cmds = append(cmds, loadSchedulesCmd(m.app.client))

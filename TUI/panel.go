@@ -88,6 +88,8 @@ type Model struct {
 	app          *appCtx
 	boot         bootState
 	bootErr      string
+	conn         connState // whether the host can be reached; see conn.go
+	lostErr      error     // a turn ended because the host went away
 	chat         *api.Chat // nil until the first message is sent (or a session is resumed)
 	models       []modelEntry
 	selProvider  string

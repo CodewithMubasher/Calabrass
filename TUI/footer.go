@@ -107,6 +107,8 @@ func (m Model) footerView(w int, home bool) string {
 	}
 	var left string
 	switch {
+	case m.conn.down:
+		left = lipgloss.NewStyle().Foreground(lipgloss.Color("#b8862f")).Render(ansi.Truncate(m.connBanner(), avail, "…"))
 	case home && m.banner != "":
 		left = lipgloss.NewStyle().Foreground(lipgloss.Color("#b8862f")).Render(ansi.Truncate(m.banner, avail, "…"))
 	case home:

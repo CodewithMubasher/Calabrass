@@ -197,6 +197,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, opts ...Optio
 		Logger:        log,
 		ListenAddr:    cfg.Addr,
 		PairingCode:   cfg.PairingCode,
+		AllowRemote:   cfg.AllowRemote,
 		HostInfo:      hostInfo,
 		WebUI:         webHandler,
 		KeyBackend:    keyBackend,

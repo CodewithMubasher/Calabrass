@@ -624,6 +624,29 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	// write to a response that has gone.
 	defer stream.close()
 
+	// A command can run for minutes without a word to say. Telling the client up
+	// front that this host beats, and then beating, lets it tell "still working"
+	// from "the connection died", without cutting off hosts that do not beat.
+	_ = stream.comment(fmt.Sprintf("calabrass-heartbeat %d", int(streamHeartbeat/time.Second)))
+	beatDone := make(chan struct{})
+	defer close(beatDone)
+	go func() {
+		tick := time.NewTicker(streamHeartbeat)
+		defer tick.Stop()
+		for {
+			select {
+			case <-beatDone:
+				return
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				if stream.comment("keep-alive") != nil {
+					return
+				}
+			}
+		}
+	}()
+
 	if err := stream.event("chat", updated); err != nil {
 		return
 	}
@@ -775,6 +798,9 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		_ = stream.event("error", errorPayload{Message: genErr.Error()})
 	}
 }
+
+// streamHeartbeat is how often an open reply stream says it is still alive.
+const streamHeartbeat = 10 * time.Second
 
 // clipText shortens s to n characters for a one-line record.
 func clipText(s string, n int) string {

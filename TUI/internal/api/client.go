@@ -12,6 +12,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"calabrass-tui/internal/termsafe"
 )
 
 // DefaultAddr is where the backend listens unless told otherwise.
@@ -94,7 +96,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return err
+		return wrapTransport(ctx, err)
 	}
 	defer resp.Body.Close()
 
@@ -105,8 +107,22 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxReply)).Decode(out); err != nil {
+		var syn *json.SyntaxError
+		var typ *json.UnmarshalTypeError
+		if errors.As(err, &syn) || errors.As(err, &typ) {
+			// Something answered, but not as a Calabrass host does.
+			return &BadReplyError{Status: resp.StatusCode}
+		}
+		// The body ended early: the connection broke while it was being read.
+		return wrapTransport(ctx, err)
+	}
+	return nil
 }
+
+// maxReply bounds how much of one answer is read. No answer from a host is this
+// large; a server that sends more is not one.
+const maxReply = 64 << 20
 
 func (c *Client) authorize(req *http.Request) {
 	if c.Token != "" {
@@ -129,9 +145,15 @@ func readAPIError(resp *http.Response) error {
 		msg = payload.Error
 	}
 	if msg == "" {
-		msg = strings.TrimSpace(string(data))
+		text := strings.TrimSpace(string(data))
+		// A proxy or another program answering with a web page is not a Calabrass
+		// host, and its markup is not something to put on a screen.
+		if strings.HasPrefix(text, "<") || strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "html") {
+			return &BadReplyError{Status: resp.StatusCode}
+		}
+		msg = text
 	}
-	return &APIError{Status: resp.StatusCode, Message: msg}
+	return &APIError{Status: resp.StatusCode, Message: termsafe.Clip(msg, 400)}
 }
 
 // --- health + auth --------------------------------------------------------
@@ -254,6 +276,9 @@ func (c *Client) Chats(ctx context.Context) ([]Chat, error) {
 		Chats []Chat `json:"chats"`
 	}
 	err := c.do(ctx, http.MethodGet, "/api/chats", nil, &out)
+	for i := range out.Chats {
+		cleanChat(&out.Chats[i])
+	}
 	return out.Chats, err
 }
 
@@ -263,6 +288,7 @@ func (c *Client) CreateChat(ctx context.Context, req CreateChatRequest) (Chat, e
 		Chat Chat `json:"chat"`
 	}
 	err := c.do(ctx, http.MethodPost, "/api/chats", req, &out)
+	cleanChat(&out.Chat)
 	return out.Chat, err
 }
 
@@ -272,6 +298,10 @@ func (c *Client) GetChat(ctx context.Context, id string) (ChatDetail, error) {
 		Chat ChatDetail `json:"chat"`
 	}
 	err := c.do(ctx, http.MethodGet, "/api/chats/"+url.PathEscape(id), nil, &out)
+	cleanChat(&out.Chat.Chat)
+	for i := range out.Chat.Messages {
+		cleanMessage(&out.Chat.Messages[i])
+	}
 	return out.Chat, err
 }
 
@@ -282,6 +312,7 @@ func (c *Client) RenameChat(ctx context.Context, id, title string) (Chat, error)
 	}
 	err := c.do(ctx, http.MethodPatch, "/api/chats/"+url.PathEscape(id),
 		map[string]string{"title": title}, &out)
+	cleanChat(&out.Chat)
 	return out.Chat, err
 }
 
@@ -292,6 +323,7 @@ func (c *Client) SetChatWorkspace(ctx context.Context, id, path string) (Chat, e
 	}
 	err := c.do(ctx, http.MethodPatch, "/api/chats/"+url.PathEscape(id),
 		map[string]string{"workspacePath": path}, &out)
+	cleanChat(&out.Chat)
 	return out.Chat, err
 }
 
@@ -308,6 +340,9 @@ func (c *Client) ListSchedules(ctx context.Context) ([]ScheduledTask, error) {
 		Tasks []ScheduledTask `json:"tasks"`
 	}
 	err := c.do(ctx, http.MethodGet, "/api/schedules", nil, &out)
+	for i := range out.Tasks {
+		cleanTask(&out.Tasks[i])
+	}
 	return out.Tasks, err
 }
 
@@ -317,6 +352,9 @@ func (c *Client) CreateSchedule(ctx context.Context, input ScheduledTaskInput) (
 		Tasks []ScheduledTask `json:"tasks"`
 	}
 	err := c.do(ctx, http.MethodPost, "/api/schedules", input, &out)
+	for i := range out.Tasks {
+		cleanTask(&out.Tasks[i])
+	}
 	return out.Tasks, err
 }
 
@@ -326,6 +364,9 @@ func (c *Client) UpdateSchedule(ctx context.Context, id string, patch ScheduledT
 		Tasks []ScheduledTask `json:"tasks"`
 	}
 	err := c.do(ctx, http.MethodPatch, "/api/schedules/"+url.PathEscape(id), patch, &out)
+	for i := range out.Tasks {
+		cleanTask(&out.Tasks[i])
+	}
 	return out.Tasks, err
 }
 

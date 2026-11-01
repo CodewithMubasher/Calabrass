@@ -260,6 +260,14 @@ func (m *Model) showApproval() tea.Cmd {
 // finishTurn settles the answer once the stream is over, however it ended.
 func (m *Model) finishTurn(msg *Message, endErr error) {
 	ts := m.turn
+	// The turn's context and its stream goroutine are done with: release them
+	// instead of leaving them for the garbage collector.
+	if ts.cancel != nil {
+		ts.cancel()
+	}
+	if api.IsConnError(endErr) {
+		m.lostErr = endErr // afterTurn starts looking for the host
+	}
 	m.approval = nil // nothing is waiting once the turn is over
 	if m.list.IsOpen() && m.list.Kind == "approval" {
 		m.list.Close()
@@ -360,8 +368,8 @@ func questionsOfTrace(tr api.Trace) []askQuestion {
 
 // friendlyError words a transport failure for the screen.
 func friendlyError(err error) string {
-	if api.IsAPIError(err) {
-		return err.Error()
+	if api.IsConnError(err) {
+		return api.Explain(err) + ". What had arrived is kept. Use /retry once it reconnects."
 	}
-	return "Lost the connection to the backend: " + err.Error()
+	return api.Explain(err)
 }

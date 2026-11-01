@@ -110,8 +110,18 @@ func (f *ProviderForm) Open(row api.ProviderRow, create bool) tea.Cmd {
 	f.open, f.create, f.row, f.Err, f.Saving = true, create, row, "", false
 	f.name.SetValue(row.Name)
 	f.baseURL.SetValue(row.BaseURL)
-	f.apiKey.SetValue(row.APIKey)
-	f.enabled = row.Enabled || (!create && strings.TrimSpace(row.APIKey) == "")
+	// A saved key is never sent to the terminal. The field starts empty and means
+	// "replace it with this"; left empty, the saved key stays.
+	f.apiKey.SetValue("")
+	f.apiKey.Placeholder = "API key"
+	if row.HasKey && !create {
+		f.apiKey.Placeholder = "saved"
+		if row.KeyHint != "" {
+			f.apiKey.Placeholder = "saved ••••" + row.KeyHint
+		}
+		f.apiKey.Placeholder += " (type to replace)"
+	}
+	f.enabled = row.Enabled || (!create && !row.HasKey)
 	if create {
 		f.enabled = true
 	}
@@ -166,7 +176,7 @@ func (f ProviderForm) save() tea.Msg {
 	if b := strings.TrimSpace(f.baseURL.Value()); b != f.row.BaseURL {
 		u.BaseURL = &b
 	}
-	if k := strings.TrimSpace(f.apiKey.Value()); k != f.row.APIKey {
+	if k := strings.TrimSpace(f.apiKey.Value()); k != "" {
 		u.APIKey = &k
 	}
 	return ProviderSaveMsg{ID: f.row.ID, Update: u}

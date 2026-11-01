@@ -20,6 +20,11 @@ const COMMANDS = {
   uninstall: ["uninstall"],
   stop: ["stop"],
   status: ["status"],
+  pair: ["pair"],
+  devices: ["devices"],
+  revoke: ["revoke"],
+  connect: ["connect"],
+  disconnect: ["disconnect"],
 };
 
 // Where Calabrass keeps its data. It must agree with the backend's DataDir.

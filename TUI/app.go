@@ -292,18 +292,18 @@ func (m Model) bootView() string {
 	title := lipgloss.NewStyle().Foreground(colorText).Bold(true)
 	var lines []string
 	if m.boot == bootFailed {
-		lines = []string{
-			title.Render("Can't reach the Calabrass backend"),
-			"",
-			msgMuted.Render(m.app.client.Base),
-			"",
-		}
+		lines = []string{title.Render("Can't reach the Calabrass host"), ""}
 		for _, l := range strings.Split(wrapText(m.bootErr, 60), "\n") {
 			lines = append(lines, toolErrText.Render(l))
 		}
-		lines = append(lines, "",
-			msgMuted.Render("Start the backend (cd Backend && go run ./cmd/server) or open the"),
-			msgMuted.Render("desktop app, then press r to try again. ctrl+c quits."))
+		if m.conn.down {
+			lines = append(lines, "",
+				msgMuted.Render(fmt.Sprintf("Trying again by itself (try %d). r tries now, ctrl+c quits.", m.conn.attempts+1)),
+				msgMuted.Render("Opening the desktop app also starts the host."))
+		} else {
+			lines = append(lines, "",
+				msgMuted.Render("Press r to try again, ctrl+c to quit. `cal status` shows whether the host is running."))
+		}
 	} else {
 		lines = []string{title.Render("Connecting…"), "", msgMuted.Render(m.app.client.Base)}
 	}
@@ -429,7 +429,7 @@ func (m Model) providerItems() []ListItem {
 			right = fmt.Sprintf("On · %d models", p.ModelCount)
 		case p.Enabled:
 			right = "On · no key"
-		case strings.TrimSpace(p.APIKey) != "":
+		case p.HasKey:
 			right = "Off"
 		}
 		items = append(items, ListItem{ID: p.ID, Title: p.Name, Right: right})

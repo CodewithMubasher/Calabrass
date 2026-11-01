@@ -243,3 +243,50 @@ func TestQuietSuppressesProgress(t *testing.T) {
 		t.Fatalf("stderr = %q", errw)
 	}
 }
+
+func TestLosingTheHostMidRunIsExitSixNotAFinishedAnswer(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/chats", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`{"chat":{"id":"c"}}`)) })
+	mux.HandleFunc("POST /api/chats/{id}/messages", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, frame("token", map[string]string{"text": "half an ans"}))
+		w.(http.Flusher).Flush()
+		// The host dies: the connection closes with no "done".
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	var out, errw bytes.Buffer
+	res := Run(context.Background(), api.New(strings.TrimPrefix(srv.URL, "http://")), Options{Prompt: "x", Dir: "/w"}, &out, &errw)
+	if res.Exit != ExitLost {
+		t.Fatalf("exit %d (%s), want %d", res.Exit, res.Err, ExitLost)
+	}
+	if strings.Contains(errw.String(), "127.0.0.1") || strings.Contains(errw.String(), "dial") || strings.Contains(errw.String(), "EOF") {
+		t.Fatalf("technical text reached stderr: %q", errw.String())
+	}
+}
+
+func TestAHostThatIsNotThereIsExitFiveWithAPlainMessage(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	addr := strings.TrimPrefix(srv.URL, "http://")
+	srv.Close()
+
+	var out, errw bytes.Buffer
+	res := Run(context.Background(), api.New(addr), Options{Prompt: "x", Dir: "/w"}, &out, &errw)
+	if res.Exit != ExitSetup || strings.Contains(errw.String(), addr) {
+		t.Fatalf("exit %d, stderr %q", res.Exit, errw.String())
+	}
+}
+
+func TestAToolCallIsReportedOnceWhenItFinishesNotWhileItIsPending(t *testing.T) {
+	h := newFakeHost(t,
+		frame("trace", wrap(tool("k", "run_command", `{"command":"npm test"}`, "pending", ""))),
+		frame("trace", wrap(tool("k", "run_command", `{"command":"npm test"}`, "running", ""))),
+		frame("trace", wrap(tool("k", "run_command", `{"command":"npm test"}`, "ok", ""))),
+		frame("done", map[string]any{"message": map[string]any{}}),
+	)
+	_, _, errw := run(t, h, Options{Prompt: "x", Dir: "/w"})
+	if n := strings.Count(errw, "run_command: npm test"); n != 1 {
+		t.Fatalf("the call was reported %d times:\n%s", n, errw)
+	}
+}

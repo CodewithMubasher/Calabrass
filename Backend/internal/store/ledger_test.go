@@ -3,7 +3,10 @@ package store
 import (
 	"context"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func newLedgerStore(t *testing.T) *Store {
@@ -89,5 +92,76 @@ func TestLedgerKeepsOnlyTheNewestRows(t *testing.T) {
 func TestLedgerNeedsAUser(t *testing.T) {
 	if err := newLedgerStore(t).AddLedgerEntry(context.Background(), LedgerEntry{Tool: "x"}); err == nil {
 		t.Fatal("an entry with no user was accepted")
+	}
+}
+
+func TestPairingCodesAreUsedOnceAndExpire(t *testing.T) {
+	ctx := context.Background()
+	s := newLedgerStore(t)
+	u, _ := s.CreateUser(ctx, UserRecord{ID: "u", Name: "A", Email: "a@x.com", PasswordHash: "h", CreatedAt: 1})
+	_ = u
+
+	now := time.Now().UnixMilli()
+	if err := s.CreatePairingCode(ctx, "h1", "u", now+60_000); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreatePairingCode(ctx, "old", "u", now-1); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.ConsumePairingCode(ctx, "old", now); err != ErrNotFound {
+		t.Fatalf("an expired code was accepted: %v", err)
+	}
+	if _, err := s.ConsumePairingCode(ctx, "nope", now); err != ErrNotFound {
+		t.Fatalf("an unknown code was accepted: %v", err)
+	}
+	if id, err := s.ConsumePairingCode(ctx, "h1", now); err != nil || id != "u" {
+		t.Fatalf("first use: %q %v", id, err)
+	}
+	if _, err := s.ConsumePairingCode(ctx, "h1", now); err != ErrNotFound {
+		t.Fatalf("a code worked twice: %v", err)
+	}
+}
+
+func TestOfManyAtOnceExactlyOneUseOfACodeWins(t *testing.T) {
+	ctx := context.Background()
+	s := newLedgerStore(t)
+	_, _ = s.CreateUser(ctx, UserRecord{ID: "u", Name: "A", Email: "a@x.com", PasswordHash: "h", CreatedAt: 1})
+	_ = s.CreatePairingCode(ctx, "race", "u", time.Now().Add(time.Minute).UnixMilli())
+
+	var wins atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := s.ConsumePairingCode(ctx, "race", time.Now().UnixMilli()); err == nil {
+				wins.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if wins.Load() != 1 {
+		t.Fatalf("%d of 20 simultaneous claims succeeded, want exactly 1", wins.Load())
+	}
+}
+
+func TestOnlyAFewUnusedCodesAreKeptPerPerson(t *testing.T) {
+	ctx := context.Background()
+	s := newLedgerStore(t)
+	_, _ = s.CreateUser(ctx, UserRecord{ID: "u", Name: "A", Email: "a@x.com", PasswordHash: "h", CreatedAt: 1})
+	exp := time.Now().Add(time.Hour).UnixMilli()
+	for i := 0; i < 6; i++ {
+		_ = s.CreatePairingCode(ctx, "c"+string(rune('a'+i)), "u", exp)
+		time.Sleep(2 * time.Millisecond)
+	}
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM pairing_codes WHERE user_id = 'u'`).Scan(&n)
+	if n != MaxActivePairingCodes {
+		t.Fatalf("%d codes kept, want %d", n, MaxActivePairingCodes)
+	}
+	// The oldest were the ones retired.
+	if _, err := s.ConsumePairingCode(ctx, "ca", time.Now().UnixMilli()); err != ErrNotFound {
+		t.Fatal("the oldest code survived")
 	}
 }

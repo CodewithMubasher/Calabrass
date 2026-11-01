@@ -136,7 +136,7 @@ function Row({ entry }: { entry: LedgerEntry }) {
       <div className="min-w-0 flex-1">
         <p className="font-mono text-sm break-words text-white/80">{entry.summary}</p>
         <p className="mt-0.5 text-xs text-white/35">
-          {entry.kind === "run" ? "unattended run" : tierName(entry.tier)}
+          {entry.kind === "run" ? "unattended run" : entry.kind === "device" ? "device pairing" : tierName(entry.tier)}
           {entry.unattended && entry.kind !== "run" ? " · nobody was watching" : ""}
         </p>
       </div>
@@ -180,6 +180,10 @@ function outcomeLabel(entry: LedgerEntry): string {
       return "failed"
     case "missed":
       return "missed"
+    case "paired":
+      return "device paired"
+    case "removed":
+      return "device removed"
     default:
       return entry.outcome
   }
@@ -197,6 +201,7 @@ function outcomeTone(outcome: string): string {
     case "remembered":
     case "allowed":
     case "completed":
+    case "paired":
       return "bg-emerald-500/15 text-emerald-300"
     default:
       return "bg-white/10 text-white/60"

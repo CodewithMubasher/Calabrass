@@ -29,6 +29,7 @@ Chained commands (`a && b`, pipes) are never matched by `--allow`: what you appr
 | 3 | **It finished what it could, but something it needed was refused.** stderr lists what; re-run with `--allow` for the commands you trust |
 | 4 | `--timeout` passed first (default 15 minutes) |
 | 5 | No host to talk to, could not sign in, or no model is set up |
+| 6 | The host went away in the middle of the run. Files may be partly changed; running again is safe |
 
 `3` is the one worth branching on. It is not a failure of the agent; it is the agent telling you it needed permission you did not give.
 

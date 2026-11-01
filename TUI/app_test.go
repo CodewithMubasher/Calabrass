@@ -23,15 +23,19 @@ type fakeAPI struct {
 	mu        sync.Mutex
 	models    []api.ProviderInfo
 	providers []api.ProviderRow
-	connect   []api.Connector
-	chats     map[string]*api.ChatDetail
-	sent      []api.SendRequest
-	created   []api.CreateChatRequest
-	script    func(w http.ResponseWriter, r *http.Request, emit func(string, any))
+	// keys holds the key each provider was given. The real host never sends a
+	// key back, so the row only says HasKey; the test reads what was saved here.
+	keys    map[string]string
+	hits    map[string]int // requests seen, by path
+	connect []api.Connector
+	chats   map[string]*api.ChatDetail
+	sent    []api.SendRequest
+	created []api.CreateChatRequest
+	script  func(w http.ResponseWriter, r *http.Request, emit func(string, any))
 }
 
 func newFakeAPI() *fakeAPI {
-	return &fakeAPI{chats: map[string]*api.ChatDetail{}}
+	return &fakeAPI{chats: map[string]*api.ChatDetail{}, keys: map[string]string{}}
 }
 
 func (f *fakeAPI) serve() *httptest.Server {
@@ -72,7 +76,8 @@ func (f *fakeAPI) serve() *httptest.Server {
 				continue
 			}
 			if u.APIKey != nil {
-				f.providers[i].APIKey = *u.APIKey
+				f.keys[f.providers[i].ID] = *u.APIKey
+				f.providers[i].HasKey = *u.APIKey != ""
 				f.providers[i].Connected = *u.APIKey != ""
 			}
 			if u.Enabled != nil {
@@ -155,7 +160,15 @@ func (f *fakeAPI) serve() *httptest.Server {
 		}
 		script(w, r, emit)
 	})
-	return httptest.NewServer(mux)
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		if f.hits == nil {
+			f.hits = map[string]int{}
+		}
+		f.hits[r.URL.Path]++
+		f.mu.Unlock()
+		mux.ServeHTTP(w, r)
+	}))
 }
 
 // --- a harness that runs the real Update loop -----------------------------------
@@ -596,7 +609,7 @@ func TestProviderFormAddsAKeyAndModelsAppear(t *testing.T) {
 	h.send(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 
 	f.mu.Lock()
-	key, en := f.providers[0].APIKey, f.providers[0].Enabled
+	key, en := f.keys[f.providers[0].ID], f.providers[0].Enabled
 	f.mu.Unlock()
 	if key != "sk-secret" || !en {
 		t.Errorf("saved key=%q enabled=%v", key, en)
@@ -665,4 +678,10 @@ func TestBackendDownShowsRetryScreen(t *testing.T) {
 	if h.m.boot != bootFailed || !strings.Contains(h.screen(), "Can't reach") {
 		t.Errorf("expected the unreachable screen:\n%s", h.screen())
 	}
+}
+
+func (f *fakeAPI) hitCount(path string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.hits[path]
 }

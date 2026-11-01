@@ -84,7 +84,7 @@ Calabrass is a **local-first, single-user AI assistant** that runs on your machi
   - Workspace folders the agent creates.
   - `desktop.log` — structured JSONL logs.
 - **Nothing user-made is ever written into the source checkout.** Clone, clean, update, delete the repo — your data is untouched.
-- The API listens on `127.0.0.1:8787` only. The host **refuses to start** on any other address unless you set `CALABRASS_PAIRING_CODE` (16+ characters); other devices must then present that code, and still cannot create accounts. Web pages from other sites are refused.
+- The API listens on `127.0.0.1:8787` only. The host **refuses to start** on any other address unless `CALABRASS_ALLOW_REMOTE=1` is set, and then another machine gets in only by **pairing**: you make a one-time code on the host, give it on the device, and the device becomes an entry you can see and remove. Passwords and signup never work from another machine. Web pages from other sites are refused. See [Using Calabrass from another machine](docs/REMOTE.md).
 - Read what leaves your machine, and what does not, in [PRIVACY.md](PRIVACY.md).
 
 ### 🖥️ Native Windows Installer
@@ -121,6 +121,21 @@ so scheduled tasks still happen.
 cal status      # is the host running, and who started it
 cal stop        # stop it (scheduled tasks stop with it)
 ```
+
+### Another machine: `cal pair` / `cal connect`
+
+```bash
+# on the machine the host runs on (started with CALABRASS_ALLOW_REMOTE=1)
+cal pair                        # prints a one-time code and the address to use
+# on the other machine
+cal connect 192.168.1.20:8787 K7QD-M2XH
+cal                             # now talks to that host; so does `cal run`
+# back on the host
+cal devices                     # who is paired
+cal revoke "Ada's laptop"       # signed out at once
+```
+
+Read [docs/REMOTE.md](docs/REMOTE.md) first: the connection is plain HTTP, so it is for a home network, an SSH tunnel or a VPN, and `cal connect` refuses a public address.
 
 ### Scripts and CI: `cal run`
 
@@ -200,7 +215,8 @@ Optional backend settings via `%LOCALAPPDATA%\Calabrass\.env` (see `Backend/.env
 
 ```
 CALABRASS_ADDR=127.0.0.1:8787          # API listen address (loopback only unless paired)
-CALABRASS_PAIRING_CODE=...              # lets other devices connect; needed for any non-loopback address
+CALABRASS_ALLOW_REMOTE=1                # let other machines pair with this host (required to listen beyond loopback)
+CALABRASS_PAIRING_CODE=...              # older shared-secret alternative to pairing; prefer `cal pair`
 CALABRASS_DATA_DIR=...                  # use a different data folder (and so a separate host)
 CALABRASS_BACKGROUND=off                # desktop: host in the window instead of a background process
 CALABRASS_DB=calabrass.db               # DB filename (inside data folder)

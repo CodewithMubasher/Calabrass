@@ -38,6 +38,7 @@ const (
 	ExitBlocked = 3 // it finished what it could, but something it needed was refused
 	ExitTimeout = 4 // --timeout passed first
 	ExitSetup   = 5 // no host to talk to, cannot sign in, or no model is set up
+	ExitLost    = 6 // the host went away in the middle of the run; what it did may be partial
 )
 
 // MaxInput is the most text taken from a pipe. A runaway `cat bigfile` should
@@ -78,6 +79,7 @@ Exit codes:
   0  finished           3  finished, but something it needed was refused
   1  failed             4  timed out
   2  bad command line   5  no host, not signed in, or no model set up
+                        6  the host went away mid-run (files may be half-edited; safe to re-run)
 
 Nothing run this way can reach outside the folder or act on the outside world
 (push, publish, send); those need a person to approve them in the app.`
@@ -213,7 +215,7 @@ func Run(ctx context.Context, c *api.Client, opts Options, out, errw io.Writer) 
 	}
 	chat, err := c.CreateChat(ctx, api.CreateChatRequest{Provider: provider, Model: model, WorkspacePath: dir})
 	if err != nil {
-		return finish(ctx, Result{Exit: ExitSetup, Err: "could not start a session: " + err.Error()}, opts, out, errw, emit)
+		return finish(ctx, Result{Exit: ExitSetup, Err: "could not start a session: " + api.Explain(err)}, opts, out, errw, emit)
 	}
 
 	scope := &api.TaskScope{MaxTier: 1}
@@ -264,7 +266,10 @@ func Run(ctx context.Context, c *api.Client, opts Options, out, errw io.Writer) 
 						res.Blocked = append(res.Blocked, describeTool(part))
 					}
 					emit(map[string]any{"type": "tool", "name": part.Name, "input": part.Input, "status": part.Status, "refused": refused})
-					if part.Status != "running" && part.Status != "" || refused {
+					// One line per call, when it has finished: a call goes
+					// pending, then running, then ok or error.
+					finished := part.Status != "" && part.Status != "pending" && part.Status != "running"
+					if finished || refused {
 						mark := "•"
 						if refused {
 							mark = "✗ refused:"
@@ -297,8 +302,13 @@ func Run(ctx context.Context, c *api.Client, opts Options, out, errw io.Writer) 
 		res.Exit, res.Err = ExitTimeout, fmt.Sprintf("timed out after %s", opts.Timeout)
 	case errors.Is(ctx.Err(), context.Canceled):
 		res.Exit, res.Err = ExitFailed, "interrupted"
+	case api.IsConnError(sendErr) && res.Err == "":
+		// It was running, and the host went away. Not the same as never having
+		// connected: work may be half done, and running again is safe.
+		res.Exit = ExitLost
+		res.Err = api.Explain(sendErr) + " during the run; files may be partly changed"
 	case sendErr != nil && res.Err == "":
-		res.Exit, res.Err = ExitSetup, sendErr.Error()
+		res.Exit, res.Err = ExitSetup, api.Explain(sendErr)
 	case strings.Contains(res.Err, "no model is available"):
 		res.Exit = ExitSetup
 		res.Err = "no model is set up. Open Calabrass once (the desktop app, or `cal`, then /connect) and add a provider key."

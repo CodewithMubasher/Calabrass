@@ -54,13 +54,17 @@ func IsLoopbackAddr(addr string) bool {
 // ErrRemoteWithoutPairing is returned when the address is open to the network
 // and no pairing code is set.
 var ErrRemoteWithoutPairing = errors.New(
-	"Calabrass will not listen beyond this machine without a pairing code. " +
-		"Set CALABRASS_PAIRING_CODE to a secret of at least 16 characters, " +
+	"Calabrass will not listen beyond this machine unless devices can be paired. " +
+		"Set CALABRASS_ALLOW_REMOTE=1 (then `cal pair` makes a one-time code for each device), " +
 		"or listen on 127.0.0.1")
 
 // ValidateBind refuses an unsafe listen configuration.
-func ValidateBind(addr, pairingCode string) error {
-	if IsLoopbackAddr(addr) {
+func ValidateBind(addr, pairingCode string) error { return ValidateBindWith(addr, pairingCode, false) }
+
+// ValidateBindWith is ValidateBind for a host that may also pair devices
+// (allowRemote): that is "pairing on" as much as a shared code is.
+func ValidateBindWith(addr, pairingCode string, allowRemote bool) error {
+	if IsLoopbackAddr(addr) || allowRemote {
 		return nil
 	}
 	if len(strings.TrimSpace(pairingCode)) < MinPairingCodeLength {
@@ -123,13 +127,38 @@ func isLocalHostHeader(host string) bool {
 // listenOnLoopback says how the server was bound; pairingCode is empty unless
 // the owner turned pairing on.
 func Guard(next http.Handler, listenOnLoopback bool, pairingCode string) http.Handler {
-	pairingCode = strings.TrimSpace(pairingCode)
+	return GuardWith(next, listenOnLoopback, Options{PairingCode: pairingCode})
+}
+
+// Options says how other machines may reach the host.
+type Options struct {
+	// PairingCode is a shared secret every request from another machine may carry
+	// instead of being a paired device. It is the older way; a device is better,
+	// since it can be named and revoked.
+	PairingCode string
+	// AllowRemote lets a machine that is not this one claim a pairing code.
+	AllowRemote bool
+	// DeviceOK says whether a request carries the session of a paired device.
+	DeviceOK func(r *http.Request) bool
+}
+
+// machineOnly are the paths that only the machine the host runs on may use, even
+// for a paired device: they decide who else gets in.
+func machineOnly(path string) bool {
+	return path == "/api/pairing/start" || path == "/api/devices" || strings.HasPrefix(path, "/api/devices/") ||
+		path == "/api/host/shutdown"
+}
+
+// GuardWith is Guard with the options a host that pairs devices needs.
+func GuardWith(next http.Handler, listenOnLoopback bool, opts Options) http.Handler {
+	pairingCode := strings.TrimSpace(opts.PairingCode)
+	deviceOK := func(r *http.Request) bool { return opts.DeviceOK != nil && opts.DeviceOK(r) }
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		local := IsLoopbackRequest(r)
 
 		// 1. A page in the user's browser must not be able to drive the API,
 		//    whether by rebinding a hostname to 127.0.0.1 or by posting a form.
-		if origin := r.Header.Get("Origin"); origin != "" && !IsLocalOrigin(origin) && !pairedOrigin(r, pairingCode) {
+		if origin := r.Header.Get("Origin"); origin != "" && !IsLocalOrigin(origin) && !pairedOrigin(r, pairingCode) && !deviceOK(r) {
 			refuse(w, http.StatusForbidden, "this page is not allowed to use the local Calabrass API")
 			return
 		}
@@ -149,12 +178,26 @@ func Guard(next http.Handler, listenOnLoopback bool, pairingCode string) http.Ha
 			next.ServeHTTP(w, r)
 			return
 		}
-		if pairingCode == "" || !matchesPairing(r, pairingCode) {
+		if machineOnly(r.URL.Path) {
+			refuse(w, http.StatusForbidden, "that can only be done on the machine Calabrass runs on")
+			return
+		}
+		// The one thing a machine that is not paired yet may do: trade a one-time
+		// code for a device session.
+		if opts.AllowRemote && r.URL.Path == "/api/pairing/claim" && r.Method == http.MethodPost {
+			next.ServeHTTP(w, r)
+			return
+		}
+		paired := (pairingCode != "" && matchesPairing(r, pairingCode)) || deviceOK(r)
+		if !paired {
 			refuse(w, http.StatusForbidden, "this Calabrass only accepts paired devices")
 			return
 		}
-		if r.URL.Path == "/api/auth/signup" || r.URL.Path == "/api/auth/local" {
-			refuse(w, http.StatusForbidden, "accounts can only be created on the machine Calabrass runs on")
+		// A paired device is already signed in. It never creates accounts or
+		// signs in some other way.
+		switch r.URL.Path {
+		case "/api/auth/signup", "/api/auth/local", "/api/auth/login":
+			refuse(w, http.StatusForbidden, "accounts can only be created or signed in on the machine Calabrass runs on")
 			return
 		}
 		next.ServeHTTP(w, r)

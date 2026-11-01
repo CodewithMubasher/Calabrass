@@ -72,6 +72,9 @@ type Deps struct {
 	HostInfo host.Info
 	// WebUI is the built web interface to serve beside the API. Nil serves none.
 	WebUI http.Handler
+	// AllowRemote lets other machines pair with this host and then use it. Off by
+	// default: nothing but this machine can reach the host.
+	AllowRemote bool
 	// KeyBackend names where the master key for provider keys is kept.
 	KeyBackend string
 	// OnShutdown stops the host when the owner asks it to.
@@ -103,6 +106,14 @@ type Server struct {
 	keyBackend string
 	pairingOn  bool
 	onShutdown func()
+
+	// remoteOn is true when other machines may pair with this host (a pairing
+	// code or CALABRASS_ALLOW_REMOTE is set). claimByIP and claimAll bound how
+	// fast pairing codes can be tried.
+	remoteOn  bool
+	claimByIP *attemptLimiter
+	claimAll  *attemptLimiter
+	seenState
 	// registries and libraries cache the per-account views, so each account
 	// keeps its own model catalog and workspace folders.
 	registryMu sync.Mutex
@@ -166,6 +177,11 @@ func NewServer(deps Deps) *Server {
 		keyBackend:    deps.KeyBackend,
 		pairingOn:     strings.TrimSpace(deps.PairingCode) != "",
 		onShutdown:    deps.OnShutdown,
+		remoteOn:      deps.AllowRemote || strings.TrimSpace(deps.PairingCode) != "",
+		// Five tries a minute from one address, forty from all of them: a code is
+		// eight symbols and lives ten minutes, and this keeps guessing hopeless.
+		claimByIP: newAttemptLimiter(5, time.Minute),
+		claimAll:  newAttemptLimiter(40, time.Minute),
 	}
 	s.broker.Audit = s.recordPermission
 
@@ -179,6 +195,10 @@ func NewServer(deps Deps) *Server {
 	mux.HandleFunc("GET /api/host", s.handleHostInfo)
 	mux.HandleFunc("POST /api/host/shutdown", s.handleHostShutdown)
 	mux.HandleFunc("GET /api/ledger", s.handleListLedger)
+	mux.HandleFunc("POST /api/pairing/start", s.handleStartPairing)
+	mux.HandleFunc("POST /api/pairing/claim", s.handleClaimPairing)
+	mux.HandleFunc("GET /api/devices", s.handleListDevices)
+	mux.HandleFunc("DELETE /api/devices/{deviceID}", s.handleRevokeDevice)
 	mux.HandleFunc("GET /api/approvals", s.handleListApprovals)
 	mux.HandleFunc("GET /api/approvals/stream", s.handleApprovalStream)
 	mux.HandleFunc("DELETE /api/approvals/remembered", s.handleForgetApprovals)
@@ -236,7 +256,11 @@ func NewServer(deps Deps) *Server {
 	if strings.TrimSpace(deps.ListenAddr) == "" {
 		loopback = true // no listener of its own: tests, or mounted elsewhere
 	}
-	s.handler = netguard.Guard(webui.Mount(api, s.webUI), loopback, deps.PairingCode)
+	s.handler = netguard.GuardWith(webui.Mount(api, s.webUI), loopback, netguard.Options{
+		PairingCode: deps.PairingCode,
+		AllowRemote: deps.AllowRemote,
+		DeviceOK:    s.deviceOK,
+	})
 	return s
 }
 
@@ -338,7 +362,7 @@ func isPublicPath(path string) bool {
 	switch path {
 	// /api/auth/local and /api/host/shutdown prove themselves with the host
 	// secret, which is why they need no session.
-	case "/api/health", "/api/auth/signup", "/api/auth/login", "/api/auth/local", "/api/host/shutdown":
+	case "/api/health", "/api/auth/signup", "/api/auth/login", "/api/auth/local", "/api/host/shutdown", "/api/pairing/claim":
 		return true
 	default:
 		return false

@@ -61,12 +61,16 @@ type Config struct {
 	// Empty (the default) means nothing but this machine may connect, and the
 	// host will refuse to listen on anything but loopback.
 	PairingCode string
+	// AllowRemote lets other machines pair with this host (CALABRASS_ALLOW_REMOTE=1)
+	// and so lets it listen beyond loopback. Each device pairs with a one-time code
+	// the owner makes with `cal pair`, and can be removed.
+	AllowRemote bool
 }
 
 // ValidateBind refuses a listen address that would put the agent, which can run
 // commands, in reach of the network without a pairing code.
 func (c Config) ValidateBind() error {
-	return netguard.ValidateBind(c.Addr, c.PairingCode)
+	return netguard.ValidateBindWith(c.Addr, c.PairingCode, c.AllowRemote)
 }
 
 // Load reads configuration from the environment, after hydrating it from the
@@ -96,6 +100,7 @@ func LoadFrom(envPath string) Config {
 		)),
 		QuotasPath:  strings.TrimSpace(os.Getenv("CALABRASS_QUOTAS")),
 		PairingCode: strings.TrimSpace(os.Getenv("CALABRASS_PAIRING_CODE")),
+		AllowRemote: envBool("CALABRASS_ALLOW_REMOTE"),
 	}
 }
 
@@ -162,4 +167,13 @@ func loadDotEnv(path string) {
 		}
 		_ = os.Setenv(key, value)
 	}
+}
+
+// envBool reads a yes/no setting: 1, true, yes or on.
+func envBool(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }

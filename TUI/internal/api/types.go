@@ -65,6 +65,7 @@ func (m Message) ParsedTrace() (Trace, bool) {
 	if err := json.Unmarshal(m.Trace, &t); err != nil || len(t.Steps) == 0 {
 		return Trace{}, false
 	}
+	cleanTrace(&t)
 	return t, true
 }
 
@@ -149,10 +150,13 @@ type ProviderInfo struct {
 
 // ProviderRow is a configured provider (GET /providers), usable or not.
 type ProviderRow struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	BaseURL      string `json:"baseUrl"`
-	APIKey       string `json:"apiKey"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	BaseURL string `json:"baseUrl"`
+	// HasKey says a key is saved. The key itself is never sent: it can be
+	// replaced, not read. KeyHint is its last four characters for a long key.
+	HasKey       bool   `json:"hasKey"`
+	KeyHint      string `json:"keyHint"`
 	Connected    bool   `json:"connected"`
 	Enabled      bool   `json:"enabled"`
 	DefaultModel string `json:"defaultModel"`
@@ -204,16 +208,16 @@ type TaskScope struct {
 
 // ScheduledTask is one instruction the scheduler will run, once, at a time of its own.
 type ScheduledTask struct {
-	ID        string `json:"id"`
-	Prompt    string `json:"prompt"`
-	ChatID    string `json:"chatId"`
-	RunAt     int64  `json:"runAt"`
-	Enabled   bool   `json:"enabled"`
-	LastRunAt int64  `json:"lastRunAt"`
+	ID         string `json:"id"`
+	Prompt     string `json:"prompt"`
+	ChatID     string `json:"chatId"`
+	RunAt      int64  `json:"runAt"`
+	Enabled    bool   `json:"enabled"`
+	LastRunAt  int64  `json:"lastRunAt"`
 	LastStatus string `json:"lastStatus"`
 	LastError  string `json:"lastError"`
-	CreatedAt int64  `json:"createdAt"`
-	UpdatedAt int64  `json:"updatedAt"`
+	CreatedAt  int64  `json:"createdAt"`
+	UpdatedAt  int64  `json:"updatedAt"`
 }
 
 // ScheduledTaskInput is the fields a new task is booked with.
