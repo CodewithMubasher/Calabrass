@@ -144,6 +144,43 @@ func TestScheduleToolBooksATask(t *testing.T) {
 	}
 }
 
+// A user who says "every morning" gets a repeating row, and a repeat the
+// version does not understand is refused rather than stored.
+func TestScheduleToolBooksARepeatingTask(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "calabrass.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	s := &Server{store: st}
+
+	if _, err := s.scheduleFromTool(ctx, "chat-1", "", scheduleTaskArgs{
+		Prompt:       "Water the plants",
+		AfterMinutes: 60,
+		Repeat:       "daily",
+	}); err != nil {
+		t.Fatalf("schedule: %v", err)
+	}
+
+	tasks, err := st.ListScheduledTasks(ctx)
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].Repeat != string(store.RepeatDaily) {
+		t.Fatalf("got %+v, want one daily task", tasks)
+	}
+
+	if _, err := s.scheduleFromTool(ctx, "chat-1", "", scheduleTaskArgs{
+		Prompt:       "Never",
+		AfterMinutes: 60,
+		Repeat:       "hourly",
+	}); err == nil {
+		t.Fatal("an unknown repeat was accepted")
+	}
+}
+
 // A time that has already been and gone cannot be scheduled, and saying so is
 // better than booking a task that fires the moment it is created.
 func TestScheduleToolRefusesThePast(t *testing.T) {
@@ -197,7 +234,7 @@ func TestTaskLifecycle(t *testing.T) {
 	}
 
 	// Running it once is what stops it coming due again.
-	if err := st.MarkScheduledTask(ctx, task.ID, time.Now().UnixMilli(), "ok", ""); err != nil {
+	if err := st.FinishScheduledTask(ctx, task.ID, time.Now().UnixMilli(), "ok", "", 0); err != nil {
 		t.Fatalf("mark: %v", err)
 	}
 	task, err = st.GetScheduledTask(ctx, task.ID)
@@ -224,6 +261,122 @@ func TestTaskLifecycle(t *testing.T) {
 	}
 }
 
+// A repeating task is a different shape of timer: it keeps having turns, so a
+// run advances it to its next occurrence instead of retiring it.
+func TestRepeatingTaskReArmsAfterARun(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "calabrass.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	due := time.Now().Add(-time.Minute).UnixMilli()
+	task, err := st.CreateScheduledTask(ctx, store.ScheduledTask{
+		Prompt:  "Water the plants",
+		RunAt:   due,
+		Enabled: true,
+		Repeat:  string(store.RepeatDaily),
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if tasks, _ := st.DueScheduledTasks(ctx, time.Now().UnixMilli(), 10); len(tasks) != 1 {
+		t.Fatalf("a due repeating task is not due: got %d", len(tasks))
+	}
+
+	s := &Server{store: st, log: slog.Default()}
+	s.recordRun(ctx, task, "ok", "")
+
+	task, err = st.GetScheduledTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if task.HasRun() {
+		t.Error("a repeating task was retired after one run")
+	}
+	if task.LastStatus != "ok" || task.LastRunAt == 0 {
+		t.Errorf("the run was not recorded: %+v", task)
+	}
+	if task.RunAt <= time.Now().UnixMilli() {
+		t.Errorf("the next occurrence is still in the past: %d", task.RunAt)
+	}
+	if tasks, _ := st.DueScheduledTasks(ctx, time.Now().UnixMilli(), 10); len(tasks) != 0 {
+		t.Errorf("a repeating task came due twice in one occurrence: got %d", len(tasks))
+	}
+	// It is due again when the next occurrence arrives.
+	if tasks, _ := st.DueScheduledTasks(ctx, task.RunAt, 10); len(tasks) != 1 {
+		t.Errorf("the next occurrence is not due when it arrives: got %d", len(tasks))
+	}
+}
+
+// nextOccurrence steps from the scheduled time, not from now: a laptop woken
+// late must still run at its chosen clock time, and missed turns are skipped
+// rather than replayed in a burst.
+func TestNextOccurrence(t *testing.T) {
+	base := time.Date(2026, time.March, 2, 9, 30, 0, 0, time.UTC)
+
+	tests := []struct {
+		name   string
+		from   time.Time
+		repeat store.Repeat
+		now    time.Time
+		want   time.Time
+	}{
+		{"once", base, store.RepeatOnce, base, time.Time{}},
+		{"unknown", base, store.Repeat("hourly"), base, time.Time{}},
+		{"daily", base, store.RepeatDaily, base, base.AddDate(0, 0, 1)},
+		{"weekly", base, store.RepeatWeekly, base, base.AddDate(0, 0, 7)},
+		{"monthly", base, store.RepeatMonthly, base, base.AddDate(0, 1, 0)},
+		{
+			// Woken on the fourth day after base, three turns were missed: only
+			// the one still ahead is scheduled.
+			"daily skips missed turns instead of replaying them",
+			base, store.RepeatDaily, base.AddDate(0, 0, 3).Add(2 * time.Hour),
+			base.AddDate(0, 0, 4),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := nextOccurrence(test.from, test.repeat, test.now)
+			if !got.Equal(test.want) {
+				t.Errorf("got %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+// An unknown repeat is refused at the edge rather than stored and ignored.
+func TestScheduleRejectsUnknownRepeat(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "calabrass.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	server := httptest.NewServer(NewServer(Deps{Store: st, Logger: slog.Default()}))
+	t.Cleanup(server.Close)
+	token := signUpAndGetToken(t, server)
+
+	body := `{"prompt":"Never","runAt":` + strconv.FormatInt(time.Now().Add(time.Hour).UnixMilli(), 10) + `,"repeat":"hourly"}`
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/api/schedules", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	res, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("an unknown repeat answered %s, want 400", res.Status)
+	}
+}
+
 // The endpoints the page drives, end to end through the router: booking a task,
 // reading it back, pausing it, giving it a new time, and removing it. Nothing
 // here reaches a model.
@@ -244,13 +397,16 @@ func TestScheduleEndpoints(t *testing.T) {
 
 	due := time.Now().Add(time.Minute).UnixMilli()
 	tasks := callSchedules(t, server, token, http.MethodPost, "/api/schedules",
-		`{"prompt":"Shut the laptop down","runAt":`+strconv.FormatInt(due, 10)+`}`)
+		`{"prompt":"Shut the laptop down","runAt":`+strconv.FormatInt(due, 10)+`,"repeat":"daily"}`)
 	if len(tasks) != 1 {
 		t.Fatalf("booking a task answered with %d of them", len(tasks))
 	}
 	task := tasks[0]
 	if task.Prompt != "Shut the laptop down" || task.RunAt != due || !task.Enabled {
 		t.Fatalf("the task came back as %+v", task)
+	}
+	if task.Repeat != string(store.RepeatDaily) {
+		t.Fatalf("the repeat came back as %q", task.Repeat)
 	}
 
 	tasks = callSchedules(t, server, token, http.MethodGet, "/api/schedules", "")

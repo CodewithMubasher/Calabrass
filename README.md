@@ -55,7 +55,7 @@ Calabrass is a **local-first, single-user AI assistant** that runs on your machi
 - **Agent loop** plans, calls tools, and iterates until the task is done.
 - **Approvals** — running a command asks you first; you can allow it once, allow that kind of command in this project, or allow commands for the session. Anything that reaches outside the project, or acts on the outside world, asks every time.
 - **Workspaces** — point the agent at a folder and it reads/writes files there with full context.
-- **Schedules** — one-time tasks that run the agent at a set time, unattended. A scheduled task may read and edit files in its project, and run only the commands you list when you create it. (Recurring schedules are not built yet.)
+- **Schedules** — tasks that run the agent at a set time, unattended: once, or every day, week or month. A scheduled task may read and edit files in its project, and run only the commands you list when you create it. Turns missed while the host was off are skipped, not replayed.
 
 ## 🔌 MCP Connectors
 
@@ -249,7 +249,9 @@ CALABRASS_QUOTAS=model_free_tier_quotas.md  # Free-tier limits file (your edits 
 - [ ] macOS / Linux builds (Wails supports them)
 - [ ] Plugin system for custom tools
 - [ ] Shared workspace collaboration (opt-in, local network)
-- [ ] Recurring schedules; a run ledger; a system-tray icon for the background host
+- [x] Recurring schedules (daily, weekly, monthly)
+- [x] A run ledger
+- [ ] A system-tray icon for the background host
 - [ ] Agent memory / long-term context across sessions
 - [ ] More bundled MCP servers (browser, database, git)
 

@@ -42,4 +42,5 @@ func cleanApproval(a *Approval) {
 func cleanTask(t *ScheduledTask) {
 	t.Prompt = termsafe.Clean(t.Prompt)
 	t.LastError = termsafe.Clip(t.LastError, 300)
+	t.Repeat = termsafe.Line(t.Repeat)
 }

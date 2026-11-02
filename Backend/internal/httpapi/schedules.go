@@ -32,6 +32,8 @@ func (s *Server) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Prompt string `json:"prompt"`
 		RunAt  int64  `json:"runAt"`
+		// Repeat is "", "daily", "weekly" or "monthly".
+		Repeat string `json:"repeat"`
 		// Scope is what the person pre-approves for this run. The model cannot
 		// set it: a task it books gets the default.
 		Scope *permission.Scope `json:"scope"`
@@ -50,12 +52,17 @@ func (s *Server) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("a time is required"))
 		return
 	}
+	if !store.ValidRepeat(req.Repeat) {
+		writeError(w, http.StatusBadRequest, store.ErrBadRepeat)
+		return
+	}
 
 	if _, err := s.store.CreateScheduledTask(r.Context(), store.ScheduledTask{
 		UserID:  user.ID,
 		Prompt:  prompt,
 		RunAt:   req.RunAt,
 		Enabled: true,
+		Repeat:  req.Repeat,
 		Scope:   scopeJSON(req.Scope),
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -70,6 +77,8 @@ func (s *Server) handleUpdateSchedule(w http.ResponseWriter, r *http.Request) {
 		Prompt  *string `json:"prompt"`
 		RunAt   *int64  `json:"runAt"`
 		Enabled *bool   `json:"enabled"`
+		// Repeat is "", "daily", "weekly" or "monthly".
+		Repeat *string `json:"repeat"`
 		// Scope replaces what the task may do while no one is watching.
 		Scope *permission.Scope `json:"scope"`
 	}
@@ -106,6 +115,21 @@ func (s *Server) handleUpdateSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Enabled != nil {
 		task.Enabled = *req.Enabled
+	}
+	if req.Repeat != nil {
+		if !store.ValidRepeat(*req.Repeat) {
+			writeError(w, http.StatusBadRequest, store.ErrBadRepeat)
+			return
+		}
+		task.Repeat = *req.Repeat
+		// Turning a finished one-shot task into a repeating one arms it for its
+		// next occurrence instead of firing once for a time that already passed.
+		if task.Repeat != "" && task.RunAt <= time.Now().UnixMilli() {
+			if next := nextOccurrence(time.UnixMilli(task.RunAt), store.Repeat(task.Repeat), time.Now()); !next.IsZero() {
+				task.RunAt = next.UnixMilli()
+				task.LastRunAt, task.LastStatus, task.LastError = 0, "", ""
+			}
+		}
 	}
 	if req.Scope != nil {
 		task.Scope = scopeJSON(req.Scope)
@@ -211,6 +235,8 @@ type scheduleTaskArgs struct {
 	// AfterMinutes is a delay rather than a time, which is what "in ten
 	// minutes" comes to without any arithmetic.
 	AfterMinutes int `json:"after_minutes,omitempty" jsonschema:"description=How many minutes from now to run it. Leave this out when you give run_at"`
+	// Repeat is how often it should run again after the first time.
+	Repeat string `json:"repeat,omitempty" jsonschema:"description=How often it should run again after the first time: daily, weekly or monthly. Leave it out for a one-time task"`
 }
 
 // scheduleTool lets a chat book work for later. It is added to a turn rather
@@ -218,12 +244,12 @@ type scheduleTaskArgs struct {
 // and a turn of its own, not something done to the project.
 func (s *Server) scheduleTool(chatID, userID string) goai.Tool {
 	return goai.NewTool("schedule_task",
-		"Set a timer that runs one instruction later — in a few minutes, or at a clock time. "+
-			"Use it whenever the user asks for something to happen after a delay or at a given time, "+
+		"Set a timer that runs one instruction later — in a few minutes, at a clock time, or on a daily, weekly or monthly repeat. "+
+			"Use it whenever the user asks for something to happen after a delay, at a given time, or again and again, "+
 			"including anything about their own machine, which the instruction can still do when it runs. "+
 			"The instruction runs in this conversation later, with nobody watching, so it can read and edit "+
-				"files in the project but cannot run commands or reach outside it unless the user has allowed "+
-				"that for the task on the Schedules page. If the instruction needs a command, say so when you tell the user. "+
+			"files in the project but cannot run commands or reach outside it unless the user has allowed "+
+			"that for the task on the Schedules page. If the instruction needs a command, say so when you tell the user. "+
 			"Tell the user the time it is set for, in their own clock.",
 		func(ctx context.Context, args scheduleTaskArgs) (string, error) {
 			return s.scheduleFromTool(ctx, chatID, userID, args)
@@ -247,6 +273,9 @@ func (s *Server) scheduleFromTool(ctx context.Context, chatID, userID string, ar
 		return "", fmt.Errorf("%s has already passed on this machine, which is %s now",
 			runAt.Format("15:04"), now.Format("15:04"))
 	}
+	if !store.ValidRepeat(args.Repeat) {
+		return "", fmt.Errorf("%q is not a repeat I can read; use daily, weekly or monthly", args.Repeat)
+	}
 
 	if _, err := s.store.CreateScheduledTask(ctx, store.ScheduledTask{
 		UserID:  userID,
@@ -254,14 +283,25 @@ func (s *Server) scheduleFromTool(ctx context.Context, chatID, userID string, ar
 		ChatID:  chatID,
 		RunAt:   runAt.UnixMilli(),
 		Enabled: true,
+		Repeat:  args.Repeat,
 	}); err != nil {
 		return "", err
 	}
 
-	return fmt.Sprintf("Scheduled: %s. It runs %s — %s.",
+	repeat := ""
+	switch store.Repeat(args.Repeat) {
+	case store.RepeatDaily:
+		repeat = ", then every day"
+	case store.RepeatWeekly:
+		repeat = ", then every week"
+	case store.RepeatMonthly:
+		repeat = ", then every month"
+	}
+	return fmt.Sprintf("Scheduled: %s. It runs %s — %s%s.",
 		prompt,
 		humanUntil(now, runAt),
 		runAt.Format("Monday 2 January at 15:04"),
+		repeat,
 	), nil
 }
 

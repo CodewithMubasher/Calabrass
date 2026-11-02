@@ -162,21 +162,29 @@ function stateOf(task: ScheduledTask): { label: string; className: string } {
   if (task.lastStatus === "missed") {
     return { label: "Missed", className: "bg-amber-500/10 text-amber-400" }
   }
-  if (task.lastRunAt > 0) {
-    return { label: "Ran", className: "bg-emerald-500/10 text-emerald-400" }
-  }
   if (!task.enabled) {
     return { label: "Paused", className: "bg-white/5 text-white/30" }
+  }
+  // A repeating task has run before and will run again, so "Ran" would be
+  // true but misleading: what matters is that it is armed.
+  if (task.repeat !== "") {
+    return { label: "Repeating", className: "bg-sky-500/10 text-sky-400" }
+  }
+  if (task.lastRunAt > 0) {
+    return { label: "Ran", className: "bg-emerald-500/10 text-emerald-400" }
   }
   return { label: "Scheduled", className: "bg-sky-500/10 text-sky-400" }
 }
 
-/** When a task is due, or when it last ran. */
+/** When a task is next due, or when a finished one last ran. */
 function whenText(task: ScheduledTask, now: number): string {
-  if (task.lastRunAt > 0) {
+  // A repeating task always points at its next occurrence; only a finished
+  // one-shot task is described by its last run.
+  if (task.repeat === "" && task.lastRunAt > 0) {
     return `ran ${since(task.lastRunAt, now)}`
   }
-  return `${until(task.runAt, now)} · ${clockOf(task.runAt)}`
+  const next = `${until(task.runAt, now)} · ${clockOf(task.runAt)}`
+  return task.repeat === "" ? next : `${task.repeat} · ${next}`
 }
 
 function clockOf(ms: number): string {

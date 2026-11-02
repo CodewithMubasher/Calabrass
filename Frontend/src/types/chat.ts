@@ -272,10 +272,18 @@ export interface SkillInfo {
 }
 
 /**
- * One instruction the scheduler will run, once, at a time of its own.
+ * How often a task runs again after a run. The empty value is a one-shot task,
+ * which runs once and remembers that it has.
+ */
+export type ScheduleRepeat = "" | "daily" | "weekly" | "monthly"
+
+/**
+ * One instruction the scheduler will run at a time of its own, once or on a
+ * daily/weekly/monthly repeat.
  *
- * It is a timer rather than a cron: the row remembers its run, and giving it a
- * new time arms it again.
+ * A one-shot task is a timer: the row remembers its run, and giving it a new
+ * time arms it again. A repeating task keeps having turns; `runAt` is always
+ * its next occurrence.
  */
 export interface ScheduledTask {
   id: string
@@ -283,9 +291,11 @@ export interface ScheduledTask {
   prompt: string
   /** The conversation it speaks in; empty until it has run once. */
   chatId: string
-  /** When it is due, in Unix milliseconds. */
+  /** When it is due, in Unix milliseconds. For a repeat, the next occurrence. */
   runAt: number
   enabled: boolean
+  /** How often it runs again; "" is once. */
+  repeat: ScheduleRepeat
   /** When it last ran, zero while it has not. */
   lastRunAt: number
   /** How the last run went: "" while it has not run, then "ok", "error" or "missed". */
@@ -311,6 +321,7 @@ export interface TaskScope {
 export interface ScheduledTaskInput {
   prompt: string
   runAt: number
+  repeat?: ScheduleRepeat
   scope?: TaskScope
 }
 
@@ -319,6 +330,7 @@ export interface ScheduledTaskPatch {
   prompt?: string
   runAt?: number
   enabled?: boolean
+  repeat?: ScheduleRepeat
   scope?: TaskScope
 }
 

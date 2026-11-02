@@ -201,8 +201,9 @@ func (m Model) sidebarView(inner, innerH int) string {
 	now := time.Now().UnixMilli()
 	activeSchedules := 0
 	for _, s := range m.schedules {
-		// Skip completed tasks (they vanish after done)
-		if s.LastRunAt > 0 {
+		// Skip completed one-shot tasks (they vanish after done). A repeating
+		// task is still live: run_at is its next occurrence.
+		if s.LastRunAt > 0 && s.Repeat == "" {
 			continue
 		}
 		// Skip disabled tasks
@@ -228,6 +229,9 @@ func (m Model) sidebarView(inner, innerH int) string {
 
 		// Show when it's due on the right - calculate first to know its width
 		when := formatScheduleTime(s.RunAt, now)
+		if s.Repeat != "" {
+			when += " · " + s.Repeat
+		}
 		whenRendered := muted.Render(when)
 		whenWidth := lipgloss.Width(whenRendered)
 
