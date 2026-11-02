@@ -46,41 +46,76 @@ export function useSchedulesState() {
 /**
  * Follow the task list for as long as the page is open. Returns the function
  * that closes the connection, which is what a `useEffect` hands back.
+ *
+ * The stream carries a short-lived ticket rather than the session token, so a
+ * dropped connection is reopened with a fresh one instead of letting
+ * EventSource retry a URL that may have expired.
  */
 export function watchSchedules(): () => void {
-  const source = new EventSource(api.scheduleStreamUrl())
+  let source: EventSource | null = null
+  let retry: number | undefined
+  let closed = false
 
-  source.addEventListener("schedules", (event) => {
+  const open = async () => {
+    if (closed) return
+    let url: string
     try {
-      const payload = JSON.parse((event as MessageEvent).data as string) as {
-        tasks?: ScheduledTask[]
+      url = await api.scheduleStreamUrl()
+    } catch {
+      if (closed) return
+      retry = window.setTimeout(() => void open(), 1500)
+      return
+    }
+    if (closed) return
+
+    const next = new EventSource(url)
+    source = next
+
+    next.addEventListener("schedules", (event) => {
+      try {
+        const payload = JSON.parse((event as MessageEvent).data as string) as {
+          tasks?: ScheduledTask[]
+        }
+        setState({ tasks: payload.tasks ?? [] })
+        clearNotice("schedules-stream")
+      } catch {
+        // A frame we cannot read is not worth dropping the connection over: the
+        // next snapshot will put the list right.
       }
-      setState({ tasks: payload.tasks ?? [] })
-      clearNotice("schedules-stream")
-    } catch {
-      // A frame we cannot read is not worth dropping the connection over: the
-      // next snapshot will put the list right.
-    }
-  })
+    })
 
-  // The server reports a failed read as an event; a transport failure arrives
-  // without a payload, and EventSource reconnects by itself.
-  source.addEventListener("error", (event) => {
-    const data = (event as MessageEvent).data
-    if (typeof data !== "string" || data === "") return
-    try {
-      const payload = JSON.parse(data) as { message?: string }
-      notifyError(
-        payload.message ?? "The task list could not be read.",
-        "Could not read the task list",
-        "schedules-stream"
-      )
-    } catch {
-      // Ignore it; the next snapshot is the authority.
-    }
-  })
+    // The server reports a failed read as an event with a payload; a transport
+    // failure or an expired ticket arrives without one, and is reopened here.
+    next.addEventListener("error", (event) => {
+      const data = (event as MessageEvent).data
+      if (typeof data === "string" && data !== "") {
+        try {
+          const payload = JSON.parse(data) as { message?: string }
+          notifyError(
+            payload.message ?? "The task list could not be read.",
+            "Could not read the task list",
+            "schedules-stream"
+          )
+        } catch {
+          // Ignore it; the next snapshot is the authority.
+        }
+        return
+      }
+      next.close()
+      if (source === next) source = null
+      if (closed) return
+      window.clearTimeout(retry)
+      retry = window.setTimeout(() => void open(), 1500)
+    })
+  }
 
-  return () => source.close()
+  void open()
+
+  return () => {
+    closed = true
+    window.clearTimeout(retry)
+    source?.close()
+  }
 }
 
 /** Book a task. Throws with the server's message so the dialog can show it. */

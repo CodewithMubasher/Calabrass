@@ -128,6 +128,8 @@ type Server struct {
 	// handler is the routed and wrapped mux, kept so the server itself can be
 	// handed to http.Server.
 	handler http.Handler
+	// tickets are the short-lived credentials the URL-only endpoints use.
+	tickets *streamTickets
 }
 
 // New builds the fully wired HTTP handler.
@@ -182,6 +184,7 @@ func NewServer(deps Deps) *Server {
 		// eight symbols and lives ten minutes, and this keeps guessing hopeless.
 		claimByIP: newAttemptLimiter(5, time.Minute),
 		claimAll:  newAttemptLimiter(40, time.Minute),
+		tickets:   newStreamTickets(),
 	}
 	s.broker.Audit = s.recordPermission
 
@@ -192,6 +195,7 @@ func NewServer(deps Deps) *Server {
 	mux.HandleFunc("GET /api/auth/me", s.handleMe)
 	mux.HandleFunc("POST /api/auth/local", s.handleLocalSignIn)
 	mux.HandleFunc("POST /api/auth/logout", s.handleSignOut)
+	mux.HandleFunc("POST /api/auth/stream-ticket", s.handleStreamTicket)
 	mux.HandleFunc("GET /api/host", s.handleHostInfo)
 	mux.HandleFunc("POST /api/host/shutdown", s.handleHostShutdown)
 	mux.HandleFunc("GET /api/ledger", s.handleListLedger)
@@ -348,7 +352,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		token := requestToken(r)
+		token := s.requestCredential(r)
 		user, err := s.auth.UserForToken(r.Context(), token)
 		if err != nil {
 			s.writeAuthError(w, err)

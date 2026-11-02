@@ -1,5 +1,5 @@
 import type { Chat } from "@/types/chat"
-import { getToken } from "@/lib/session"
+import { api } from "@/lib/api"
 
 /** The live voice socket: PCM in, transcript, tokens and audio out. */
 
@@ -26,14 +26,15 @@ export interface VoiceSocket {
   close: () => void
 }
 
-export function connectVoice(
+export async function connectVoice(
   onEvent: (event: VoiceEvent) => void,
   onState?: (open: boolean) => void
-): VoiceSocket {
-  const token = getToken()
-  const query = token ? `?access_token=${encodeURIComponent(token)}` : ""
+): Promise<VoiceSocket> {
+  // A WebSocket cannot carry an Authorization header, so the handshake uses a
+  // short-lived ticket instead of the session token in the URL.
+  const ticket = await api.streamTicket()
   const socket = new WebSocket(
-    `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/voice${query}`
+    `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/voice?stream_ticket=${encodeURIComponent(ticket)}`
   )
 
   // Control sent while the socket is still opening is held, not dropped, so the

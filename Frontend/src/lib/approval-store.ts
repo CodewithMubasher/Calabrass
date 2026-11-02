@@ -40,26 +40,58 @@ export function useApprovals() {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-/** Follow the waiting approvals while the app is open. Returns the closer. */
+/** Follow the waiting approvals while the app is open. Returns the closer.
+ *
+ *  The stream carries a short-lived ticket rather than the session token, so a
+ *  dropped connection is reopened with a fresh one. */
 export function watchApprovals(): () => void {
-  const source = new EventSource(api.approvalStreamUrl())
+  let source: EventSource | null = null
+  let retry: number | undefined
+  let closed = false
 
-  source.addEventListener("approvals", (event) => {
+  const open = async () => {
+    if (closed) return
+    let url: string
     try {
-      const payload = JSON.parse((event as MessageEvent).data as string) as {
-        approvals?: Approval[]
-      }
-      setState({ approvals: payload.approvals ?? [] })
+      url = await api.approvalStreamUrl()
     } catch {
-      // A frame that cannot be read is not worth dropping the connection over:
-      // the next snapshot puts the list right.
+      if (closed) return
+      retry = window.setTimeout(() => void open(), 1500)
+      return
     }
-  })
+    if (closed) return
 
-  // A transport failure arrives without a payload; EventSource reconnects by
-  // itself and the first frame after that is the full list again.
+    const next = new EventSource(url)
+    source = next
+
+    next.addEventListener("approvals", (event) => {
+      try {
+        const payload = JSON.parse((event as MessageEvent).data as string) as {
+          approvals?: Approval[]
+        }
+        setState({ approvals: payload.approvals ?? [] })
+      } catch {
+        // A frame that cannot be read is not worth dropping the connection over:
+        // the next snapshot puts the list right.
+      }
+    })
+
+    // A transport failure or an expired ticket arrives without a payload.
+    next.addEventListener("error", () => {
+      next.close()
+      if (source === next) source = null
+      if (closed) return
+      window.clearTimeout(retry)
+      retry = window.setTimeout(() => void open(), 1500)
+    })
+  }
+
+  void open()
+
   return () => {
-    source.close()
+    closed = true
+    window.clearTimeout(retry)
+    source?.close()
     setState({ approvals: [], answering: [] })
   }
 }

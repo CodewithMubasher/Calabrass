@@ -170,7 +170,7 @@ export function useVoice(greeting: string): VoiceState {
     // Each connection is numbered so a socket that has been replaced cannot
     // report state, or ask for a retry, on behalf of the one that is current.
     const generation = ++socketGenRef.current
-    const socket = connectVoice(handleEvent, (open) => {
+    void connectVoice(handleEvent, (open) => {
       if (generation !== socketGenRef.current) return
       liveSocketRef.current = open
       setLive(open)
@@ -185,7 +185,22 @@ export function useVoice(greeting: string): VoiceState {
         }, 1500)
       }
     })
-    socketRef.current = socket
+      .then((socket) => {
+        // A socket that arrived after a newer one replaced it, or after the
+        // panel closed, is not kept and never spoken through.
+        if (generation !== socketGenRef.current || closedRef.current) {
+          socket.close()
+          return
+        }
+        socketRef.current = socket
+      })
+      .catch((err) => {
+        console.warn("[voice] could not open the socket", err)
+        if (closedRef.current) return
+        window.setTimeout(() => {
+          if (!closedRef.current && generation === socketGenRef.current) connectRef.current()
+        }, 1500)
+      })
   }, [handleEvent])
 
   useEffect(() => {

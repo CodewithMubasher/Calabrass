@@ -238,7 +238,7 @@ CALABRASS_QUOTAS=model_free_tier_quotas.md  # Free-tier limits file (your edits 
 | Backend | Go 1.26, SQLite (modernc.org/sqlite), GoAI SDK, Server-Sent Events |
 | Desktop | Wails v2 (native WebView2 window) |
 | MCP | Official Go MCP SDK, stdio transport |
-| Auth | bcrypt (default cost), 30-day bearer tokens, SHA-256 token storage |
+| Auth | bcrypt (default cost), 30-day bearer tokens, SHA-256 token storage; short-lived stream tickets for EventSource, the voice socket and downloads |
 | Logging | slog JSONL to `%LOCALAPPDATA%\Calabrass\desktop.log` |
 
 ---
