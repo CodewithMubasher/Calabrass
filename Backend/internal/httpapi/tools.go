@@ -118,16 +118,10 @@ func (s *Server) setupTurnFor(ctx context.Context, userID string, workspace *age
 		briefs, offered := s.connectors.Turn(ctx, userID)
 		var skipped []string
 
-		// If agent has a specific connector, only use that one
+		// An agent bound to one connector gets that connector's tools and no one
+		// else's: not just described that way, but actually offered that way.
 		if agentConnectorID != "" {
-			filteredBriefs := []connectors.Brief{}
-			for _, brief := range briefs {
-				if brief.ID == agentConnectorID {
-					filteredBriefs = append(filteredBriefs, brief)
-					break
-				}
-			}
-			briefs = filteredBriefs
+			briefs, offered = restrictToConnector(briefs, offered, agentConnectorID)
 		}
 
 		tools, skipped = mergeTools(tools, offered)
@@ -357,4 +351,35 @@ func without(names, unwanted []string) []string {
 		}
 	}
 	return kept
+}
+
+// restrictToConnector narrows what a turn is offered to one connector: its brief
+// for the prompt, and its tools for the model to call. The two must narrow
+// together. A prompt that describes one connector while the model can still call
+// another's tools makes the model use tools it was never told about, and makes the
+// agent's restriction mean nothing.
+//
+// It fails closed. If the connector is not among those available (it is turned
+// off, or did not start), nothing is offered, never everything.
+func restrictToConnector(briefs []connectors.Brief, offered []goai.Tool, connectorID string) ([]connectors.Brief, []goai.Tool) {
+	var kept []connectors.Brief
+	allowed := map[string]bool{}
+	for _, brief := range briefs {
+		if brief.ID != connectorID {
+			continue
+		}
+		kept = append(kept, brief)
+		for _, name := range brief.Tools {
+			allowed[name] = true
+		}
+		break
+	}
+
+	tools := make([]goai.Tool, 0, len(allowed))
+	for _, tool := range offered {
+		if allowed[tool.Name] {
+			tools = append(tools, tool)
+		}
+	}
+	return kept, tools
 }
