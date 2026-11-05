@@ -14,6 +14,18 @@ The agent can run commands on your computer. Reaching the API is as good as reac
 
 A command the classifier does not recognise is tier 2, never tier 0. A chained command (`a && b`, pipes, redirection) takes the highest tier of its parts, and is never remembered as a pattern: what you approved would not be what runs next time.
 
+Some syntax is never a lookup, whatever word it starts with, because the shell works out what runs only after the words were read: command substitution (`$(...)`, backticks), variable expansion (`$NAME`, `${NAME}`, `%NAME%`), process substitution, and redirection that writes a file (`>`, `>>`). `echo $(rm -rf x)` and `cat a > b` are therefore tier 2 at least, and are asked about every time. Harmless redirection (`2>&1`, `>/dev/null`) does not count. Lookups that can run a program or write a file through a flag (`go list -toolexec`, `rg --pre`, `git diff --output`, `go env -w`) are not lookups either, and `git branch <name>` creates a branch, so only the listing forms of `git branch` are tier 0.
+
+### Files that run code
+
+Editing most files is tier 1. Editing a file that something *else* will run is asked about like a command (tier 2, every time, never in an unattended run): shell start-up files (`.bashrc`, `.profile`), `.envrc`, git configuration files (`.gitmodules`, `.gitattributes`), package-manager settings (`.npmrc`), CI and hook definitions (`.github/workflows`, `.husky`, `.gitlab-ci.yml`), editor tasks (`.vscode/tasks.json`, `launch.json`, `settings.json`), `.devcontainer` and `.ssh`.
+
+Anything inside `.git` is refused outright by the file tools: git runs the files there (hooks, `core.fsmonitor`) the next time anyone uses the repository. Change git state with git commands, which go through the gate as commands. Calabrass's own git calls ignore a repository's `core.fsmonitor` and hooks.
+
+### The project boundary
+
+The file tools and `run_command`'s working directory follow symbolic links before checking that a path is inside the project, including for files that do not exist yet. A link that points outside the project, or nowhere, is refused.
+
 ## Answering an approval
 
 When the agent needs a yes, you are asked, in whichever window you are using. You can answer from any open Calabrass window; the first answer wins.
@@ -44,7 +56,7 @@ Every decision at tier 2 or above, and how every unattended run ended, is writte
 Be honest about the limits:
 
 - **Commands run with your permissions.** The gate decides whether to *ask*; it is not an operating-system sandbox. Once you allow a command, it can do whatever that command can do as you. The file tools are confined to the project folder; commands are not.
-- The classifier works from the text of the command. It is deliberately cautious, but a determined or obfuscated command could look more harmless than it is. If a request looks wrong, deny it.
+- The classifier works from the text of the command (it does not parse the shell language yet; see the roadmap in CHANGES.md). It is deliberately cautious, but a determined or obfuscated command could look more harmless than it is. If a request looks wrong, deny it.
 - "Always allow" answers are remembered in memory only; they reset when the host restarts.
 - Voice and the crew's direct-delegate calls raise approvals that any open window can answer; if none is open, they time out and are refused.
 

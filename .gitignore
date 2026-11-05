@@ -1,15 +1,3 @@
-# Dependencies
-node_modules
-npm-wrapper/node_modules
-
-# The platform binaries the CLI release workflow assembles for the npm package
-npm-wrapper/binaries/
-
-# Build output
-dist
-dist-ssr
-build
-
 # Logs
 logs
 *.log
@@ -17,14 +5,14 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+lerna-debug.log*
 
-# Env
-.env
-.env.*
-!.env.example
+node_modules
+dist
+dist-ssr
 *.local
 
-# Editor
+# Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -34,50 +22,3 @@ pnpm-debug.log*
 *.njsproj
 *.sln
 *.sw?
-
-# Go backend
-Backend/data/
-Backend/*.exe
-
-# MCP servers we ship: the built binary, and the temporary file the Go toolchain
-# leaves beside it when the binary was in use while it was being rebuilt
-MCP/*/*.exe
-MCP/*/*.exe~
-MCP/*/*.test
-
-# The agent's workspaces: the files it creates while working
-/workspace/
-
-# Wails desktop app. The icon and manifest are source; the executable and
-# generated frontend/wails bindings are not.
-!Backend/desktop/build/
-!Backend/desktop/build/**
-Backend/desktop/build/bin/
-!Backend/desktop/dist/
-Backend/desktop/dist/*
-!Backend/desktop/dist/.gitkeep
-Backend/desktop/wailsjs/
-
-# Wails' frontend dependency-install fingerprint.
-Frontend/package.json.md5
-
-# The desktop build's loopback API address is not a secret.
-!Frontend/.env.desktop
-
-# The Windows installer, as built. The script and its Inno Setup source are the
-# source; the setup executable is the product of them.
-installer/out/
-
-# TUI build output
-TUI/calabrass-tui
-TUI/calabrass-tui.exe
-
-# The web interface is built from Frontend/ and copied in before the backend is
-# compiled (see build-all.ps1 and the release workflow). Only the placeholder
-# that keeps `go:embed` valid is tracked.
-!Backend/internal/webui/dist/
-Backend/internal/webui/dist/*
-!Backend/internal/webui/dist/.gitkeep
-!Backend/desktop/dist/
-Backend/desktop/dist/*
-!Backend/desktop/dist/.gitkeep

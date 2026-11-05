@@ -136,11 +136,6 @@ func newHeadlessEnv(t *testing.T, command string) headlessEnv {
 	}
 
 	workdir := t.TempDir()
-	// A file to copy: `cp` exists in both sh and PowerShell (Copy-Item), so the
-	// command tests run on Linux, macOS and Windows alike.
-	if err := os.WriteFile(filepath.Join(workdir, "source.txt"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	_, ch := do(t, web.URL, "POST", "/api/chats", token, nil,
 		map[string]any{"provider": providerID, "model": "fake-model", "workspacePath": workdir})
 	chatID := ch["chat"].(map[string]any)["id"].(string)
@@ -158,7 +153,7 @@ func (e headlessEnv) ledger(t *testing.T, query string) []map[string]any {
 }
 
 func TestUnattendedRunRefusesACommandOutsideItsScope(t *testing.T) {
-	env := newHeadlessEnv(t, "cp source.txt marker.txt")
+	env := newHeadlessEnv(t, "touch marker.txt")
 	events := headlessRun(t, env.base, env.token, env.chatID, map[string]any{"content": "make the marker", "unattended": true})
 
 	if !contains(events, "done") {
@@ -187,8 +182,8 @@ func TestUnattendedRunRefusesACommandOutsideItsScope(t *testing.T) {
 }
 
 func TestUnattendedRunInsideItsScopeRunsTheCommand(t *testing.T) {
-	env := newHeadlessEnv(t, "cp source.txt marker.txt")
-	scope := map[string]any{"maxTier": 2, "commands": []string{"cp"}}
+	env := newHeadlessEnv(t, "touch marker.txt")
+	scope := map[string]any{"maxTier": 2, "commands": []string{"touch *"}}
 	events := headlessRun(t, env.base, env.token, env.chatID,
 		map[string]any{"content": "make the marker", "unattended": true, "scope": scope})
 

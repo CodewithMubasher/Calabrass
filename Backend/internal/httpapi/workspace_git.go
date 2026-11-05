@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/CodewithMubasher/Calabrass/backend/internal/agent"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/proc"
 	"github.com/CodewithMubasher/Calabrass/backend/internal/store"
 )
@@ -245,7 +246,7 @@ func cloneInto(ctx context.Context, dir, remote string) error {
 
 	// The URL goes after `--` so a remote that begins with a dash is read as an
 	// address rather than as another option.
-	cmd := exec.CommandContext(ctx, "git", "clone", "--", remote)
+	cmd := exec.CommandContext(ctx, "git", append(agent.GitSafetyFlags(), "clone", "--", remote)...)
 	cmd.Dir = dir
 	proc.Hide(cmd)
 
@@ -263,7 +264,7 @@ func cloneInto(ctx context.Context, dir, remote string) error {
 // timeout, a non-zero exit — comes back as an error the caller reads as "no
 // answer", never as a panic.
 func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.CommandContext(ctx, "git", append(append([]string{"-C", dir}, agent.GitSafetyFlags()...), args...)...)
 	proc.Hide(cmd)
 	out, err := cmd.Output()
 	if err != nil {

@@ -78,68 +78,34 @@ export function setSelectedArtifactPath(chatId: string, path: string | null) {
  * screen without anyone asking for it.
  */
 export function watchArtifacts(chatId: string) {
-  let source: EventSource | null = null
-  let retry: number | undefined
-  let closed = false
+  const source = new EventSource(api.artifactStreamUrl(chatId))
 
-  const open = async () => {
-    if (closed) return
-    let url: string
-    try {
-      url = await api.artifactStreamUrl(chatId)
-    } catch {
-      if (closed) return
-      retry = window.setTimeout(() => void open(), 1500)
-      return
+  source.addEventListener("artifacts", (event) => {
+    const payload = JSON.parse((event as MessageEvent<string>).data) as {
+      files?: ArtifactFile[]
     }
-    if (closed) return
+    const files = payload.files ?? []
 
-    const next = new EventSource(url)
-    source = next
+    // Detect new files and auto-open panel
+    const prevPaths = previousFiles.get(chatId) ?? new Set<string>()
+    const newFiles = files.filter((f) => !prevPaths.has(f.path))
+    previousFiles.set(chatId, new Set(files.map((f) => f.path)))
 
-    next.addEventListener("artifacts", (event) => {
-      const payload = JSON.parse((event as MessageEvent<string>).data) as {
-        files?: ArtifactFile[]
-      }
-      const files = payload.files ?? []
+    // Auto-open artifact panel if new .md files appeared
+    const newMdFiles = newFiles.filter((f) => f.extension.toLowerCase() === "md")
+    if (newMdFiles.length > 0) {
+      // Always open panel and select the newest .md file
+      setArtifactsOpen(true)
+      
+      // Auto-open the newest .md file in the detail view
+      const newestMd = newMdFiles.reduce((latest, f) => 
+        f.modified > latest.modified ? f : latest
+      )
+      setSelectedArtifactPath(chatId, newestMd.path)
+    }
 
-      // Detect new files and auto-open panel
-      const prevPaths = previousFiles.get(chatId) ?? new Set<string>()
-      const newFiles = files.filter((f) => !prevPaths.has(f.path))
-      previousFiles.set(chatId, new Set(files.map((f) => f.path)))
+    emit({ chatId, files })
+  })
 
-      // Auto-open artifact panel if new .md files appeared
-      const newMdFiles = newFiles.filter((f) => f.extension.toLowerCase() === "md")
-      if (newMdFiles.length > 0) {
-        // Always open panel and select the newest .md file
-        setArtifactsOpen(true)
-
-        // Auto-open the newest .md file in the detail view
-        const newestMd = newMdFiles.reduce((latest, f) =>
-          f.modified > latest.modified ? f : latest
-        )
-        setSelectedArtifactPath(chatId, newestMd.path)
-      }
-
-      emit({ chatId, files })
-    })
-
-    // A transport failure or an expired ticket arrives without a payload: the
-    // connection is reopened with a fresh ticket instead of retrying a dead URL.
-    next.addEventListener("error", () => {
-      next.close()
-      if (source === next) source = null
-      if (closed) return
-      window.clearTimeout(retry)
-      retry = window.setTimeout(() => void open(), 1500)
-    })
-  }
-
-  void open()
-
-  return () => {
-    closed = true
-    window.clearTimeout(retry)
-    source?.close()
-  }
+  return () => source.close()
 }

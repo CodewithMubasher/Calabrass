@@ -191,17 +191,10 @@ func (s *Server) runScheduledTask(ctx context.Context, task store.ScheduledTask)
 	return genErr
 }
 
-// recordRun writes down how a task went, and arms a repeating task for its next
-// occurrence in the same write, so a run is never counted twice.
+// recordRun writes down how a task went, so the page can say.
 func (s *Server) recordRun(ctx context.Context, task store.ScheduledTask, status, message string) {
-	next := int64(0)
-	if task.Repeat != "" {
-		if at := nextOccurrence(time.UnixMilli(task.RunAt), store.Repeat(task.Repeat), time.Now()); !at.IsZero() {
-			next = at.UnixMilli()
-		}
-	}
-	if err := s.store.FinishScheduledTask(
-		context.WithoutCancel(ctx), task.ID, time.Now().UnixMilli(), status, message, next,
+	if err := s.store.MarkScheduledTask(
+		context.WithoutCancel(ctx), task.ID, time.Now().UnixMilli(), status, message,
 	); err != nil {
 		s.log.Error("could not record a scheduled run", "task", task.ID, "error", err)
 	}
@@ -219,36 +212,6 @@ func (s *Server) recordRun(ctx context.Context, task store.ScheduledTask, status
 		UserID: task.UserID, Kind: "run", ChatID: task.ChatID, Tool: "scheduled task",
 		Summary: summary, Outcome: outcome, Unattended: true,
 	})
-}
-
-// nextOccurrence moves a task's scheduled time forward until it is in the
-// future. It steps from the time the task was due rather than from "now", so a
-// daily task stays at its chosen clock time across a late wake-up and a weekly
-// task stays on its chosen weekday. Missed occurrences are skipped rather than
-// replayed in a burst. A one-shot task (or an unknown repeat) has no next time.
-func nextOccurrence(from time.Time, repeat store.Repeat, now time.Time) time.Time {
-	if from.IsZero() || repeat == store.RepeatOnce || !store.ValidRepeat(string(repeat)) {
-		return time.Time{}
-	}
-	next := from
-	// The loop only runs as many times as occurrences were missed; the guard is
-	// for a clock that is wrong by centuries, not for normal use.
-	for i := 0; i < 10000 && !next.After(now); i++ {
-		switch repeat {
-		case store.RepeatDaily:
-			next = next.AddDate(0, 0, 1)
-		case store.RepeatWeekly:
-			next = next.AddDate(0, 0, 7)
-		case store.RepeatMonthly:
-			next = next.AddDate(0, 1, 0)
-		default:
-			return time.Time{}
-		}
-	}
-	if !next.After(now) {
-		return time.Time{}
-	}
-	return next
 }
 
 func statusFor(err error) string {

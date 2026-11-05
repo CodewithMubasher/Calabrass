@@ -73,12 +73,12 @@ func (s *Server) seedProviderPresets(ctx context.Context, userID string) {
 	for _, preset := range providers.ProviderPresets {
 		// Use UpsertProvider to create or update the preset
 		err := s.store.UpsertProvider(ctx, store.ProviderRecord{
-			ID:      preset.ID,
-			Name:    preset.Name,
-			BaseURL: preset.BaseURL,
-			APIKey:  "",    // Empty - user must add their own key
-			Enabled: false, // Disabled by default
-			Custom:  false, // These are built-in presets
+			ID:        preset.ID,
+			Name:      preset.Name,
+			BaseURL:   preset.BaseURL,
+			APIKey:    "", // Empty - user must add their own key
+			Enabled:   false, // Disabled by default
+			Custom:    false, // These are built-in presets
 		}, userID)
 		if err != nil {
 			s.log.Warn("could not register a provider preset",
@@ -164,42 +164,11 @@ func bearerToken(r *http.Request) string {
 	return strings.TrimSpace(header[7:])
 }
 
-// requestToken is the session the request proves itself with in its header.
-// Credentials are never read from the URL: a browser cannot set a header on an
-// EventSource, a WebSocket or a download link, so those endpoints take a
-// short-lived ticket instead (see requestCredential).
+// requestToken accepts the header, or the query parameter the streaming
+// endpoints use because EventSource and WebSocket cannot set headers.
 func requestToken(r *http.Request) string {
-	return bearerToken(r)
-}
-
-// requestCredential is the session a request stands for: the bearer header
-// everywhere, or a stream ticket on the few paths a browser cannot put a header
-// on. A ticket is refused anywhere else, so one caught in a URL cannot be used
-// to call the API.
-func (s *Server) requestCredential(r *http.Request) string {
 	if token := bearerToken(r); token != "" {
 		return token
 	}
-	if !isStreamPath(r.URL.Path) {
-		return ""
-	}
-	return s.tickets.resolve(r.URL.Query().Get("stream_ticket"))
-}
-
-// isStreamPath reports whether this path is served to something that cannot set
-// a request header: EventSource streams, the voice socket and downloads.
-func isStreamPath(path string) bool {
-	switch path {
-	case "/api/schedules/stream",
-		"/api/approvals/stream",
-		"/api/crew/stream",
-		"/api/artifacts/stream",
-		"/api/artifacts/content",
-		"/api/artifacts/file",
-		"/api/artifacts/archive":
-		return true
-	case "/api/voice":
-		return true
-	}
-	return false
+	return strings.TrimSpace(r.URL.Query().Get("access_token"))
 }

@@ -1,6 +1,4 @@
 import { useState } from "react"
-import { HugeiconsIcon } from "@hugeicons/react"
-import { ArrowDown01Icon } from "@hugeicons/core-free-icons"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -11,17 +9,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectIcon,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { createSchedule, deleteSchedule, updateSchedule } from "@/lib/schedule-store"
 import { notifyError } from "@/lib/toast"
-import type { ScheduledTask, ScheduleRepeat, TaskScope } from "@/types/chat"
+import type { ScheduledTask, TaskScope } from "@/types/chat"
 
 // The dialogs sit on the same dark panel as the reference project's, with our
 // own popover token standing in for its neutral-900.
@@ -29,25 +19,6 @@ const SURFACE = "sm:max-w-md bg-popover border border-white/10"
 
 const FIELD =
   "h-9 border-white/10 bg-white/5 px-3 text-white/80 placeholder:text-white/30"
-
-/**
- * The repeat picker's choices. "once" is the form's word for the empty repeat
- * the API stores, because a select needs a value to show.
- */
-const REPEATS: { value: string; label: string }[] = [
-  { value: "once", label: "Once" },
-  { value: "daily", label: "Every day" },
-  { value: "weekly", label: "Every week" },
-  { value: "monthly", label: "Every month" },
-]
-
-function repeatChoice(repeat: ScheduleRepeat | undefined): string {
-  return repeat ? repeat : "once"
-}
-
-function repeatValue(choice: string): ScheduleRepeat {
-  return choice === "once" ? "" : (choice as ScheduleRepeat)
-}
 
 function Field({
   label,
@@ -81,7 +52,6 @@ export function ScheduleDialog({
 }) {
   const [prompt, setPrompt] = useState(task?.prompt ?? "")
   const [runAt, setRunAt] = useState(() => toInputValue(task?.runAt ?? defaultRunAt()))
-  const [repeat, setRepeat] = useState(() => repeatChoice(task?.repeat))
   const [confirming, setConfirming] = useState(false)
   const [saving, setSaving] = useState(false)
   // One command pattern per line. Empty means the task may read and edit files
@@ -98,19 +68,9 @@ export function ScheduleDialog({
     setSaving(true)
     try {
       if (task) {
-        await updateSchedule(task.id, {
-          prompt: prompt.trim(),
-          runAt: at,
-          repeat: repeatValue(repeat),
-          scope: scopeOf(commands),
-        })
+        await updateSchedule(task.id, { prompt: prompt.trim(), runAt: at, scope: scopeOf(commands) })
       } else {
-        await createSchedule({
-          prompt: prompt.trim(),
-          runAt: at,
-          repeat: repeatValue(repeat),
-          scope: scopeOf(commands),
-        })
+        await createSchedule({ prompt: prompt.trim(), runAt: at, scope: scopeOf(commands) })
       }
       onOpenChange(false)
     } catch (err) {
@@ -175,38 +135,6 @@ export function ScheduleDialog({
                 className={FIELD}
               />
             </Field>
-            <div className="mt-4">
-              <Field label="Repeat">
-                <Select
-                  value={repeat}
-                  onValueChange={(next) => setRepeat(next ?? "once")}
-                  items={REPEATS}
-                >
-                  <SelectTrigger aria-label="Repeat">
-                    <SelectValue placeholder="Once" />
-                    <SelectIcon>
-                      <HugeiconsIcon
-                        icon={ArrowDown01Icon}
-                        strokeWidth={2}
-                        className="size-3.5"
-                      />
-                    </SelectIcon>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {REPEATS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <p className="mt-2 text-xs text-white/30">
-                A repeating task runs again at the same time each day, week or
-                month. Turns missed while the host was off are skipped, not run
-                in a burst.
-              </p>
-            </div>
             <div className="mt-4">
               <Field label="Commands it may run (optional)">
                 <textarea

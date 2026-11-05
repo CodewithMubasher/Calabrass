@@ -132,7 +132,7 @@ func (s *Server) handleRevokeDevice(w http.ResponseWriter, r *http.Request) {
 // does it carry the session of a paired device? It also notes, at most once a
 // minute per device, that the device was just seen.
 func (s *Server) deviceOK(r *http.Request) bool {
-	token := s.requestCredential(r)
+	token := requestToken(r)
 	if token == "" {
 		return false
 	}

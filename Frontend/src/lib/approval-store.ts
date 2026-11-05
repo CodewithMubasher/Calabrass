@@ -40,58 +40,26 @@ export function useApprovals() {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-/** Follow the waiting approvals while the app is open. Returns the closer.
- *
- *  The stream carries a short-lived ticket rather than the session token, so a
- *  dropped connection is reopened with a fresh one. */
+/** Follow the waiting approvals while the app is open. Returns the closer. */
 export function watchApprovals(): () => void {
-  let source: EventSource | null = null
-  let retry: number | undefined
-  let closed = false
+  const source = new EventSource(api.approvalStreamUrl())
 
-  const open = async () => {
-    if (closed) return
-    let url: string
+  source.addEventListener("approvals", (event) => {
     try {
-      url = await api.approvalStreamUrl()
-    } catch {
-      if (closed) return
-      retry = window.setTimeout(() => void open(), 1500)
-      return
-    }
-    if (closed) return
-
-    const next = new EventSource(url)
-    source = next
-
-    next.addEventListener("approvals", (event) => {
-      try {
-        const payload = JSON.parse((event as MessageEvent).data as string) as {
-          approvals?: Approval[]
-        }
-        setState({ approvals: payload.approvals ?? [] })
-      } catch {
-        // A frame that cannot be read is not worth dropping the connection over:
-        // the next snapshot puts the list right.
+      const payload = JSON.parse((event as MessageEvent).data as string) as {
+        approvals?: Approval[]
       }
-    })
+      setState({ approvals: payload.approvals ?? [] })
+    } catch {
+      // A frame that cannot be read is not worth dropping the connection over:
+      // the next snapshot puts the list right.
+    }
+  })
 
-    // A transport failure or an expired ticket arrives without a payload.
-    next.addEventListener("error", () => {
-      next.close()
-      if (source === next) source = null
-      if (closed) return
-      window.clearTimeout(retry)
-      retry = window.setTimeout(() => void open(), 1500)
-    })
-  }
-
-  void open()
-
+  // A transport failure arrives without a payload; EventSource reconnects by
+  // itself and the first frame after that is the full list again.
   return () => {
-    closed = true
-    window.clearTimeout(retry)
-    source?.close()
+    source.close()
     setState({ approvals: [], answering: [] })
   }
 }

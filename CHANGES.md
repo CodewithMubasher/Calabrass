@@ -1,3 +1,25 @@
+# Calabrass — hardening phases
+
+## Phase 1 — close the approval bypasses
+
+Found by reading the code (not by running it). Each had a way for the agent to do something approval-worthy without being asked.
+
+| Problem | Fix | Where |
+|---|---|---|
+| `echo $(rm -rf x)`, `` echo `cmd` ``, `cat a > b`, `echo $API_KEY` were tier 0: the line began with a lookup, so it ran unasked | Substitution, variable expansion and file-writing redirection raise a line to tier 2 at least, and it is never remembered. `2>&1` and `>/dev/null` are still harmless, and the `&` inside `2>&1` no longer splits the line into a bogus command | `permission/classify.go` |
+| Lookups that can run a program or write a file: `go env -w`, `go list -toolexec`, `go vet -vettool`, `rg --pre`, `git diff --output`, `git branch <name>` | Not treated as lookups | `permission/classify.go` |
+| `write_file` into `.git/config` or `.git/hooks` ran freely, and the host's own `git status` then executed `core.fsmonitor` | File tools refuse any path inside `.git` (case, trailing-dot, 8.3 and stream spellings included). Host git calls pass `-c core.fsmonitor=false -c core.hooksPath=/dev/null` | `agent/workspace.go`, `agent/write.go`, `agent/lines.go`, `agent/git.go`, `httpapi/workspace_git.go` |
+| Other files something else runs (workflows, `.envrc`, shell rc, editor tasks, `.husky`, ...) were tier 1 | Tier 2, asked every time, refused unattended | `permission/classify.go` |
+| A symlink in the project could be used to create files outside it: for a file that did not exist yet the path was only checked by its spelling. A dangling link would create its target | `Resolve` resolves the deepest existing part of the path and fails closed. `run_command`'s `cwd` uses the same check | `agent/workspace.go`, `agent/shell.go` |
+
+New tests: `agent/boundary_test.go`, and `TestShellSyntax...`, `TestHarmlessSyntax...`, `TestReadOnlyCommandsWithDangerousFlags...`, `TestFilesThatRunCode...`, `TestUnattended...` in `permission/permission_test.go`.
+
+**Not yet run.** No Go toolchain was available when these were written: run `go vet ./... && go test -race ./...` in `Backend/` before committing. The classifier cases were checked against a Python port of its regexes (all pass); the Go tests themselves have not been executed.
+
+**Known limits that remain** (Phase 2 and later): the child shell still inherits the host's environment; "remember this command" for interpreters (`python`, `node`, `bash`) is still too broad; sign-in has no rate limit; the voice socket skips its Origin check; there is still a small window between checking a path and using it. The classifier is still text-based, not a shell parser.
+
+---
+
 # Calabrass — Stage 1 + Stage 2 changes
 
 Extract the zip over the repository root (paths are relative to it). 80 files: 42 edited, 38 new.

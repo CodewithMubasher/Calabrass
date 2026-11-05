@@ -23,10 +23,6 @@ var ErrNotFound = errors.New("store: not found")
 // is asked to be removed.
 var ErrProtected = errors.New("store: this item is built in and cannot be removed")
 
-// ErrBadRepeat is returned when a scheduled task is given a repeat this
-// version does not understand.
-var ErrBadRepeat = errors.New("store: unknown repeat; use daily, weekly or monthly")
-
 // The operating modes a conversation can be in. Chat is the ordinary one;
 // crew is for long and complex work.
 const (
@@ -269,9 +265,8 @@ CREATE TABLE IF NOT EXISTS connectors (
 );
 
 -- One row per scheduled task: an instruction, the conversation it speaks in, and
--- the time it is due. repeat_kind is '', 'daily', 'weekly' or 'monthly'; an empty
--- value is a one-shot task, and last_run_at is what stops it coming due twice.
--- A repeating task is advanced to its next occurrence after every run.
+-- the time it is due. A timer rather than a cron — last_run_at is what stops a
+-- task from coming due twice.
 CREATE TABLE IF NOT EXISTS scheduled_tasks (
 	id           TEXT PRIMARY KEY,
 	user_id      TEXT NOT NULL DEFAULT '',
@@ -279,7 +274,6 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
 	chat_id      TEXT NOT NULL DEFAULT '',
 	run_at       INTEGER NOT NULL,
 	enabled      INTEGER NOT NULL DEFAULT 1,
-	repeat_kind  TEXT NOT NULL DEFAULT '',
 	last_run_at  INTEGER NOT NULL DEFAULT 0,
 	last_status  TEXT NOT NULL DEFAULT '',
 	last_error   TEXT NOT NULL DEFAULT '',
@@ -474,7 +468,6 @@ CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_events(provider_id, creat
 		{"connectors", "user_id", "user_id TEXT NOT NULL DEFAULT ''"},
 		{"scheduled_tasks", "user_id", "user_id TEXT NOT NULL DEFAULT ''"},
 		{"scheduled_tasks", "scope", "scope TEXT NOT NULL DEFAULT ''"},
-		{"scheduled_tasks", "repeat_kind", "repeat_kind TEXT NOT NULL DEFAULT ''"},
 		{"sessions", "device_id", "device_id TEXT NOT NULL DEFAULT ''"},
 		{"agents", "user_id", "user_id TEXT NOT NULL DEFAULT ''"},
 		{"usage_events", "user_id", "user_id TEXT NOT NULL DEFAULT ''"},

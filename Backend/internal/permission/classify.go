@@ -29,7 +29,15 @@ func Classify(tool string, input json.RawMessage, workspace string) Action {
 		return Action{Tool: tool, Tier: TierObserve, Summary: tool}
 
 	case "create_dir", "write_file", "edit_file", "edit_lines":
-		return Action{Tool: tool, Tier: TierChange, Summary: describeFileAction(tool, input)}
+		act := Action{Tool: tool, Tier: TierChange, Summary: describeFileAction(tool, input)}
+		// Some files are not data: something else runs them (git, an editor, a
+		// CI service, the shell at login). Changing one is running code later,
+		// so it is asked about like running a command, every time.
+		if path := pathArg(input); runsCode(path) {
+			act.Tier = TierExecute
+			act.Summary = "Change a file that runs code: " + clip(path, 120)
+		}
+		return act
 
 	case "run_command":
 		var args struct {
@@ -63,15 +71,63 @@ func Classify(tool string, input json.RawMessage, workspace string) Action {
 	return classifyConnectorTool(tool, input)
 }
 
-func describeFileAction(tool string, input json.RawMessage) string {
+func pathArg(input json.RawMessage) string {
 	var args struct {
 		Path string `json:"path"`
 	}
 	_ = json.Unmarshal(input, &args)
-	if args.Path == "" {
+	return args.Path
+}
+
+func describeFileAction(tool string, input json.RawMessage) string {
+	path := pathArg(input)
+	if path == "" {
 		return tool
 	}
-	return tool + ": " + args.Path
+	return tool + ": " + path
+}
+
+// codeFileNames are files that a program other than the editor reads and
+// acts on: shell start-up files, git configuration, package-manager settings.
+var codeFileNames = map[string]bool{
+	".envrc": true, ".gitmodules": true, ".gitattributes": true, ".gitconfig": true,
+	".npmrc": true, ".yarnrc": true, ".yarnrc.yml": true, ".pypirc": true,
+	".pre-commit-config.yaml": true, ".gitlab-ci.yml": true,
+	".bashrc": true, ".bash_profile": true, ".zshrc": true, ".profile": true,
+}
+
+// codeDirNames are directories whose contents are run by tools or services.
+var codeDirNames = map[string]bool{
+	".husky": true, ".devcontainer": true, ".ssh": true,
+}
+
+// runsCode reports whether a path names a file that something else will run.
+// It reads the path as written, lexically, and errs towards asking.
+func runsCode(path string) bool {
+	path = strings.ToLower(strings.TrimSpace(path))
+	if path == "" {
+		return false
+	}
+	parts := strings.FieldsFunc(path, func(r rune) bool { return r == '/' || r == '\\' })
+	for i, part := range parts {
+		trimmed := strings.TrimRight(part, ". ")
+		switch {
+		case trimmed == ".git" || strings.HasPrefix(trimmed, ".git:") || strings.HasPrefix(trimmed, "git~"):
+			return true
+		case codeDirNames[trimmed]:
+			return true
+		case i == len(parts)-1 && codeFileNames[trimmed]:
+			return true
+		case trimmed == ".github" && i+1 < len(parts) && strings.TrimRight(parts[i+1], ". ") == "workflows":
+			return true
+		case trimmed == ".vscode" && i+1 < len(parts):
+			switch strings.TrimRight(parts[i+1], ". ") {
+			case "tasks.json", "launch.json", "settings.json":
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // classifyConnectorTool covers tools that come from MCP connectors. The agent
@@ -119,7 +175,9 @@ func ClassifyCommand(command, cwd, workspace string) Action {
 		return act
 	}
 
-	parts := splitCompound(command)
+	// 2>&1 and >/dev/null are harmless, and splitting on the & inside 2>&1
+	// would turn "1" into a command of its own.
+	parts := splitCompound(stripSafeRedirects(command))
 	compound := len(parts) > 1 || hasShellMeta(command)
 
 	tier := TierObserve
@@ -134,6 +192,14 @@ func ClassifyCommand(command, cwd, workspace string) Action {
 	// Pipes into an interpreter run whatever came down the pipe.
 	if pipesIntoInterpreter(command) && tier < TierReach {
 		tier = TierReach
+	}
+	// Substitution, variable expansion and redirection are worked out by the
+	// shell, after the words were read. `echo $(rm -rf x)` begins with a
+	// lookup and runs a deletion; `cat a > b` begins with a lookup and writes a
+	// file; `echo $API_KEY` prints a secret. The words of such a line are no
+	// evidence of what it does, so it is never an observation.
+	if hasUnsafeSyntax(command) && tier < TierExecute {
+		tier = TierExecute
 	}
 	// A cwd that leaves the workspace is a reach, whatever the command is.
 	if cwdEscapes(cwd, workspace) && tier < TierReach {
@@ -224,14 +290,27 @@ func mustCompile(patterns ...string) []*regexp.Regexp {
 var readOnlyLines = mustCompile(
 	`^(ls|dir|pwd|cd|echo|whoami|hostname|date|get-date|get-location|tree|wc|which|where|get-childitem|gci)(\s|$)`,
 	`^(cat|type|head|tail|more|less|get-content|gc|findstr|grep|rg|select-string)\s`,
-	`^git\s+(status|log|diff|show|branch|rev-parse|remote\s+-v|describe|ls-files|blame|shortlog|tag\s+-l|config\s+--get)\b`,
+	`^git\s+(status|log|diff|show|rev-parse|remote\s+-v|describe|ls-files|blame|shortlog|tag\s+-l|config\s+--get)\b`,
+	// `git branch name` creates a branch and `git branch -D` deletes one, so
+	// only the listing forms count as a lookup.
+	`^git\s+branch(\s+(-a|-r|-v|-vv|--all|--remotes|--list|--show-current))*\s*$`,
 	`^(node|npm|pnpm|yarn|go|python|python3|pip|pip3|cargo|rustc|java|dotnet|git|docker|tsc)\s+(-v|--version|version)\s*$`,
 	`^go\s+(list|env|vet)\b`,
 	`^(npm|pnpm|yarn)\s+(ls|list|outdated|why)\b`,
 )
 
+// unsafeReadFlags turn an otherwise harmless lookup into something that runs a
+// program or writes a file: a tool wrapper, a preprocessor, an output file, an
+// external diff driver, a changed Go environment.
+var unsafeReadFlags = regexp.MustCompile(
+	`(^|\s)(-{1,2}toolexec|-{1,2}vettool|--pre|--pre-glob|--output|--ext-diff|--textconv|--exec|-exec|--open-files-in-pager)(=|\s|$)` +
+		`|^go\s+env\b.*\s-[wu]\b|^tree\b.*\s-o\b`)
+
 func isReadOnlyCommand(part string) bool {
 	trimmed := strings.ToLower(strings.TrimSpace(part))
+	if unsafeReadFlags.MatchString(trimmed) {
+		return false
+	}
 	for _, re := range readOnlyLines {
 		if re.MatchString(trimmed) {
 			return true
@@ -258,7 +337,26 @@ func splitCompound(command string) []string {
 // never remembered as a pattern: what was approved would not be what runs next.
 func hasShellMeta(command string) bool {
 	return strings.ContainsAny(command, "&|;<>`\n") || strings.Contains(command, "$(") ||
-		strings.Contains(command, "${")
+		strings.Contains(command, "${") || shellExpansion.MatchString(command)
+}
+
+// safeRedirect is a redirection that only joins streams or discards output.
+var safeRedirect = regexp.MustCompile(`(?i)\d*>&\d+|\d*>>?\s*(?:/dev/null|nul)\b`)
+
+// shellExpansion is anything the shell replaces before running: $VAR, ${VAR},
+// $(cmd), `cmd`, process substitution, PowerShell @(...) and %VAR%. A digit after
+// the dollar sign ($1 in an awk program) is not an expansion worth asking about.
+var shellExpansion = regexp.MustCompile("\\$[A-Za-z_{(]|`|<\\(|>\\(|@\\(|%[A-Za-z_][A-Za-z0-9_]*%")
+
+func stripSafeRedirects(command string) string {
+	return safeRedirect.ReplaceAllString(command, " ")
+}
+
+// hasUnsafeSyntax reports expansion, substitution or a redirection that writes
+// to a file or reads a here-document, once the harmless redirections are set aside.
+func hasUnsafeSyntax(command string) bool {
+	c := stripSafeRedirects(command)
+	return shellExpansion.MatchString(c) || strings.Contains(c, ">") || strings.Contains(c, "<<")
 }
 
 var interpreterPipe = regexp.MustCompile(`(?i)\|\s*(sudo\s+)?(sh|bash|zsh|fish|dash|python3?|node|perl|ruby|iex|invoke-expression|powershell|pwsh|cmd)\b`)

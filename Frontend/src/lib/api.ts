@@ -28,7 +28,7 @@ import type {
 import { getToken, type AuthSession, type AuthUser } from "@/lib/session"
 import { clearSession } from "@/lib/session"
 import { navigate } from "@/lib/navigation"
-import { notifyError, notifyWarning } from "@/lib/toast"
+import { notifyWarning } from "@/lib/toast"
 
 const BASE = import.meta.env.VITE_API_BASE || "/api"
 
@@ -89,22 +89,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 /** Query for the artifact endpoints: a chat scopes them to its workspace, and
- *  no chat means the account's default one. */
+ *  no chat means the account's default one. The bearer token is a query
+ *  parameter because EventSource and download links cannot set headers. */
 function artifactQuery(chatId: string, extra: Record<string, string> = {}) {
   const params = new URLSearchParams(extra)
   if (chatId) params.set("chatId", chatId)
-  return params.toString()
-}
-
-/**
- * The same query plus a short-lived ticket. EventSource, WebSocket and a
- * download link cannot set an Authorization header, and the session token
- * should never ride in a URL, so they carry a ticket that opens only the
- * streaming paths and stops working after minutes.
- */
-async function streamQuery(chatId: string, extra: Record<string, string> = {}) {
-  const params = new URLSearchParams(artifactQuery(chatId, extra))
-  params.set("stream_ticket", await api.streamTicket())
+  const token = getToken()
+  if (token) params.set("access_token", token)
   return params.toString()
 }
 
@@ -130,13 +121,6 @@ export const api = {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
     }),
-
-  /** A short-lived ticket for the endpoints a browser cannot put a header on:
-   *  EventSource, the voice socket and download links. */
-  streamTicket: () =>
-    request<{ ticket: string }>("/auth/stream-ticket", { method: "POST" }).then(
-      (r) => r.ticket
-    ),
 
   /** A fresh usage snapshot: totals, allowances and the last seven days. */
   getUsage: () => request<UsageSnapshot>("/usage"),
@@ -309,9 +293,15 @@ export const api = {
     }).then((r) => r.tasks ?? []),
 
   /** The task list as a stream: it arrives complete, and again on every change.
-   *  EventSource cannot send an Authorization header, so it takes a ticket. */
-  scheduleStreamUrl: async () =>
-    `${BASE}/schedules/stream?stream_ticket=${encodeURIComponent(await api.streamTicket())}`,
+   *  EventSource cannot send an Authorization header, so the token rides in the
+   *  URL. */
+  scheduleStreamUrl: () => {
+    const params = new URLSearchParams()
+    const token = getToken()
+    if (token) params.set("access_token", token)
+    const query = params.toString()
+    return `${BASE}/schedules/stream${query ? `?${query}` : ""}`
+  },
 
   /** What the agent did that needed trust, newest first. */
   listLedger: (query: { before?: number; limit?: number; unattended?: boolean; refused?: boolean } = {}) => {
@@ -338,21 +328,26 @@ export const api = {
   forgetApprovals: () => request<{ ok: boolean }>("/approvals/remembered", { method: "DELETE" }),
 
   /** Waiting approvals as a stream: complete on connect, and again on every change. */
-  approvalStreamUrl: async () =>
-    `${BASE}/approvals/stream?stream_ticket=${encodeURIComponent(await api.streamTicket())}`,
+  approvalStreamUrl: () => {
+    const params = new URLSearchParams()
+    const token = getToken()
+    if (token) params.set("access_token", token)
+    const query = params.toString()
+    return `${BASE}/approvals/stream${query ? `?${query}` : ""}`
+  },
 
   deleteChat: (chatId: string) =>
     request<{ deleted: boolean }>(`/chats/${chatId}`, { method: "DELETE" }),
 
   /** The workspace listing, as a stream: it arrives complete, and again as soon
    *  as the folder changes. */
-  artifactStreamUrl: async (chatId: string) =>
-    `${BASE}/artifacts/stream?${await streamQuery(chatId)}`,
+  artifactStreamUrl: (chatId: string) =>
+    `${BASE}/artifacts/stream?${artifactQuery(chatId)}`,
 
   /** The crew work listing, as a stream: todos and reports, complete and again
    *  as soon as one is written. */
-  crewStreamUrl: async (chatId: string) =>
-    `${BASE}/crew/stream?${await streamQuery(chatId)}`,
+  crewStreamUrl: (chatId: string) =>
+    `${BASE}/crew/stream?${artifactQuery(chatId)}`,
 
   /** A file's text for the detail view. A binary file answers with
    *  `binary: true` instead of bytes, and a long one is cut short. */
@@ -367,30 +362,22 @@ export const api = {
     }>(`/artifacts/content?${artifactQuery(chatId, { path })}`),
 
   /** One file as it is on disk, which is what the browser saves. */
-  artifactFileUrl: async (chatId: string, path: string) =>
-    `${BASE}/artifacts/file?${await streamQuery(chatId, { path })}`,
+  artifactFileUrl: (chatId: string, path: string) =>
+    `${BASE}/artifacts/file?${artifactQuery(chatId, { path })}`,
 
   /** Every file in the workspace, in one archive. */
-  artifactsArchiveUrl: async (chatId: string) =>
-    `${BASE}/artifacts/archive?${await streamQuery(chatId)}`,
+  artifactsArchiveUrl: (chatId: string) =>
+    `${BASE}/artifacts/archive?${artifactQuery(chatId)}`,
 }
 
 /**
  * Start a download without leaving the page. The artifact endpoints answer with
  * Content-Disposition, so the browser saves the response rather than navigating
- * to it — a link is all it takes. A URL that is still being prepared (it needs
- * a fresh ticket) can be passed as a promise.
+ * to it — a link is all it takes.
  */
-export async function startDownload(url: string | Promise<string>) {
-  let href: string
-  try {
-    href = typeof url === "string" ? url : await url
-  } catch {
-    notifyError("The download link could not be prepared.", "Could not download")
-    return
-  }
+export function startDownload(url: string) {
   const link = document.createElement("a")
-  link.href = href
+  link.href = url
   link.rel = "noopener"
   document.body.append(link)
   link.click()

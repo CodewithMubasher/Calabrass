@@ -83,73 +83,39 @@ export function setSelectedCrewPath(chatId: string, path: string | null) {
  * so the work is visible without the reader having to know it exists.
  */
 export function watchCrew(chatId: string) {
-  let source: EventSource | null = null
-  let retry: number | undefined
-  let closed = false
+  const source = new EventSource(api.crewStreamUrl(chatId))
 
-  const open = async () => {
-    if (closed) return
-    let url: string
-    try {
-      url = await api.crewStreamUrl(chatId)
-    } catch {
-      if (closed) return
-      retry = window.setTimeout(() => void open(), 1500)
-      return
+  source.addEventListener("crew", (event) => {
+    const payload = JSON.parse((event as MessageEvent<string>).data) as {
+      files?: ArtifactFile[]
     }
-    if (closed) return
+    const files = payload.files ?? []
 
-    const next = new EventSource(url)
-    source = next
+    const previous = previousFiles.get(chatId)
+    previousFiles.set(
+      chatId,
+      new Map(files.map((file) => [file.path, fileStamp(file)]))
+    )
 
-    next.addEventListener("crew", (event) => {
-      const payload = JSON.parse((event as MessageEvent<string>).data) as {
-        files?: ArtifactFile[]
-      }
-      const files = payload.files ?? []
-
-      const previous = previousFiles.get(chatId)
-      previousFiles.set(
-        chatId,
-        new Map(files.map((file) => [file.path, fileStamp(file)]))
+    // The first listing is where this chat starts, not something that just
+    // happened. Everything after it is news — including a todo or a report the
+    // same worker overwrote on a later delegation, which is why the comparison
+    // is by stamp and not just by path.
+    if (previous !== undefined) {
+      const appeared = files.filter(
+        (file) => previous.get(file.path) !== fileStamp(file)
       )
-
-      // The first listing is where this chat starts, not something that just
-      // happened. Everything after it is news — including a todo or a report the
-      // same worker overwrote on a later delegation, which is why the comparison
-      // is by stamp and not just by path.
-      if (previous !== undefined) {
-        const appeared = files.filter(
-          (file) => previous.get(file.path) !== fileStamp(file)
+      if (appeared.length > 0) {
+        const newest = appeared.reduce((latest, file) =>
+          file.modified > latest.modified ? file : latest
         )
-        if (appeared.length > 0) {
-          const newest = appeared.reduce((latest, file) =>
-            file.modified > latest.modified ? file : latest
-          )
-          setCrewOpen(true)
-          setSelectedCrewPath(chatId, newest.path)
-        }
+        setCrewOpen(true)
+        setSelectedCrewPath(chatId, newest.path)
       }
+    }
 
-      emit({ chatId, files })
-    })
+    emit({ chatId, files })
+  })
 
-    // A transport failure or an expired ticket arrives without a payload: the
-    // connection is reopened with a fresh ticket instead of retrying a dead URL.
-    next.addEventListener("error", () => {
-      next.close()
-      if (source === next) source = null
-      if (closed) return
-      window.clearTimeout(retry)
-      retry = window.setTimeout(() => void open(), 1500)
-    })
-  }
-
-  void open()
-
-  return () => {
-    closed = true
-    window.clearTimeout(retry)
-    source?.close()
-  }
+  return () => source.close()
 }

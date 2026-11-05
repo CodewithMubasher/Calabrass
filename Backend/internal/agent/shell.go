@@ -91,21 +91,13 @@ func (w *Workspace) runCommand(ctx context.Context, args runCommandArgs) (string
 	// Resolve cwd: default to workspace root, validate it's inside workspace
 	cwd := w.Root()
 	if args.Cwd != "" {
-		requested := filepath.Join(w.Root(), args.Cwd)
-		absReq, err := filepath.Abs(requested)
+		// Resolve follows links, so a link inside the project that points
+		// elsewhere cannot be used as a way out.
+		resolved, err := w.Resolve(args.Cwd)
 		if err != nil {
-			return "", fmt.Errorf("invalid cwd: %w", err)
-		}
-		absRoot, err := filepath.Abs(w.Root())
-		if err != nil {
-			return "", fmt.Errorf("workspace root: %w", err)
-		}
-		// Ensure requested cwd is inside workspace root
-		rel, err := filepath.Rel(absRoot, absReq)
-		if err != nil || strings.HasPrefix(rel, "..") {
 			return "", errors.New("cwd must be inside the workspace root")
 		}
-		cwd = absReq
+		cwd = resolved
 	}
 	cmd.Dir = cwd
 

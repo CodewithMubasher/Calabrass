@@ -400,7 +400,7 @@ func TestFullAgentTurnRendersReasoningToolsEditsAndAnswer(t *testing.T) {
 	h.send(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	scr := h.screen()
 	for _, s := range []string{"make hello", "Wrote hello.py", "print('there')", "Edit hello.py", "print('hello')",
-		"Explored: 1 listing", "List .", "created hello.py.", "Chat", "Model One"} {
+		"Listed .", "README.md", "created hello.py.", "Chat", "Model One"} {
 		if !strings.Contains(scr, s) {
 			t.Errorf("screen is missing %q:\n%s", s, scr)
 		}

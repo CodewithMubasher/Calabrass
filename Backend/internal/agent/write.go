@@ -30,7 +30,7 @@ func (w *Workspace) createDir(path string) (string, error) {
 	if path == "" || path == "." {
 		return "", errors.New("path is required")
 	}
-	abs, err := w.Resolve(path)
+	abs, err := w.ResolveForWrite(path)
 	if err != nil {
 		return "", err
 	}
@@ -69,7 +69,7 @@ func (w *Workspace) writeFile(path, content string) (string, error) {
 	if len(content) > writeFileMaxBytes {
 		return "", fmt.Errorf("content is %s, over the %d KB limit", humanSize(int64(len(content))), writeFileMaxBytes>>10)
 	}
-	abs, err := w.Resolve(path)
+	abs, err := w.ResolveForWrite(path)
 	if err != nil {
 		return "", err
 	}
@@ -108,7 +108,7 @@ func editFileTool(ws *Workspace) goai.Tool {
 }
 
 func (w *Workspace) editFile(args editFileArgs) (string, error) {
-	abs, err := w.Resolve(args.Path)
+	abs, err := w.ResolveForWrite(args.Path)
 	if err != nil {
 		return "", err
 	}

@@ -1,62 +1,89 @@
-package main
+package headless
 
 import (
-	"flag"
+	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
-
-	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
+	"os/signal"
+	"strings"
 
 	"calabrass-tui/internal/api"
-	"calabrass-tui/internal/headless"
+	"calabrass-tui/internal/session"
 	"calabrass-tui/internal/settings"
 )
 
-// App-wide styles
-var (
-	colorPanel = lipgloss.Color("#1e1e1e") // darker grey panel (matches prompt input)
-	colorText  = lipgloss.Color("#ffffff") // white text
-
-	// The main app style: NO background color, so it inherits the terminal's
-	// own background and the app area never looks different from the window.
-	appStyle = lipgloss.NewStyle().
-			Foreground(colorText)
-
-	// Panel style (grey, no borders, with padding)
-	panelStyle = lipgloss.NewStyle().
-			Background(colorPanel).
-			Foreground(colorText).
-			Padding(1, 2) // 1 row top/bottom, 2 cols left/right
-)
-
-func main() {
-	// `cal run ...` is the headless mode: one task, no screen, for scripts and CI.
-	if len(os.Args) > 1 && os.Args[1] == "run" {
-		os.Exit(headless.Main(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+// Main is `cal run`: it reads the command line, signs in, runs the task, and
+// returns the process exit code.
+func Main(args []string, stdin *os.File, stdout, stderr io.Writer) int {
+	piped := false
+	if info, err := stdin.Stat(); err == nil {
+		piped = info.Mode()&os.ModeCharDevice == 0
 	}
-
-	addr := flag.String("addr", "", "backend address (default: $CALABRASS_ADDR, the saved one, or "+api.DefaultAddr+")")
-	cont := flag.Bool("c", false, "continue the latest session of this folder")
-	flag.BoolVar(cont, "continue", false, "continue the latest session of this folder")
-	flag.Parse()
+	opts, err := Parse(args, stdin, piped)
+	if err != nil {
+		fmt.Fprintln(stderr, "calabrass:", err)
+		return ExitUsage
+	}
 
 	st, err := settings.Load()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "calabrass: could not read settings:", err)
 		st = settings.Settings{}
 	}
-	switch {
-	case *addr != "":
-		st.Addr = *addr
-	case os.Getenv("CALABRASS_ADDR") != "":
-		st.Addr = os.Getenv("CALABRASS_ADDR")
+	if v := os.Getenv("CALABRASS_ADDR"); v != "" {
+		st.Addr = v
+	}
+	client := api.New(st.Addr)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	if _, err := session.Ensure(ctx, client, &st); err != nil {
+		var unreachable *session.ErrUnreachable
+		if errors.As(err, &unreachable) {
+			fmt.Fprintln(stderr, "calabrass: no Calabrass host answers. Open the desktop app, or run `cal` once so it starts one.")
+		} else {
+			fmt.Fprintln(stderr, "calabrass: could not sign in:", err)
+		}
+		return ExitSetup
+	}
+	_ = st.Save()
+
+	// A pipeline has no screen to add a provider on, so it can say which one and
+	// bring its key in the environment.
+	if err := ProviderFromEnv(ctx, client, os.Getenv, &opts); err != nil {
+		fmt.Fprintln(stderr, "calabrass:", err)
+		return ExitSetup
 	}
 
-	app := &appCtx{client: api.New(st.Addr), st: &st, resume: *cont}
-	p := tea.NewProgram(NewModel(app))
-	if _, err := p.Run(); err != nil {
-		fmt.Println("Error running TUI:", err)
-		os.Exit(1)
+	return Run(ctx, client, opts, stdout, stderr).Exit
+}
+
+// ProviderFromEnv turns on a model provider from the environment, for a machine
+// no one will ever sit at (CI, a container, a server):
+//
+//	CALABRASS_PROVIDER   a provider id, for example openai, groq, google
+//	CALABRASS_API_KEY    its key
+//	CALABRASS_MODEL      the model; becomes the run's model when --model is not given
+//
+// Nothing happens unless CALABRASS_PROVIDER and CALABRASS_API_KEY are both set.
+// The key is handed to the host, which stores it protected, and is not written
+// anywhere by this program.
+func ProviderFromEnv(ctx context.Context, c *api.Client, getenv func(string) string, opts *Options) error {
+	id := strings.TrimSpace(getenv("CALABRASS_PROVIDER"))
+	key := strings.TrimSpace(getenv("CALABRASS_API_KEY"))
+	if id == "" || key == "" {
+		return nil
 	}
+	enabled := true
+	if _, err := c.UpdateProvider(ctx, id, api.ProviderUpdate{APIKey: &key, Enabled: &enabled}); err != nil {
+		return fmt.Errorf("could not set up provider %q from CALABRASS_PROVIDER / CALABRASS_API_KEY: %w", id, err)
+	}
+	if opts.Model == "" {
+		if model := strings.TrimSpace(getenv("CALABRASS_MODEL")); model != "" {
+			opts.Model = id + "/" + model
+		}
+	}
+	return nil
 }

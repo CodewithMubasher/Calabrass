@@ -105,7 +105,7 @@ func editLinesTool(ws *Workspace) goai.Tool {
 // every edit in a call describes the same original file, and a call that fails
 // changes nothing.
 func (w *Workspace) editLines(args editLinesArgs) (string, error) {
-	abs, err := w.Resolve(args.Path)
+	abs, err := w.ResolveForWrite(args.Path)
 	if err != nil {
 		return "", err
 	}

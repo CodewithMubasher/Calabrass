@@ -355,3 +355,130 @@ func TestForgetClearsRememberedAnswers(t *testing.T) {
 		t.Fatal("forget did not clear the remembered run")
 	}
 }
+
+// The words at the start of a command line are no evidence of what the shell
+// will run once it has expanded substitutions, variables and redirections.
+func TestShellSyntaxIsNeverAnObservation(t *testing.T) {
+	atLeastExecute := []string{
+		"echo $(rm -rf build)",
+		"echo `rm -rf build`",
+		"cat README.md $(touch pwned)",
+		"echo $API_KEY",
+		"echo ${HOME}",
+		"echo $env:API_KEY",
+		"echo %MISTRAL_API_KEY%",
+		"echo hi > notes.txt",
+		"echo hi >> notes.txt",
+		"cat a.txt > b.txt",
+		"echo x > package.json",
+		"cat <<EOF",
+		"cat <(rm x)",
+		"echo @(Remove-Item x)",
+		"&>out.txt ls",
+	}
+	for _, cmd := range atLeastExecute {
+		act := ClassifyCommand(cmd, "", ws)
+		if act.Tier < TierExecute {
+			t.Errorf("%q: tier %d, want at least execute", cmd, act.Tier)
+		}
+		if act.Pattern != "" {
+			t.Errorf("%q: pattern %q, a line like this must be asked about every time", cmd, act.Pattern)
+		}
+	}
+}
+
+// What was already fine stays fine, so the fix does not turn every lookup into
+// a question.
+func TestHarmlessSyntaxStillObserves(t *testing.T) {
+	for _, cmd := range []string{
+		"git log | head -5",
+		"go vet ./... 2>&1",
+		"ls 2>/dev/null",
+		"echo hi > /dev/null",
+		"dir >nul",
+		"ls $1",
+		"git branch",
+		"git branch -a",
+		"git branch --show-current",
+		"go env GOPATH",
+	} {
+		if got := ClassifyCommand(cmd, "", ws).Tier; got != TierObserve {
+			t.Errorf("%q: tier %d, want observe", cmd, got)
+		}
+	}
+}
+
+// Lookups that can run a program or write a file are not lookups.
+func TestReadOnlyCommandsWithDangerousFlagsAreNot(t *testing.T) {
+	for _, cmd := range []string{
+		"git branch feature",
+		"git branch -D old",
+		"go env -w GOFLAGS=-mod=mod",
+		"go env -u GOFLAGS",
+		"go list -toolexec=./wrap ./...",
+		"go vet -vettool=./evil ./...",
+		"rg --pre ./transform needle",
+		"git diff --output=out.patch",
+		"git log --ext-diff",
+		"git show --textconv HEAD",
+		"tree -o listing.txt",
+	} {
+		if got := ClassifyCommand(cmd, "", ws).Tier; got < TierExecute {
+			t.Errorf("%q: tier %d, want at least execute", cmd, got)
+		}
+	}
+}
+
+// A file that something else runs is asked about, not written freely.
+func TestFilesThatRunCodeNeedApproval(t *testing.T) {
+	asks := []string{
+		".git/config",
+		".git/hooks/pre-commit",
+		".GIT/config",
+		`.git\hooks\pre-commit`,
+		"sub/.git/config",
+		".github/workflows/ci.yml",
+		".husky/pre-commit",
+		".vscode/tasks.json",
+		".vscode/settings.json",
+		".envrc",
+		"app/.envrc",
+		".gitmodules",
+		".npmrc",
+		".bashrc",
+		".ssh/authorized_keys",
+		".devcontainer/devcontainer.json",
+	}
+	for _, path := range asks {
+		for _, tool := range []string{"write_file", "edit_file", "edit_lines", "create_dir"} {
+			input, _ := json.Marshal(map[string]string{"path": path})
+			act := Classify(tool, input, ws)
+			if act.Tier != TierExecute {
+				t.Errorf("%s %q: tier %d, want execute", tool, path, act.Tier)
+			}
+			if act.Pattern != "" {
+				t.Errorf("%s %q: pattern %q, it must be asked about every time", tool, path, act.Pattern)
+			}
+		}
+	}
+
+	frees := []string{
+		"README.md", "src/main.go", ".gitignore", ".github/CODEOWNERS", ".github/ISSUE_TEMPLATE/bug.md",
+		".vscode/extensions.json", "docs/envrc.md", "notes/git-tips.md", "src/.github.go",
+	}
+	for _, path := range frees {
+		input, _ := json.Marshal(map[string]string{"path": path})
+		if got := Classify("write_file", input, ws).Tier; got != TierChange {
+			t.Errorf("write_file %q: tier %d, want change", path, got)
+		}
+	}
+}
+
+// Nothing unattended may write a file that runs code.
+func TestUnattendedRunsCannotChangeCodeFiles(t *testing.T) {
+	scope := ParseScope(`{"maxTier":2,"commands":["npm *"]}`)
+	input, _ := json.Marshal(map[string]string{"path": ".github/workflows/ci.yml"})
+	if scope.Allows(Classify("write_file", input, ws)) {
+		t.Fatal("an unattended run was allowed to write a workflow file")
+	}
+}

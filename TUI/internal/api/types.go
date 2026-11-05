@@ -206,15 +206,13 @@ type TaskScope struct {
 	Commands []string `json:"commands,omitempty"`
 }
 
-// ScheduledTask is one instruction the scheduler will run at a time of its own,
-// once or on a daily/weekly/monthly repeat.
+// ScheduledTask is one instruction the scheduler will run, once, at a time of its own.
 type ScheduledTask struct {
 	ID         string `json:"id"`
 	Prompt     string `json:"prompt"`
 	ChatID     string `json:"chatId"`
 	RunAt      int64  `json:"runAt"`
 	Enabled    bool   `json:"enabled"`
-	Repeat     string `json:"repeat"`
 	LastRunAt  int64  `json:"lastRunAt"`
 	LastStatus string `json:"lastStatus"`
 	LastError  string `json:"lastError"`
@@ -226,7 +224,6 @@ type ScheduledTask struct {
 type ScheduledTaskInput struct {
 	Prompt string `json:"prompt"`
 	RunAt  int64  `json:"runAt"`
-	Repeat string `json:"repeat,omitempty"`
 }
 
 // ScheduledTaskPatch is what an edit can change about a task.
@@ -234,7 +231,6 @@ type ScheduledTaskPatch struct {
 	Prompt  *string `json:"prompt,omitempty"`
 	RunAt   *int64  `json:"runAt,omitempty"`
 	Enabled *bool   `json:"enabled,omitempty"`
-	Repeat  *string `json:"repeat,omitempty"`
 }
 
 // Approval is the agent asking to do something that needs a person's say-so.

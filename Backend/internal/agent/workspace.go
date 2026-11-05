@@ -6,6 +6,7 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -48,6 +49,12 @@ func (w *Workspace) Root() string { return w.root }
 // Resolve turns a model-supplied path into an absolute path inside the
 // workspace. An empty path, or ".", means the workspace root itself. Paths that
 // climb out of the workspace are refused.
+//
+// Symbolic links are followed before the containment check, including for a
+// file that does not exist yet: the deepest part of the path that does exist is
+// resolved, and the missing tail is put back after it. Without that, writing
+// "link/new.txt" through a link that points outside the project would pass a
+// purely lexical check.
 func (w *Workspace) Resolve(path string) (string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" || path == "." {
@@ -60,17 +67,94 @@ func (w *Workspace) Resolve(path string) (string, error) {
 	}
 	candidate = filepath.Clean(candidate)
 
-	// Follow links so a symlink cannot be used to leave the workspace. The
-	// lookup fails for a path that does not exist yet (writes and reads of a
-	// missing file alike), which is fine: the lexical check still applies.
-	if real, err := filepath.EvalSymlinks(candidate); err == nil {
-		candidate = real
+	real, err := evalExisting(candidate)
+	if err != nil {
+		return "", fmt.Errorf("%s cannot be used: %w", path, err)
 	}
-
-	if !w.contains(candidate) {
+	if !w.contains(real) {
 		return "", fmt.Errorf("%s is outside the workspace (%s)", path, w.root)
 	}
-	return candidate, nil
+	return real, nil
+}
+
+// evalExisting resolves symbolic links in p even when its last parts do not
+// exist yet. It fails closed: a link that points nowhere, or any lookup error
+// other than "not found", is an error, never a reason to trust the spelling.
+func evalExisting(p string) (string, error) {
+	tail := ""
+	cur := p
+	for {
+		real, err := filepath.EvalSymlinks(cur)
+		if err == nil {
+			if tail == "" {
+				return real, nil
+			}
+			return filepath.Join(real, tail), nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", err
+		}
+		// EvalSymlinks also reports "not found" for a dangling link. Writing
+		// through one would create its target, wherever that is.
+		if _, lerr := os.Lstat(cur); lerr == nil {
+			return "", errors.New("it is a symbolic link that points nowhere")
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return "", err
+		}
+		tail = filepath.Join(filepath.Base(cur), tail)
+		cur = parent
+	}
+}
+
+// ResolveForWrite is Resolve for a path a tool is about to change. On top of
+// the containment check it refuses anything inside .git: a file there (config,
+// hooks) is run by git itself the next time anyone uses the repository, so
+// editing it is running code. Git changes go through git, via run_command,
+// where they are classified and asked about like any other command.
+func (w *Workspace) ResolveForWrite(path string) (string, error) {
+	abs, err := w.Resolve(path)
+	if err != nil {
+		return "", err
+	}
+	if w.insideGitDir(path) || hasGitComponent(w.Rel(abs)) {
+		return "", fmt.Errorf("%s is inside .git, which the file tools may not change; use git commands through run_command instead", path)
+	}
+	return abs, nil
+}
+
+// insideGitDir looks at the path as the model spelled it, relative to the root.
+func (w *Workspace) insideGitDir(path string) bool {
+	path = strings.TrimSpace(path)
+	if filepath.IsAbs(path) {
+		rel, err := filepath.Rel(w.root, filepath.Clean(path))
+		if err != nil {
+			return false
+		}
+		path = rel
+	}
+	return hasGitComponent(path)
+}
+
+// hasGitComponent reports whether any part of a relative path names a git
+// directory, under every spelling the file system may treat as the same name.
+func hasGitComponent(rel string) bool {
+	parts := strings.FieldsFunc(rel, func(r rune) bool { return r == '/' || r == '\\' })
+	for _, part := range parts {
+		if isGitComponent(part) {
+			return true
+		}
+	}
+	return false
+}
+
+// isGitComponent is deliberately wider than ".git": Windows ignores trailing
+// dots and spaces and has 8.3 short names (GIT~1) and alternate data streams
+// (.git::$INDEX_ALLOCATION), and macOS and Windows compare names without case.
+func isGitComponent(name string) bool {
+	name = strings.ToLower(strings.TrimRight(name, ". "))
+	return name == ".git" || strings.HasPrefix(name, ".git:") || strings.HasPrefix(name, "git~")
 }
 
 // Rel renders an absolute path the way the model should see it.

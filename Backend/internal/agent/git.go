@@ -8,6 +8,20 @@ import (
 	"time"
 )
 
+// GitSafetyFlags are options for every git command the host runs for itself in
+// a folder the agent can write to. A repository's own .git/config can name a
+// program for git to run (core.fsmonitor), and a hook runs on commit or
+// checkout, so a repository the agent or a stranger has shaped must not decide
+// what the host executes. Options given on the command line win over the
+// repository's configuration.
+func GitSafetyFlags() []string {
+	return []string{
+		"-c", "core.fsmonitor=false",
+		"-c", "core.hooksPath=/dev/null",
+		"-c", "protocol.ext.allow=never",
+	}
+}
+
 // GitSnapshot says, in a few lines, where the project stands in git: the
 // branch, whether there is unfinished work, and the last commit. It is for the
 // model, so that "fix the failing test" and "commit this" start from the real
@@ -22,7 +36,7 @@ func GitSnapshot(ctx context.Context, root string) string {
 	defer cancel()
 
 	run := func(args ...string) (string, bool) {
-		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
+		cmd := exec.CommandContext(ctx, "git", append(append([]string{"-C", root}, GitSafetyFlags()...), args...)...)
 		// Reading state must not take the index lock the user's own git needs.
 		cmd.Env = append(cmd.Environ(), "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
 		out, err := cmd.Output()
